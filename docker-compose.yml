@@ -1,0 +1,55 @@
+services:
+  api:
+    build: .
+    env_file:
+      - .env
+    command: uvicorn postbridge.api.main:app --host 0.0.0.0 --port 8000
+    depends_on:
+      - redis
+      - db
+    ports:
+      # Keep host 8010 for Core so deployments can coexist with a hosted backend on host 8000.
+      - "8010:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # socks5h resolves Telegram hostnames through the proxy.
+      TELEGRAM_PROXY_URL: socks5h://host.docker.internal:10808
+      # One direct retry is useful for local development when the proxy is down.
+      TELEGRAM_PROXY_FALLBACK_DIRECT: "true"
+      # Compatibility hosted backend URL for local development.
+      SAAS_BASE_URL: http://host.docker.internal:8001
+
+  worker:
+    build: .
+    env_file:
+      - .env
+    command: celery -A postbridge.workers.celery_app:celery_app worker -l info
+    depends_on:
+      - redis
+      - db
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      TELEGRAM_PROXY_URL: socks5h://host.docker.internal:10808
+      TELEGRAM_PROXY_FALLBACK_DIRECT: "true"
+      SAAS_BASE_URL: http://host.docker.internal:8001
+
+  redis:
+    image: redis:7
+    ports:
+      - "6380:6379"
+
+  db:
+    image: pgvector/pgvector:pg15
+    environment:
+      POSTGRES_DB: postbridge
+      POSTGRES_USER: postbridge
+      POSTGRES_PASSWORD: postbridge
+    ports:
+      # Host 5432 is often already occupied by a local PostgreSQL.
+      - "5433:5432"
+    networks:
+      default:
+        aliases:
+          - postgres

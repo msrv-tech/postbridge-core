@@ -1,0 +1,97 @@
+# Self-host: Core API + Postgres + Redis + Celery (worker + beat).
+# Репозиторий: каталог deploy относительно корня postbridge-core.
+#
+# Подготовка: скопировать ../.env.example в ../.env и задать как минимум
+#   CREDENTIALS_ENCRYPTION_KEY, CORE_SERVICE_TOKEN, внешние API при необходимости.
+#
+# Запуск: docker compose -f deploy/docker-compose.self-host.yml --env-file ../.env up -d --build
+# Миграции: сервис core-migrate выполняет alembic upgrade head при старте стека.
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postbridge
+      POSTGRES_PASSWORD: postbridge
+      POSTGRES_DB: postbridge
+    volumes:
+      - pb_core_selfhost_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postbridge -d postbridge"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  core-migrate:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    working_dir: /app
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postbridge:postbridge@postgres:5432/postbridge
+      APP_ENV: ${APP_ENV:-dev}
+      POSTBRIDGE_APP_MODE: ${POSTBRIDGE_APP_MODE:-selfhost}
+      POSTBRIDGE_SELFHOST_TENANT_ID: ${POSTBRIDGE_SELFHOST_TENANT_ID:-00000000-0000-4000-8000-000000000001}
+    command: alembic upgrade head
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  core-api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    working_dir: /app
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postbridge:postbridge@postgres:5432/postbridge
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: ${APP_ENV:-dev}
+      POSTBRIDGE_APP_MODE: ${POSTBRIDGE_APP_MODE:-selfhost}
+      POSTBRIDGE_SELFHOST_TENANT_ID: ${POSTBRIDGE_SELFHOST_TENANT_ID:-00000000-0000-4000-8000-000000000001}
+      CELERY_TASK_ALWAYS_EAGER: "0"
+      CREDENTIALS_ENCRYPTION_KEY: ${CREDENTIALS_ENCRYPTION_KEY:?set in .env}
+      CORE_SERVICE_TOKEN: ${CORE_SERVICE_TOKEN:-}
+      STATUS_EVENT_WEBHOOK_URL: ${STATUS_EVENT_WEBHOOK_URL:-}
+      STATUS_EVENT_WEBHOOK_TOKEN: ${STATUS_EVENT_WEBHOOK_TOKEN:-}
+    command: uvicorn postbridge.api.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      core-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  core-worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    working_dir: /app
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postbridge:postbridge@postgres:5432/postbridge
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: ${APP_ENV:-dev}
+      POSTBRIDGE_APP_MODE: ${POSTBRIDGE_APP_MODE:-selfhost}
+      POSTBRIDGE_SELFHOST_TENANT_ID: ${POSTBRIDGE_SELFHOST_TENANT_ID:-00000000-0000-4000-8000-000000000001}
+      CELERY_TASK_ALWAYS_EAGER: "0"
+      CREDENTIALS_ENCRYPTION_KEY: ${CREDENTIALS_ENCRYPTION_KEY:?set in .env}
+      CORE_SERVICE_TOKEN: ${CORE_SERVICE_TOKEN:-}
+      STATUS_EVENT_WEBHOOK_URL: ${STATUS_EVENT_WEBHOOK_URL:-}
+      STATUS_EVENT_WEBHOOK_TOKEN: ${STATUS_EVENT_WEBHOOK_TOKEN:-}
+    command: celery -A postbridge.workers.celery_app:celery_app worker -l info -B
+    depends_on:
+      core-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  pb_core_selfhost_pg:

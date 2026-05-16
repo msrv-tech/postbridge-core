@@ -1,0 +1,109 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create output dir
+        run: mkdir -p ci/out
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci --prefix web
+
+      - name: Install Playwright browser
+        run: npm --prefix web exec playwright install --with-deps chromium
+
+      - name: Run web smoke tests
+        run: |
+          npm --prefix web run build
+          npm --prefix web run test:e2e
+          npm --prefix web run test:e2e:saas
+
+      - name: Build and run tests (Docker Compose)
+        run: |
+          docker compose --progress=plain -f ci/docker-compose.yml build
+          docker compose -f ci/docker-compose.yml run --rm test
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: web/playwright-report
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: openapi-core
+          path: ci/out/openapi-core.json
+          if-no-files-found: warn
+
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on:
+      - self-hosted
+      - prod-core
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: postbridge-core
+          fetch-depth: 0
+
+      - name: Deploy postbridge-core
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SERVER_URL: ${{ github.server_url }}
+          BRANCH: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          notify() {
+            code=$?
+            if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then exit "$code"; fi
+            SHORT_SHA="$(printf '%s' "$SHA" | cut -c1-7)"
+            RUN_URL="${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}"
+            if [ "$code" -eq 0 ]; then
+              DEPLOY_STATUS="success"
+              TITLE="Postbridge Core deploy completed"
+            else
+              DEPLOY_STATUS="failure"
+              TITLE="Postbridge Core deploy failed"
+            fi
+            MSG="$(printf '%s\nStatus: %s\nRepo: %s\nBranch: %s\nCommit: %s\nWorkflow: %s #%s.%s\nEvent: %s\nActor: %s\nRun: %s' \
+              "$TITLE" "$DEPLOY_STATUS" "$REPOSITORY" "$BRANCH" "$SHORT_SHA" "$WORKFLOW" "$RUN_ID" "$RUN_ATTEMPT" "$EVENT_NAME" "$ACTOR" "$RUN_URL")"
+            curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d "chat_id=${TELEGRAM_CHAT_ID}" \
+              --data-urlencode "text=${MSG}" \
+              -d "disable_web_page_preview=true" || true
+            exit "$code"
+          }
+          trap notify EXIT
+
+          sudo mkdir -p /opt
+          sudo cp /opt/postbridge-core/.env /tmp/postbridge-core-env.bak 2>/dev/null || true
+          sudo rsync -a --delete postbridge-core/ /opt/postbridge-core/
+          sudo cp /tmp/postbridge-core-env.bak /opt/postbridge-core/.env 2>/dev/null || true
+          sudo bash /opt/postbridge-core/scripts/deploy-prod.sh

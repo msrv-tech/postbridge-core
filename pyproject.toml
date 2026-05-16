@@ -1,0 +1,53 @@
+[project]
+name = "postbridge-core"
+version = "0.1.0"
+description = "Postbridge core sync engine"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "aiogram>=3.15.0",
+  "aiohttp-socks>=0.8.4",
+  "alembic>=1.14.0",
+  "fastapi>=0.115.0",
+  "python-multipart>=0.0.9",
+  "uvicorn>=0.30.0",
+  "celery>=5.4.0",
+  "redis>=5.0.0",
+  "sqlalchemy>=2.0.0",
+  "psycopg2-binary>=2.9.0",
+  "telethon>=1.37.0",
+  "requests>=2.32.0",
+  "httpx[socks]>=0.27.0",
+  "langgraph>=1.0.0",
+  "PySocks>=1.7.1",
+  "feedparser>=6.0.0",
+  "pydantic>=2.8.0",
+  "cryptography>=44.0.0",
+  "croniter>=3.0.0",
+  "sentry-sdk[celery,fastapi]>=2.0.0",
+  "boto3>=1.35.0",
+  "pgvector>=0.3.0",
+]
+
+[project.scripts]
+postbridge-telegram-bot = "postbridge.botkit.platforms.telegram.runtime:main"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"postbridge" = ["web/*.html"]
+"postbridge.i18n" = ["locales/*.json"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

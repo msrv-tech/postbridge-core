@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+.pytest_cache
+__pycache__
+*.pyc
+.env
+.env.*
+!.env.example
+postbridge*.db
+
+web/node_modules
+web/dist
+node_modules
+dist
+build

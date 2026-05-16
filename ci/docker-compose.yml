@@ -1,0 +1,48 @@
+# После правок в tests/ или src/: docker compose -f ci/docker-compose.yml build test
+#   (или: run --build --rm test …) — образ копирует код при сборке, не монтирует репозиторий.
+# Зависшие контейнеры test-run-* после Ctrl+C или таймаута (у --rm нет шанса сработать):
+#   docker rm -f $(docker ps -q --filter name=postbridge-core-ci-test-run)
+# Остановить весь стек (postgres, redis): docker compose -f ci/docker-compose.yml down
+name: postbridge-core-ci
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postbridge
+      POSTGRES_PASSWORD: postbridge
+      POSTGRES_DB: postbridge_test
+    # Подстраховка от зависаний pytest: открытая транзакция без активности не держит блокировки вечно.
+    command: postgres -c idle_in_transaction_session_timeout=60s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postbridge -d postbridge_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  test:
+    build:
+      context: ..
+      dockerfile: ci/Dockerfile
+    working_dir: /app
+    volumes:
+      - ./out:/out
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: test
+      DATABASE_URL: postgresql+psycopg2://postbridge:postbridge@postgres:5432/postbridge_test
+      REDIS_URL: redis://redis:6379/0
+    command: >
+      sh -c "pytest -q && python scripts/export_openapi.py /out/openapi-core.json"
