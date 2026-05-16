@@ -1,6 +1,6 @@
 # postbridge-core
 
-Open-source publishing, migration, and automation engine for Postbridge.
+Open-source publishing, migration, and automation engine for Postbridge Core.
 
 `postbridge-core` contains the public runtime:
 
