@@ -1,4 +1,4 @@
-FROM node:20-slim AS web-build
+FROM node:24-slim AS web-build
 
 WORKDIR /web
 COPY web/package*.json /web/
