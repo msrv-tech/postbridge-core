@@ -1,5 +1,7 @@
 import { useI18n } from '../i18n'
 
+const brandMarkSrc = `${import.meta.env.BASE_URL}postbridge-mark.svg`
+
 export default function LoadingSkeleton() {
   const { t } = useI18n()
 
@@ -8,7 +10,7 @@ export default function LoadingSkeleton() {
       <header className="public-header">
         <div className="container public-header-inner">
           <span className="brand">
-            <img src="/postbridge-mark.svg" alt="" className="brand-mark" width="28" height="28" />
+            <img src={brandMarkSrc} alt="" className="brand-mark" width="28" height="28" />
             Postbridge
           </span>
           <div className="public-nav" style={{ opacity: 0.6 }}>

@@ -7,6 +7,10 @@ Open-source publishing, migration, and automation engine for Postbridge Core.
 
 Postbridge Core helps teams import content, prepare publication plans, and deliver posts across connected channels from a self-hosted stack.
 
+![Postbridge Core content workspace](docs/assets/screenshots/postbridge-content.png)
+
+![Postbridge Core channels and bridges](docs/assets/screenshots/postbridge-channels.png)
+
 `postbridge-core` contains the public runtime:
 
 - channel fetchers and publishers for Telegram, MAX, VK, RSS/Zen, LinkedIn publishing, and the built-in Postbridge source;

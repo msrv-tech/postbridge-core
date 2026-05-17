@@ -3,6 +3,8 @@ import { isSelfhostMode } from '../adapters/runtime'
 import { BILLING_SUPPORT_EMAIL } from '../billingSupport'
 import { LanguageSelect, useI18n } from '../i18n'
 
+const brandMarkSrc = `${import.meta.env.BASE_URL}postbridge-mark.svg`
+
 export default function PublicLayout({ children, compact = false }) {
   const { t } = useI18n()
   const selfhost = isSelfhostMode()
@@ -12,7 +14,7 @@ export default function PublicLayout({ children, compact = false }) {
       <header className="public-header">
         <div className="container public-header-inner">
           <Link to="/" className="brand">
-            <img src="/postbridge-mark.svg" alt="" className="brand-mark" width="28" height="28" />
+            <img src={brandMarkSrc} alt="" className="brand-mark" width="28" height="28" />
             Postbridge
           </Link>
           <nav className="public-nav" aria-label={t('public.nav.aria')}>

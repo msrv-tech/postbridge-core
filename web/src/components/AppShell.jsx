@@ -4,6 +4,7 @@ import { listMediaGenerationJobs } from '../adapters/media'
 import { LanguageSelect, useI18n } from '../i18n'
 
 const dismissedImageJobsKey = (workspaceId) => `postbridge_dismissed_image_jobs_${workspaceId}`
+const brandMarkSrc = `${import.meta.env.BASE_URL}postbridge-mark.svg`
 
 function readDismissedImageJobs(workspaceId) {
   if (typeof window === 'undefined' || !workspaceId) return new Set()
@@ -106,7 +107,7 @@ export default function AppShell({
           <div className="app-header-top">
             <div className="app-header-top-left">
               <Link to={brandHref} className="brand brand-small">
-                <img src="/postbridge-mark.svg" alt="" className="brand-mark" width="26" height="26" />
+                <img src={brandMarkSrc} alt="" className="brand-mark" width="26" height="26" />
                 Postbridge
               </Link>
               <nav className="app-nav" aria-label={t('app.nav.aria')}>

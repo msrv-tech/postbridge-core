@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "screenshots:readme": "node scripts/capture-readme-screenshots.mjs",
     "check:i18n": "node scripts/check-i18n-boundaries.mjs",
     "preview": "vite preview",
     "test:e2e": "playwright test",
