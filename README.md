@@ -40,6 +40,8 @@ Core serves the self-host app without exposing internal service credentials.
 
 ## Local Run
 
+See [docs/quickstart.md](docs/quickstart.md) for a more detailed self-host walkthrough.
+
 1. Copy `.env.example` to `.env` and fill the required secrets.
    Generate unique values for `POSTGRES_PASSWORD`, `DATABASE_URL`, `CREDENTIALS_ENCRYPTION_KEY`, and any platform credentials you enable.
 2. Start the stack:
@@ -108,12 +110,22 @@ Core deployments should:
 
 The provided GitHub Actions workflow deploys only after CI passes on `main` and targets a trusted self-hosted runner labeled `prod-core`.
 
+## Releases
+
+Version tags such as `v0.1.0` publish a Docker image to GitHub Container Registry:
+
+```text
+ghcr.io/msrv-tech/postbridge-core
+```
+
 ## Documentation
 
 - [docs/app-api.md](docs/app-api.md)
 - [CHANGELOG.md](CHANGELOG.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
+- [ROADMAP.md](ROADMAP.md)
 - [docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md)
+- [docs/quickstart.md](docs/quickstart.md)
 - [docs/i18n.md](docs/i18n.md)
 - [docs/recovery-runbook.md](docs/recovery-runbook.md)
 - [docs/telegram-proxy.md](docs/telegram-proxy.md)

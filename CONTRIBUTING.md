@@ -16,7 +16,10 @@ For frontend-only changes:
 ```bash
 cd web
 npm ci
+npm run check:i18n
 npm run build
+npm run test:e2e
+npm run test:e2e:saas
 ```
 
 ## Guidelines
@@ -24,6 +27,7 @@ npm run build
 - Keep browser-facing Core code safe for public self-host deployments.
 - Do not expose `CORE_SERVICE_TOKEN` or other server-to-server credentials to the browser.
 - Prefer English for product-facing text, docs, tests, and code.
+- Put frontend user-facing copy in `web/src/i18n/catalogs.js`; do not add hardcoded localized strings in components.
 - Keep private hosted deployment logic outside this repository.
 - Include focused tests for behavioral changes.
 
