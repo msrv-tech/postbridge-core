@@ -30,6 +30,8 @@ npm run test:e2e:saas
 - Put frontend user-facing copy in `web/src/i18n/catalogs.js`; do not add hardcoded localized strings in components.
 - Keep private hosted deployment logic outside this repository.
 - Include focused tests for behavioral changes.
+- Do not add private deployment URLs, customer data, production tokens, local databases, or generated sessions.
+- Keep self-host behavior working without any private hosted services.
 
 ## Migrations
 

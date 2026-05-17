@@ -120,15 +120,20 @@ ghcr.io/msrv-tech/postbridge-core
 
 ## Documentation
 
-- [docs/app-api.md](docs/app-api.md)
-- [CHANGELOG.md](CHANGELOG.md)
-- [CONTRIBUTING.md](CONTRIBUTING.md)
-- [ROADMAP.md](ROADMAP.md)
-- [docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md)
 - [docs/quickstart.md](docs/quickstart.md)
+- [docs/configuration.md](docs/configuration.md)
+- [docs/self-host.md](docs/self-host.md)
+- [docs/architecture.md](docs/architecture.md)
+- [docs/saas-vs-self-host.md](docs/saas-vs-self-host.md)
+- [docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md)
+- [docs/app-api.md](docs/app-api.md)
 - [docs/i18n.md](docs/i18n.md)
 - [docs/recovery-runbook.md](docs/recovery-runbook.md)
 - [docs/telegram-proxy.md](docs/telegram-proxy.md)
+- [CHANGELOG.md](CHANGELOG.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [SUPPORT.md](SUPPORT.md)
+- [ROADMAP.md](ROADMAP.md)
 
 ## Security
 

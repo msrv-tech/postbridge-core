@@ -6,8 +6,9 @@ Minimal stack for running Core without a hosted backend: Postgres, Redis, HTTP A
 
 1. Copy `.env.example` to `.env`.
 2. Set `CREDENTIALS_ENCRYPTION_KEY` (Fernet; see [credentials-encryption.md](credentials-encryption.md)).
-3. Set `CORE_SERVICE_TOKEN` if a trusted backend calls the internal Service API.
-4. Set `STATUS_EVENT_WEBHOOK_*` if Core should deliver status events to a hosted receiver.
+3. Set `POSTGRES_PASSWORD` and make sure `DATABASE_URL` uses the same password.
+4. Set `CORE_SERVICE_TOKEN` if a trusted backend calls the internal Service API.
+5. Set `STATUS_EVENT_WEBHOOK_*` if Core should deliver status events to a hosted receiver.
 
 ```bash
 docker compose -f deploy/docker-compose.self-host.yml --env-file .env up -d --build
@@ -54,3 +55,13 @@ For drafts with `scheduled_publish_at` in `postbridge_extra` to move to `publish
 - External integrations such as Telegram, MAX, VK, LinkedIn, and AI providers require their own secrets in `.env`.
 - The internal Service API is for trusted server-to-server callers only.
 - The browser-safe self-host API is exposed under `/api/app/*`.
+
+## Public Container Image
+
+Release tags publish a Docker image:
+
+```text
+ghcr.io/msrv-tech/postbridge-core:v0.1.0
+```
+
+Compose examples build locally by default so contributors can test changes without publishing an image.

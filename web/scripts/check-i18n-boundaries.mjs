@@ -4,7 +4,6 @@ import path from 'node:path'
 const root = path.resolve(import.meta.dirname, '..', 'src')
 const allowed = new Set([
   path.join(root, 'i18n', 'catalogs.js'),
-  path.join(root, 'mdEditorRu.js'),
 ])
 const extensions = new Set(['.js', '.jsx'])
 const cyrillic = /[А-Яа-яЁё]/

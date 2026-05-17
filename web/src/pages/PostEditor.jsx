@@ -1251,7 +1251,7 @@ export default function PostEditor() {
                     preview="live"
                     hideToolbar={false}
                     visibleDragbar
-                    commandsFilter={(command) => mdEditorCommandsFilter(command, locale)}
+                    commandsFilter={(command) => mdEditorCommandsFilter(command, locale, t)}
                     textareaProps={{ lang: locale }}
                   />
                 </Suspense>
