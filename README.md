@@ -5,6 +5,8 @@
 
 Open-source publishing, migration, and automation engine for Postbridge Core.
 
+Postbridge Core helps teams import content, prepare publication plans, and deliver posts across connected channels from a self-hosted stack.
+
 `postbridge-core` contains the public runtime:
 
 - channel fetchers and publishers for Telegram, MAX, VK, RSS/Zen, LinkedIn publishing, and the built-in Postbridge source;
@@ -40,39 +42,42 @@ Core serves the self-host app without exposing internal service credentials.
 
 ## Local Run
 
-See [docs/quickstart.md](docs/quickstart.md) for a more detailed self-host walkthrough.
+See [docs/quickstart.md](docs/quickstart.md) for the complete self-host walkthrough.
 
 1. Copy `.env.example` to `.env` and fill the required secrets.
    Generate unique values for `POSTGRES_PASSWORD`, `DATABASE_URL`, `CREDENTIALS_ENCRYPTION_KEY`, and any platform credentials you enable.
 2. Start the stack:
 
 ```bash
-docker compose up -d --build
-```
-
-3. Apply migrations:
-
-```bash
-docker compose exec api alembic upgrade head
-```
-
-Default local ports:
-
-- Core API: `http://127.0.0.1:8000`
-- Core API compatibility port: `http://127.0.0.1:8010`
-- Redis: `6380`
-- Postgres: `5433`
-
-## Self-Host Compose
-
-For a standalone Core stack:
-
-```bash
-cp .env.example .env
 docker compose -f deploy/docker-compose.self-host.yml --env-file .env up -d --build
 ```
 
-The self-host compose file runs Postgres, Redis, migrations, API, and worker.
+3. Open the app:
+
+```text
+http://127.0.0.1:8000/web
+```
+
+The self-host compose file runs migrations automatically through the `core-migrate` service.
+
+Default self-host ports:
+
+- Core API: `http://127.0.0.1:8000`
+- Web UI: `http://127.0.0.1:8000/web`
+
+## Demo
+
+After the stack is running, follow [docs/demo-walkthrough.md](docs/demo-walkthrough.md) to bootstrap a local workspace, create demo channels, and inspect the content-to-bridge flow without external platform credentials.
+
+## Container Image
+
+Release tags publish a public Docker image to GitHub Container Registry:
+
+```text
+ghcr.io/msrv-tech/postbridge-core:v0.1.1
+```
+
+Compose examples build locally by default so contributors can test changes before publishing images.
 
 ## Tests
 
@@ -121,6 +126,7 @@ ghcr.io/msrv-tech/postbridge-core
 ## Documentation
 
 - [docs/quickstart.md](docs/quickstart.md)
+- [docs/demo-walkthrough.md](docs/demo-walkthrough.md)
 - [docs/configuration.md](docs/configuration.md)
 - [docs/self-host.md](docs/self-host.md)
 - [docs/architecture.md](docs/architecture.md)
