@@ -134,6 +134,32 @@ test('bootstraps into the self-host workspace', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'Channels' })).toBeVisible()
 })
 
+test('opens the quick-start root path with the self-host app API', async ({ page }) => {
+  const appApiRequests = []
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname
+    if (
+      path === '/me' ||
+      path.startsWith('/api/') ||
+      path.startsWith('/auth/') ||
+      path.startsWith('/workspaces/')
+    ) {
+      appApiRequests.push(path)
+    }
+  })
+
+  await page.goto('/')
+
+  await expect(page).toHaveURL(/\/web\/workspaces\/local\/content/)
+  await expect(page.getByRole('heading', { name: 'Content' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Pricing' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'News' })).toHaveCount(0)
+  expect(appApiRequests).toContain('/api/app/runtime-config')
+  expect(appApiRequests).toContain('/api/app/session')
+  expect(appApiRequests).toContain('/api/app/content-items')
+  expect(appApiRequests.every((path) => path.startsWith('/api/app/'))).toBe(true)
+})
+
 test('navigates core workflow screens without SaaS billing surfaces', async ({ page }) => {
   await page.goto('/web/')
 
