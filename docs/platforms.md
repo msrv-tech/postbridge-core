@@ -14,6 +14,37 @@ Postbridge Core uses a fetcher/publisher registry selected by `source_platform` 
 | `zen` | ZenFetcher | ZenPublisher | RSS-based Zen import/publishing helper. |
 | `linkedin` | - | LinkedInPublisher | Organic posts through LinkedIn Posts API: text, images, video, PDF/document. |
 
+## Complete Telegram Example
+
+### Registration Steps
+1. Create a Telegram Bot via BotFather
+2. Obtain API ID and Hash from https://my.telegram.org
+3. Copy the Bot Token from BotFather
+
+### Configuration Requirements
+- TELEGRAM_API_ID
+- TELEGRAM_API_HASH
+- TELEGRAM_BOT_TOKEN
+- TELEGRAM_SESSION_STRING (generated automatically)
+
+### Sample .env Settings
+```env
+TELEGRAM_API_ID=12345678
+TELEGRAM_API_HASH=0123456789abcdef0123456789abcdef
+TELEGRAM_BOT_TOKEN=1234567890:ABC-DEF1234567890ABC_DEF1234567890ABC
+```
+
+### Runtime Setup Commands
+```bash
+# Start the Telegram Bot
+python -m postbridge core-run --telegram
+```
+
+### Troubleshooting Tips
+- Ensure permissions are properly set in BotFather
+- Verify token and API credentials
+- Check firewall settings if using webhooks
+
 ## Credentials
 
 - **telegram:** `api_id`, `api_hash`, `session_string` (env: TELEGRAM_*)
