@@ -46,7 +46,7 @@ services:
       POSTGRES_DB: postbridge
       POSTGRES_USER: postbridge
       # Same value as POSTGRES_PASSWORD / DATABASE_URL in .env (see scripts/deploy-prod.sh --env-file).
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postbridge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     ports:
       # Host 5432 is often already occupied by a local PostgreSQL.
       - "5433:5432"

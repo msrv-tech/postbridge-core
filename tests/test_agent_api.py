@@ -433,19 +433,19 @@ def test_post_copilot_timeline_persists_user_messages_and_agent_actions(client: 
     assert any(
         event["role"] == "system"
         and event["kind"] == "action"
-        and "начал обработку" in event["content"]
+        and "started processing" in event["content"]
         for event in events
     )
     assert any(
         event["role"] == "system"
         and event["kind"] == "action"
-        and "проверил текущий черновик" in event["content"].lower()
+        and "reviewed the current draft" in event["content"].lower()
         for event in events
     )
     assert any(
         event["role"] == "assistant"
         and event["kind"] == "result"
-        and "обновил текущий черновик" in event["content"].lower()
+        and "updated the current post draft" in event["content"].lower()
         for event in events
     )
 
@@ -649,19 +649,19 @@ def test_post_copilot_timeline_includes_review_resolution_events(client: TestCli
     assert any(
         event["role"] == "system"
         and event["kind"] == "action"
-        and "согласовал вариант" in event["content"].lower()
+        and "approved the agent variant" in event["content"].lower()
         for event in events
     )
     assert any(
         event["role"] == "assistant"
         and event["kind"] == "result"
-        and "исполнитель: editor-1" in event["content"].lower()
+        and "actor: editor-1" in event["content"].lower()
         for event in events
     )
     assert any(
         event["role"] == "assistant"
         and event["kind"] == "result"
-        and "текущему черновику" in event["content"].lower()
+        and "current draft" in event["content"].lower()
         for event in events
     )
 
@@ -838,7 +838,7 @@ def test_post_copilot_creates_source_package_review_before_drafting(
         f"/internal/service/agent/content-items/{content_id}/timeline",
         headers=_svc_headers(),
     ).json()
-    assert "пакет источников" in timeline["events"][-1]["content"].lower()
+    assert "source package" in timeline["events"][-1]["content"].lower()
 
 
 def test_post_copilot_builds_source_package_subgraph(monkeypatch: pytest.MonkeyPatch):

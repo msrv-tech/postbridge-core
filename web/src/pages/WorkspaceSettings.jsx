@@ -157,7 +157,7 @@ export default function WorkspaceSettings() {
   const aiTokenRemainder = buildAiTokenRemainder(billingSummary?.billing, t)
 
   const tzSelectOptions = useMemo(() => {
-    const base = getTimezoneSelectOptions(locale)
+    const base = getTimezoneSelectOptions(t)
     const saved = (user?.profile_timezone || '').trim()
     if (saved && !RUSSIAN_TIMEZONE_VALUES.has(saved)) {
       return [
@@ -169,7 +169,7 @@ export default function WorkspaceSettings() {
       ]
     }
     return base
-  }, [locale, t, user?.profile_timezone])
+  }, [t, user?.profile_timezone])
 
   useEffect(() => {
     if (user?.profile_timezone) setTimezone(user.profile_timezone)
@@ -1107,7 +1107,7 @@ export default function WorkspaceSettings() {
               <strong>{tbankSubscriptionConsentModal.plan.price_rub} ₽</strong>
               <br />
               {t('channels.tbank.period', {
-                period: formatSubscriptionPeriod(tbankSubscriptionConsentModal.plan.period, locale),
+                period: formatSubscriptionPeriod(tbankSubscriptionConsentModal.plan.period, t),
               })}
             </div>
             <label className="tbank-consent-checkbox-row" htmlFor="tbank-subscription-recurrent-consent">

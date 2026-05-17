@@ -1,8 +1,8 @@
-# После правок в tests/ или src/: docker compose -f ci/docker-compose.yml build test
-#   (или: run --build --rm test …) — образ копирует код при сборке, не монтирует репозиторий.
-# Зависшие контейнеры test-run-* после Ctrl+C или таймаута (у --rm нет шанса сработать):
+# After changes in tests/ or src/: docker compose -f ci/docker-compose.yml build test
+#   Or use run --build --rm test. The image copies code at build time and does not mount the repository.
+# Stale test-run-* containers after Ctrl+C or a timeout:
 #   docker rm -f $(docker ps -q --filter name=postbridge-core-ci-test-run)
-# Остановить весь стек (postgres, redis): docker compose -f ci/docker-compose.yml down
+# Stop the whole stack (postgres, redis): docker compose -f ci/docker-compose.yml down
 name: postbridge-core-ci
 
 services:
@@ -12,7 +12,7 @@ services:
       POSTGRES_USER: postbridge
       POSTGRES_PASSWORD: postbridge
       POSTGRES_DB: postbridge_test
-    # Подстраховка от зависаний pytest: открытая транзакция без активности не держит блокировки вечно.
+    # Guard against stuck pytest runs: inactive open transactions do not hold locks forever.
     command: postgres -c idle_in_transaction_session_timeout=60s
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postbridge -d postbridge_test"]

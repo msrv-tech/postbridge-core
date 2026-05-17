@@ -1,7 +1,7 @@
 /**
- * Синхронный <script src="telegram.org/..."> в index.html блокирует первый paint
- * на всём сайте, пока CDN Telegram не ответит. Здесь — ленивая подгрузка только
- * если похоже на Mini App / встроенный браузер Telegram.
+ * A synchronous <script src="telegram.org/..."> in index.html blocks the first
+ * paint site-wide while the Telegram CDN responds. This loader keeps it lazy
+ * and only activates for likely Mini App / embedded Telegram browsers.
  */
 
 const SCRIPT_SRC = 'https://telegram.org/js/telegram-web-app.js'

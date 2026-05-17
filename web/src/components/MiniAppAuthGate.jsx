@@ -13,8 +13,8 @@ function initialGateState() {
 }
 
 /**
- * Mini App (Telegram / MAX): авторизация по initData.
- * SDK Telegram не грузим на всех страницах — только если похоже на встроенный WebView.
+ * Mini App (Telegram / MAX): authenticates via initData.
+ * The Telegram SDK is loaded lazily only when the page appears embedded.
  */
 export default function MiniAppAuthGate({ children }) {
   const navigate = useNavigate()

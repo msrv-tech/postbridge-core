@@ -1,0 +1,13 @@
+title = "postbridge-core gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Documented example placeholders and scanner examples"
+paths = [
+  '''^\.env\.example$''',
+  '''^web/\.env\.example$''',
+  '''^SECURITY\.md$''',
+]
+

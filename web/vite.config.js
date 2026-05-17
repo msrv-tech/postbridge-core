@@ -28,10 +28,10 @@ export default defineConfig({
       '/workspaces': {
         target: apiProxyTarget,
         changeOrigin: true,
-        // SSE (ИИ generate-stream): иначе dev-proxy обрывает долгий поток
+        // SSE (AI generate-stream): keep long-running dev-proxy streams open.
         timeout: 0,
         proxyTimeout: 0,
-        // При обновлении страницы браузер запрашивает /workspaces/... — не проксировать, отдать index.html
+        // Browser refreshes request /workspaces/... directly; serve the SPA shell.
         bypass(req) {
           if (req.headers['x-requested-with'] !== 'XMLHttpRequest' && !req.headers.accept?.includes('application/json')) {
             return '/index.html';

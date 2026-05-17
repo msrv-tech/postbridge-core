@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import PublicLayout from '../components/PublicLayout'
-import { getCaseLanding } from '../caseLandings'
+import { getCaseLanding, translateCaseLanding } from '../caseLandings'
+import { useI18n } from '../i18n'
 import { reachMetrikaGoal } from '../metrika'
 import { useAuth } from '../useAuth'
 
@@ -16,35 +17,39 @@ function useCaseCtaPath(slug) {
 }
 
 function CaseFlowPreview() {
+  const { t } = useI18n()
+
   return (
-    <div className="case-flow-preview" aria-label="Telegram to MAX publication flow">
+    <div className="case-flow-preview" aria-label={t('case.flow.aria')}>
       <div className="case-flow-channel case-flow-channel-telegram">
-        <span>Источник</span>
+        <span>{t('case.flow.source')}</span>
         <strong>Telegram</strong>
-        <p>Новый пост в канале</p>
+        <p>{t('case.flow.newPost')}</p>
       </div>
       <div className="case-flow-pipeline">
         <span className="case-flow-pulse" aria-hidden />
         <strong>Postbridge</strong>
-        <p>Проверка, очередь, доставка</p>
+        <p>{t('case.flow.pipeline')}</p>
       </div>
       <div className="case-flow-channel case-flow-channel-max">
-        <span>Направление</span>
+        <span>{t('case.flow.destination')}</span>
         <strong>MAX</strong>
-        <p>Публикация в канале</p>
+        <p>{t('case.flow.publication')}</p>
       </div>
       <div className="case-status-strip">
-        <span className="case-status case-status-done">Опубликовано</span>
-        <span className="case-status case-status-warning">Требует внимания</span>
-        <span className="case-status case-status-error">Ошибка</span>
+        <span className="case-status case-status-done">{t('case.status.published')}</span>
+        <span className="case-status case-status-warning">{t('case.status.needsAttention')}</span>
+        <span className="case-status case-status-error">{t('case.status.failed')}</span>
       </div>
     </div>
   )
 }
 
 export default function CaseLanding() {
+  const { t } = useI18n()
   const { slug = '' } = useParams()
-  const landing = getCaseLanding(slug)
+  const landingConfig = getCaseLanding(slug)
+  const landing = useMemo(() => translateCaseLanding(landingConfig, t), [landingConfig, t])
   const ctaPath = useCaseCtaPath(slug)
   const [activeScenario, setActiveScenario] = useState(0)
 
@@ -97,8 +102,8 @@ export default function CaseLanding() {
         <div className="container case-two-column">
           <div>
             <div className="section-heading">
-              <span className="eyebrow">Для кого</span>
-              <h2>Для каналов, команд и регулярных публикаций</h2>
+              <span className="eyebrow">{t('case.sections.who.eyebrow')}</span>
+              <h2>{t('case.sections.who.title')}</h2>
             </div>
             <div className="case-qualifier-grid">
               {landing.qualifiedFor.map((item) => (
@@ -110,7 +115,7 @@ export default function CaseLanding() {
           </div>
           <div className="case-problem-solution">
             <article className="card">
-              <h3>Проблема</h3>
+              <h3>{t('case.sections.problem')}</h3>
               <ul className="check-list">
                 {landing.problem.map((item) => (
                   <li key={item}>{item}</li>
@@ -118,7 +123,7 @@ export default function CaseLanding() {
               </ul>
             </article>
             <article className="card">
-              <h3>Решение</h3>
+              <h3>{t('case.sections.solution')}</h3>
               <ul className="check-list">
                 {landing.solution.map((item) => (
                   <li key={item}>{item}</li>
@@ -132,11 +137,11 @@ export default function CaseLanding() {
       <section className="section section-muted" id="case-scenarios">
         <div className="container">
           <div className="section-heading">
-            <span className="eyebrow">Сценарии</span>
-            <h2>Выберите, как команда будет переносить контент</h2>
+            <span className="eyebrow">{t('case.sections.scenarios.eyebrow')}</span>
+            <h2>{t('case.sections.scenarios.title')}</h2>
           </div>
           <div className="case-scenario-layout">
-            <div className="case-scenario-tabs" role="tablist" aria-label="Сценарии переноса">
+            <div className="case-scenario-tabs" role="tablist" aria-label={t('case.sections.scenarios.aria')}>
               {landing.scenarios.map((scenario, index) => (
                 <button
                   type="button"
@@ -157,7 +162,7 @@ export default function CaseLanding() {
               ))}
             </div>
             <article className="case-scenario-detail">
-              <span>Сценарий {activeScenario + 1}</span>
+              <span>{t('case.sections.scenarios.number', { number: activeScenario + 1 })}</span>
               <h3>{selectedScenario.title}</h3>
               <p>{selectedScenario.text}</p>
               <Link to={ctaPath} className="btn btn-secondary" onClick={() => trackCta('scenario_next_step')}>
@@ -171,8 +176,8 @@ export default function CaseLanding() {
       <section className="section">
         <div className="container case-two-column">
           <article className="card case-proof-card">
-            <span className="eyebrow">Что видно в работе</span>
-            <h2>Связка Telegram → MAX с понятными статусами</h2>
+            <span className="eyebrow">{t('case.sections.proof.eyebrow')}</span>
+            <h2>{t('case.sections.proof.title')}</h2>
             <ul className="check-list">
               {landing.supported.map((item) => (
                 <li key={item}>{item}</li>
@@ -180,8 +185,8 @@ export default function CaseLanding() {
             </ul>
           </article>
           <article className="card case-not-promised-card">
-            <span className="eyebrow">Что не обещаем</span>
-            <h2>Не смешиваем кросспостинг с бытовой миграцией</h2>
+            <span className="eyebrow">{t('case.sections.notPromised.eyebrow')}</span>
+            <h2>{t('case.sections.notPromised.title')}</h2>
             <ul className="case-no-list">
               {landing.notPromised.map((item) => (
                 <li key={item}>{item}</li>
@@ -195,7 +200,7 @@ export default function CaseLanding() {
         <div className="container">
           <div className="section-heading">
             <span className="eyebrow">FAQ</span>
-            <h2>Частые вопросы перед настройкой</h2>
+            <h2>{t('case.sections.faq.title')}</h2>
           </div>
           <div className="faq-list">
             {landing.faq.map((item) => (
@@ -211,10 +216,10 @@ export default function CaseLanding() {
       <section className="section">
         <div className="container cta-card">
           <div>
-            <span className="eyebrow">Готово к настройке</span>
-            <h2>Запустите первый поток Telegram → MAX</h2>
+            <span className="eyebrow">{t('case.sections.cta.eyebrow')}</span>
+            <h2>{t('case.sections.cta.title')}</h2>
             <p className="section-copy">
-              Начните с одной связки, проверьте доставку и расширяйте процесс после первых публикаций.
+              {t('case.sections.cta.text')}
             </p>
           </div>
           <div className="hero-actions">
@@ -222,7 +227,7 @@ export default function CaseLanding() {
               {landing.primaryCta}
             </Link>
             <Link to="/pricing" className="btn btn-secondary" onClick={() => trackCta('pricing')}>
-              Тарифы
+              {t('common.pricing')}
             </Link>
           </div>
         </div>

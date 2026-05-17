@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useI18n } from '../i18n'
 
-/** Показ https://t.me/... для копирования и открытия на другом устройстве. */
+/** Shows a https://t.me/... link for copying and opening on another device. */
 export default function TelegramDeepLinkField({ url }) {
   const [copied, setCopied] = useState(false)
   const { t } = useI18n()
@@ -13,7 +13,7 @@ export default function TelegramDeepLinkField({ url }) {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      /* Clipboard может быть недоступен — пользователь выделит из поля */
+      /* Clipboard may be unavailable, so the user can select the field manually. */
     }
   }
 

@@ -3564,7 +3564,7 @@ textarea:focus {
   flex-shrink: 0;
 }
 
-/* Модалка согласия на рекуррент (card payment): чекбокс + текст в одну колонку */
+/* Recurring card payment consent modal: checkbox and text in one column. */
 .tbank-consent-modal .tbank-consent-checkbox-row {
   display: flex;
   flex-direction: row;

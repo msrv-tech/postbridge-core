@@ -15,7 +15,7 @@ import TelegramDeepLinkField from '../components/TelegramDeepLinkField'
 import { fetchTelegramWebLinkStatus, startTelegramWebLinkSession } from '../telegramWebLinkFlow'
 import { useI18n } from '../i18n'
 
-// VK: community token из настроек группы (Контур 2).
+// VK: community token from the group settings.
 const VK_OAUTH_ADD_ENABLED = true
 
 const PLATFORMS = [
@@ -53,16 +53,16 @@ export default function AddChannel() {
   const [loading, setLoading] = useState(false)
   const [validating, setValidating] = useState(false)
   const [error, setError] = useState('')
-  // MAX: верификация через уникальный код
+  // MAX: verification with a unique code.
   const [maxCode, setMaxCode] = useState(null)
   const [maxDeeplink, setMaxDeeplink] = useState(null)
   const [maxCodeRequested, setMaxCodeRequested] = useState(false)
-  // Telegram: привязка для email-пользователей (ссылка в боте)
+  // Telegram: link email users through the bot.
   const [showLinkTelegram, setShowLinkTelegram] = useState(false)
   const [tgBindDeepLink, setTgBindDeepLink] = useState(null)
   const [tgBindSessionToken, setTgBindSessionToken] = useState(null)
   const [bindSuccess, setBindSuccess] = useState('')
-  // VK: community token — access_token и credential_ref после проверки
+  // VK: community token, access_token and credential_ref after validation.
   const [vkAccessToken, setVkAccessToken] = useState('')
   const [vkCredentialsRef, setVkCredentialsRef] = useState('')
   const [linkedinAccessToken, setLinkedinAccessToken] = useState('')
@@ -86,7 +86,7 @@ export default function AddChannel() {
         return
       }
       if (platform === 'max') {
-        // MAX: сначала запросить код (если ещё не запрашивали)
+        // MAX: request the code first if it has not been requested yet.
         if (!maxCodeRequested) {
           const res = await requestMaxChannelVerification(workspaceId, channelId.trim())
           setMaxCode(res.code)
@@ -96,7 +96,7 @@ export default function AddChannel() {
           setValidating(false)
           return
         }
-        // MAX: проверить код в канале
+        // MAX: verify the code in the channel.
         const verifyRes = await verifyMaxChannel(workspaceId, {
           platform_channel_id: channelId.trim(),
           code: maxCode,
@@ -107,10 +107,10 @@ export default function AddChannel() {
         }
         setValidatedRead(true)
         setValidatedDisplay(verifyRes.display || channelId.trim())
-        // MAX: публикация кода в канале подтверждает доступ на запись
+        // MAX: publishing the code in the channel confirms write access.
         setValidatedWrite(true)
       } else if (platform === 'vk') {
-        // VK: community token — проверка и создание credential
+        // VK: validate the community token and create a credential.
         const credRes = await createVkCommunityCredential(workspaceId, {
           group_id: channelId.trim(),
           access_token: vkAccessToken.trim(),
@@ -157,7 +157,7 @@ export default function AddChannel() {
         if (!readRes?.ok) {
           const errMsg = readRes?.errors?.join(' ') || t('addChannel.errors.noReadAccess')
           setError(errMsg)
-          if (errMsg.includes('Привяжите Telegram') || errMsg.includes('Link Telegram')) {
+          if (errMsg.includes(t('addChannel.errors.telegramLinkNeedle')) || errMsg.includes('Link Telegram')) {
             setShowLinkTelegram(true)
           }
           return

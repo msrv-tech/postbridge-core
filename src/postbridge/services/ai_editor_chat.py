@@ -1,4 +1,4 @@
-"""Персистентность чата ИИ редактора (сообщения привязаны к content_item)."""
+"""AI editor chat persistence, with messages attached to a content_item."""
 
 from __future__ import annotations
 
@@ -298,7 +298,7 @@ def append_agent_editor_run_started(
         session,
         tenant_id=tenant_id,
         content_item_id=content_item_id,
-        content="Агент начал обработку запроса",
+        content="The agent started processing the request",
         status="running",
         agent_run_id=agent_run_id,
     )
@@ -315,7 +315,7 @@ def append_agent_editor_context_loaded(
         session,
         tenant_id=tenant_id,
         content_item_id=content_item_id,
-        content="Агент проверил текущий черновик и редакционный контекст",
+        content="The agent reviewed the current draft and editorial context",
         status="done",
         agent_run_id=agent_run_id,
     )
@@ -330,12 +330,12 @@ def append_agent_editor_candidate_ready(
     headline: str | None,
     topic: str | None,
 ) -> None:
-    label = headline or topic or "без заголовка"
+    label = headline or topic or "untitled"
     append_ai_chat_action(
         session,
         tenant_id=tenant_id,
         content_item_id=content_item_id,
-        content=f"Подготовил новый вариант черновика: {label}",
+        content=f"Prepared a new draft variant: {label}",
         status="done",
         agent_run_id=agent_run_id,
         payload={"headline": headline, "topic": topic},
@@ -351,9 +351,9 @@ def append_agent_editor_source_package_ready(
     source_count: int,
     image_candidate_count: int,
 ) -> None:
-    content = f"Подобрал пакет источников: {source_count} источ."
+    content = f"Prepared a source package: {source_count} sources."
     if image_candidate_count > 0:
-        content = f"{content}, {image_candidate_count} изображ."
+        content = f"{content}, {image_candidate_count} images."
     append_ai_chat_action(
         session,
         tenant_id=tenant_id,
@@ -388,7 +388,7 @@ def append_agent_editor_run_completed(
         session,
         tenant_id=tenant_id,
         content_item_id=content_item_id,
-        content="Агент завершил обработку",
+        content="The agent finished processing",
         status="done",
         agent_run_id=agent_run_id,
         payload={
@@ -403,7 +403,7 @@ def append_agent_editor_run_completed(
             session,
             tenant_id=tenant_id,
             content_item_id=content_item_id,
-            content="Агент подобрал пакет источников и ждёт согласования перед подготовкой черновика.",
+            content="The agent prepared a source package and is waiting for approval before drafting.",
             agent_run_id=agent_run_id,
             payload={"review_items": source_package_review_items},
         )
@@ -413,18 +413,18 @@ def append_agent_editor_run_completed(
         materialization_kind = (
             materialization.get("materialization") if isinstance(materialization, dict) else None
         )
-        result_text = "Агент обновил черновик и применил изменения к посту."
+        result_text = "The agent updated the draft and applied changes to the post."
         if materialization_kind == "updated_existing_content_item":
-            result_text = "Агент обновил текущий черновик поста."
+            result_text = "The agent updated the current post draft."
         elif materialization_kind == "created_editorial_draft_content_item":
-            result_text = "Агент создал новый редакционный черновик."
+            result_text = "The agent created a new editorial draft."
         elif materialization_kind == "created_draft_content_item":
-            result_text = "Агент создал новый черновик."
+            result_text = "The agent created a new draft."
         elif materialization_kind in {
             "created_content_plan_and_targets",
             "created_and_dispatched_content_plan_and_targets",
         }:
-            result_text = "Агент создал новый черновик и подготовил публикационный план."
+            result_text = "The agent created a new draft and prepared a publication plan."
         if guardrail_blocks:
             reasons: list[str] = []
             for block in guardrail_blocks:
@@ -435,7 +435,7 @@ def append_agent_editor_run_completed(
             if reasons:
                 result_text = f"{result_text} Notes: {'; '.join(reasons)}."
         if candidate_label:
-            result_text = f"{result_text} Вариант: {candidate_label}."
+            result_text = f"{result_text} Variant: {candidate_label}."
         append_ai_chat_result(
             session,
             tenant_id=tenant_id,
@@ -446,9 +446,9 @@ def append_agent_editor_run_completed(
         )
         return
     if review_items:
-        result_text = "Агент подготовил новый вариант черновика и отправил его на согласование."
+        result_text = "The agent prepared a new draft variant and sent it for review."
         if candidate_label:
-            result_text = f"{result_text} Вариант: {candidate_label}."
+            result_text = f"{result_text} Variant: {candidate_label}."
         append_ai_chat_result(
             session,
             tenant_id=tenant_id,
@@ -459,9 +459,9 @@ def append_agent_editor_run_completed(
         )
         return
     if result.get("candidates"):
-        result_text = "Агент подготовил новый вариант черновика."
+        result_text = "The agent prepared a new draft variant."
         if candidate_label:
-            result_text = f"{result_text} Вариант: {candidate_label}."
+            result_text = f"{result_text} Variant: {candidate_label}."
         append_ai_chat_result(
             session,
             tenant_id=tenant_id,
@@ -485,9 +485,9 @@ def append_agent_editor_source_package_resolved(
 ) -> None:
     actor = reviewer_id or "reviewer"
     action_text = (
-        "Редактор согласовал пакет источников"
+        "The editor approved the source package"
         if decision == "approved"
-        else "Редактор отклонил пакет источников"
+        else "The editor rejected the source package"
     )
     payload = {
         "decision": decision,
@@ -504,11 +504,11 @@ def append_agent_editor_source_package_resolved(
         agent_run_id=agent_run_id,
         payload=payload,
     )
-    result_text = f"Решение по пакету источников: {decision}. Исполнитель: {actor}."
+    result_text = f"Source package decision: {decision}. Actor: {actor}."
     if note:
-        result_text = f"{result_text} Комментарий: {note}."
+        result_text = f"{result_text} Comment: {note}."
     if decision == "approved" and follow_up_run_id:
-        result_text = f"{result_text} Агент продолжил работу по утверждённым источникам."
+        result_text = f"{result_text} The agent continued with the approved sources."
     append_ai_chat_result(
         session,
         tenant_id=tenant_id,
@@ -533,9 +533,9 @@ def append_agent_editor_review_resolved(
 ) -> None:
     actor = reviewer_id or "reviewer"
     if decision == "approved":
-        action_text = "Редактор согласовал вариант агента"
+        action_text = "The editor approved the agent variant"
     else:
-        action_text = "Редактор отклонил вариант агента"
+        action_text = "The editor rejected the agent variant"
     append_ai_chat_action(
         session,
         tenant_id=tenant_id,
@@ -551,12 +551,12 @@ def append_agent_editor_review_resolved(
         },
     )
     result_text = (
-        f"Решение по варианту: {decision}. Исполнитель: {actor}."
+        f"Variant decision: {decision}. Actor: {actor}."
     )
     if review_action:
-        result_text = f"{result_text} Действие: {review_action}."
+        result_text = f"{result_text} Action: {review_action}."
     if note:
-        result_text = f"{result_text} Комментарий: {note}."
+        result_text = f"{result_text} Comment: {note}."
     append_ai_chat_result(
         session,
         tenant_id=tenant_id,
@@ -573,18 +573,18 @@ def append_agent_editor_review_resolved(
     if decision != "approved" or not materialization:
         return
     materialization_kind = materialization.get("materialization") if isinstance(materialization, dict) else None
-    materialization_text = "Согласованный вариант применён к черновику."
+    materialization_text = "The approved variant was applied to the draft."
     if materialization_kind == "updated_existing_content_item":
-        materialization_text = "Согласованный вариант применён к текущему черновику."
+        materialization_text = "The approved variant was applied to the current draft."
     elif materialization_kind == "created_editorial_draft_content_item":
-        materialization_text = "На основе согласованного варианта создан новый редакционный черновик."
+        materialization_text = "A new editorial draft was created from the approved variant."
     elif materialization_kind == "created_draft_content_item":
-        materialization_text = "На основе согласованного варианта создан новый черновик."
+        materialization_text = "A new draft was created from the approved variant."
     elif materialization_kind in {
         "created_content_plan_and_targets",
         "created_and_dispatched_content_plan_and_targets",
     }:
-        materialization_text = "Согласованный вариант материализован в черновик и публикационный план."
+        materialization_text = "The approved variant was materialized into a draft and publication plan."
     append_ai_chat_result(
         session,
         tenant_id=tenant_id,

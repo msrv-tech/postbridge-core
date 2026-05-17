@@ -22,7 +22,7 @@ from sentry_sdk.integrations.fastapi import FastApiIntegration
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Контекст жизненного цикла приложения: валидация настроек и инициализация БД."""
+    """Application lifespan context: validate settings and initialize the database."""
     settings = get_settings()
     if settings.sentry_dsn:
         sentry_sdk.init(
@@ -46,7 +46,7 @@ app.include_router(agent_internal_router)
 
 
 def _media_storage_dir() -> Path:
-    """Каталог локальных медиа (согласован с get_settings().media_storage_path)."""
+    """Local media directory aligned with get_settings().media_storage_path."""
     s = get_settings()
     raw = (s.media_storage_path or "").strip() or "/var/postbridge/media"
     return Path(raw)
@@ -54,7 +54,7 @@ def _media_storage_dir() -> Path:
 
 @app.get("/media/{path:path}", include_in_schema=False)
 def serve_media(path: str) -> FileResponse:
-    """Раздаёт файлы из MEDIA_STORAGE_PATH для on-premise live-sync медиа."""
+    """Serve files from MEDIA_STORAGE_PATH for on-premise live-sync media."""
     media_root = _media_storage_dir()
     full = (media_root / path).resolve()
     if not str(full).startswith(str(media_root.resolve())):
@@ -72,7 +72,7 @@ _ERROR_STATUS_BY_CODE = {
 
 
 def _status_code_for_error(exc: PostbridgeError) -> int:
-    """Определяет HTTP-код ответа по коду ошибки Postbridge."""
+    """Resolve the HTTP response status from a Postbridge error code."""
     if exc.code in _ERROR_STATUS_BY_CODE:
         return _ERROR_STATUS_BY_CODE[exc.code]
     if exc.code.startswith("VALIDATION_"):
@@ -92,7 +92,7 @@ def _translate_message_key(key: str, *, default: str | None = None, params: dict
 
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
-    """Прокидывает X-Correlation-Id в запрос и ответ для трассировки."""
+    """Propagate X-Correlation-Id through request handling and the response."""
     correlation_id = request.headers.get("X-Correlation-Id") or str(uuid4())
     request.state.correlation_id = correlation_id
     response = await call_next(request)
@@ -102,7 +102,7 @@ async def correlation_id_middleware(request: Request, call_next):
 
 @app.exception_handler(PostbridgeError)
 async def postbridge_error_handler(request: Request, exc: PostbridgeError):
-    """Обработчик доменных ошибок Postbridge: возвращает JSON с единым форматом."""
+    """Handle Postbridge domain errors with the unified JSON format."""
     return JSONResponse(
         status_code=_status_code_for_error(exc),
         content=exc.to_dict(correlation_id=request.state.correlation_id),
@@ -111,7 +111,7 @@ async def postbridge_error_handler(request: Request, exc: PostbridgeError):
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_error_handler(request: Request, exc: RequestValidationError):
-    """Обработчик ошибок валидации Pydantic: маппинг в формат Postbridge."""
+    """Map Pydantic validation errors into the Postbridge error format."""
     error = ValidationError(
         code="VALIDATION_REQUEST_INVALID",
         message="request payload validation failed",
@@ -126,7 +126,7 @@ async def request_validation_error_handler(request: Request, exc: RequestValidat
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    """Обработчик необработанных исключений: оборачивает в InternalError."""
+    """Wrap unhandled exceptions as InternalError responses."""
     error = InternalError(
         "Unhandled API error",
         message_key="error.internal.unhandled_api_error",
@@ -197,13 +197,13 @@ def web_asset_or_route(path: str):
 
 @app.get("/health")
 def healthcheck() -> dict[str, str]:
-    """Проверка доступности Core API."""
+    """Check Core API availability."""
     return {"status": "ok"}
 
 
 @app.get("/metrics", response_class=PlainTextResponse)
 def metrics() -> str:
-    """Возвращает метрики Prometheus."""
+    """Return Prometheus metrics."""
     return export_prometheus()
 
 

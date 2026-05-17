@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Сохраняет публичную OpenAPI-схему Core в JSON (CI / локально)."""
+"""Save the public Core OpenAPI schema as JSON for CI or local checks."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 def _bootstrap_env() -> None:
     if not os.environ.get("DATABASE_URL", "").strip():
         raise SystemExit(
-            "DATABASE_URL must be set (например через docker compose -f ci/docker-compose.yml run --rm test)"
+            "DATABASE_URL must be set (for example, via docker compose -f ci/docker-compose.yml run --rm test)"
         )
     os.environ.setdefault("APP_ENV", "test")
     os.environ.setdefault("REDIS_URL", "redis://redis:6379/0")

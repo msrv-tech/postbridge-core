@@ -8,7 +8,7 @@
     "/health": {
       "get": {
         "summary": "Healthcheck",
-        "description": "Проверка доступности Core API.",
+        "description": "Check Core API availability.",
         "operationId": "healthcheck_health_get",
         "responses": {
           "200": {
@@ -31,7 +31,7 @@
     "/metrics": {
       "get": {
         "summary": "Metrics",
-        "description": "Возвращает метрики Prometheus.",
+        "description": "Return Prometheus metrics.",
         "operationId": "metrics_metrics_get",
         "responses": {
           "200": {

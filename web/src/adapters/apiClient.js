@@ -118,16 +118,16 @@ function normalizeSelfhostResponse(originalPath, data) {
   return data;
 }
 
-/** Текст ошибки из JSON FastAPI (detail) или AppError (message). */
+// Error text from FastAPI JSON (detail) or AppError (message).
 function browserLocale() {
-  if (typeof window === 'undefined') return 'ru'
-  return (window.localStorage.getItem('postbridge.locale') || document.documentElement.lang || 'ru').startsWith('en')
-    ? 'en'
-    : 'ru'
+  if (typeof window === 'undefined') return DEFAULT_LOCALE
+  const locale = window.localStorage.getItem('postbridge.locale') || document.documentElement.lang || DEFAULT_LOCALE
+  return String(locale).toLowerCase().startsWith('ru') ? 'ru' : DEFAULT_LOCALE
 }
 
-function clientText(ru, en) {
-  return browserLocale() === 'en' ? en : ru
+function localizedClientText(key) {
+  const locale = browserLocale()
+  return catalogs[locale]?.[key] ?? catalogs[DEFAULT_LOCALE]?.[key] ?? key
 }
 
 function interpolate(template, params) {
@@ -188,10 +188,7 @@ function normalizeApiErrorMessage(message, status, details = {}) {
   if (exception) return exception;
 
   if (status >= 500) {
-    return clientText(
-      'Сервис временно не смог обработать запрос. Попробуйте ещё раз через несколько секунд.',
-      'The service could not process the request. Try again in a few seconds.',
-    )
+    return localizedClientText('api.error.genericTemporary')
   }
   return raw || `HTTP ${status}`
 }

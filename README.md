@@ -1,5 +1,8 @@
 # postbridge-core
 
+[![CI](https://github.com/msrv-tech/postbridge-core/actions/workflows/ci.yml/badge.svg)](https://github.com/msrv-tech/postbridge-core/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Open-source publishing, migration, and automation engine for Postbridge Core.
 
 `postbridge-core` contains the public runtime:
@@ -38,6 +41,7 @@ Core serves the self-host app without exposing internal service credentials.
 ## Local Run
 
 1. Copy `.env.example` to `.env` and fill the required secrets.
+   Generate unique values for `POSTGRES_PASSWORD`, `DATABASE_URL`, `CREDENTIALS_ENCRYPTION_KEY`, and any platform credentials you enable.
 2. Start the stack:
 
 ```bash
@@ -107,6 +111,8 @@ The provided GitHub Actions workflow deploys only after CI passes on `main` and 
 ## Documentation
 
 - [docs/app-api.md](docs/app-api.md)
+- [CHANGELOG.md](CHANGELOG.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
 - [docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md)
 - [docs/i18n.md](docs/i18n.md)
 - [docs/recovery-runbook.md](docs/recovery-runbook.md)
@@ -115,3 +121,5 @@ The provided GitHub Actions workflow deploys only after CI passes on `main` and 
 ## Security
 
 Do not commit `.env`, local databases, credentials, or generated build artifacts. Run a secret scan before publishing forks or changing repository visibility.
+
+Use [SECURITY.md](SECURITY.md) for vulnerability reporting.

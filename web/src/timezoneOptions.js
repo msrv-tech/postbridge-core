@@ -4,58 +4,53 @@
 
 const MSK_IANA = 'Europe/Moscow'
 
-/**
- * Канонический IANA + подпись с городами для UI (одна строка на пояс).
- * Где несколько городов в одном поясе — перечислены через запятую.
- */
 const RUSSIAN_TIMEZONES = [
   {
     value: 'Europe/Kaliningrad',
-    city: { ru: 'Калининград', en: 'Kaliningrad' },
+    cityKey: 'timezone.city.kaliningrad',
   },
   {
     value: 'Europe/Moscow',
-    city: { ru: 'Москва, Санкт-Петербург и большинство регионов', en: 'Moscow, Saint Petersburg, and most regions' },
+    cityKey: 'timezone.city.moscow',
   },
   {
     value: 'Europe/Samara',
-    city: { ru: 'Самара, Саратов, Ульяновск, Астрахань', en: 'Samara, Saratov, Ulyanovsk, Astrakhan' },
+    cityKey: 'timezone.city.samara',
   },
   {
     value: 'Asia/Yekaterinburg',
-    city: { ru: 'Екатеринбург, Пермь', en: 'Yekaterinburg, Perm' },
+    cityKey: 'timezone.city.yekaterinburg',
   },
   {
     value: 'Asia/Omsk',
-    city: { ru: 'Омск', en: 'Omsk' },
+    cityKey: 'timezone.city.omsk',
   },
   {
     value: 'Asia/Novosibirsk',
-    city: { ru: 'Новосибирск, Красноярск, Томск, Барнаул', en: 'Novosibirsk, Krasnoyarsk, Tomsk, Barnaul' },
+    cityKey: 'timezone.city.novosibirsk',
   },
   {
     value: 'Asia/Irkutsk',
-    city: { ru: 'Иркутск', en: 'Irkutsk' },
+    cityKey: 'timezone.city.irkutsk',
   },
   {
     value: 'Asia/Yakutsk',
-    city: { ru: 'Якутск, Чита', en: 'Yakutsk, Chita' },
+    cityKey: 'timezone.city.yakutsk',
   },
   {
     value: 'Asia/Vladivostok',
-    city: { ru: 'Владивосток', en: 'Vladivostok' },
+    cityKey: 'timezone.city.vladivostok',
   },
   {
     value: 'Asia/Magadan',
-    city: { ru: 'Магадан, Сахалин', en: 'Magadan, Sakhalin' },
+    cityKey: 'timezone.city.magadan',
   },
   {
     value: 'Asia/Kamchatka',
-    city: { ru: 'Петропавловск-Камчатский, Анадырь', en: 'Petropavlovsk-Kamchatsky, Anadyr' },
+    cityKey: 'timezone.city.kamchatka',
   },
 ]
 
-/** Все IANA из списка выше (для проверки «сохранённого ранее» значения). */
 export const RUSSIAN_TIMEZONE_VALUES = new Set(RUSSIAN_TIMEZONES.map((r) => r.value))
 
 /** @param {string} offsetPart e.g. GMT+3, UTC+03:00 */
@@ -95,9 +90,8 @@ function minutesRelativeToMsk(iana, at = new Date()) {
   return loc - msk
 }
 
-/** Компактно: МСК+0, МСК+1, МСК−1 (смещение в часах от московского времени). */
-function formatMskCompact(diffMinutes, locale = 'ru') {
-  const label = String(locale || 'ru').toLowerCase().startsWith('en') ? 'MSK' : 'МСК'
+function formatMskCompact(diffMinutes, t) {
+  const label = t('timezone.msk')
   if (diffMinutes == null) return `${label} ?`
   if (diffMinutes === 0) return `${label}+0`
   const sign = diffMinutes > 0 ? '+' : '−'
@@ -118,22 +112,22 @@ function formatUtcOffsetMinutes(minutes) {
   return `UTC${sign}${h}`
 }
 
-function buildTimezoneLabel(value, cityLine, at, locale = 'ru') {
+function buildTimezoneLabel(value, cityLine, at, t) {
   const utcMin = timezoneOffsetMinutesFromUtc(value, at)
   const relMin = minutesRelativeToMsk(value, at)
   const utcStr = formatUtcOffsetMinutes(utcMin)
-  const mskStr = formatMskCompact(relMin, locale)
+  const mskStr = formatMskCompact(relMin, t)
   return `${cityLine} — ${utcStr}, ${mskStr}`
 }
 
 /**
  * @returns {{ value: string, label: string }[]}
  */
-export function getTimezoneSelectOptions(locale = 'ru') {
+export function getTimezoneSelectOptions(t) {
   const ref = new Date()
-  const rows = RUSSIAN_TIMEZONES.map(({ value, city }) => ({
+  const rows = RUSSIAN_TIMEZONES.map(({ value, cityKey }) => ({
     value,
-    label: buildTimezoneLabel(value, city[String(locale || 'ru').startsWith('en') ? 'en' : 'ru'], ref, locale),
+    label: buildTimezoneLabel(value, t(cityKey), ref, t),
     offsetUtc: timezoneOffsetMinutesFromUtc(value, ref) ?? 0,
   }))
   rows.sort((a, b) => a.offsetUtc - b.offsetUtc)

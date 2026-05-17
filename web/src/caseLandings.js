@@ -2,78 +2,74 @@ export const caseLandings = {
   'telegram-to-max': {
     slug: 'telegram-to-max',
     metrikaCase: 'telegram_to_max',
-    eyebrow: 'Кейс: Telegram -> MAX',
-    title: 'Переносите Telegram-контент в MAX без ручного копирования',
-    subtitle:
-      'Postbridge помогает командам дублировать посты, сохранять регулярность публикаций и не терять аудиторию при переходе на MAX.',
-    primaryCta: 'Настроить кросспостинг',
-    secondaryCta: 'Посмотреть сценарии переноса',
+    eyebrowKey: 'case.telegramToMax.eyebrow',
+    titleKey: 'case.telegramToMax.title',
+    subtitleKey: 'case.telegramToMax.subtitle',
+    primaryCtaKey: 'case.telegramToMax.primaryCta',
+    secondaryCtaKey: 'case.telegramToMax.secondaryCta',
     qualifiedFor: [
-      'Администраторы Telegram-каналов',
-      'SMM-команды и агентства',
-      'Редакции и контент-команды',
-      'Бизнесы, которые заводят MAX как дополнительный канал',
+      'case.telegramToMax.qualifiedFor.1',
+      'case.telegramToMax.qualifiedFor.2',
+      'case.telegramToMax.qualifiedFor.3',
+      'case.telegramToMax.qualifiedFor.4',
     ],
     problem: [
-      'Telegram уже работает, но аудиторию нужно вести в MAX.',
-      'Ручное копирование постов забирает время у команды.',
-      'Без статусов и расписания легко потерять регулярность.',
+      'case.telegramToMax.problem.1',
+      'case.telegramToMax.problem.2',
+      'case.telegramToMax.problem.3',
     ],
     solution: [
-      'Подключите Telegram как источник.',
-      'Подключите MAX как направление.',
-      'Публикуйте один пост в несколько каналов.',
-      'Отслеживайте статусы публикаций и ошибки.',
+      'case.telegramToMax.solution.1',
+      'case.telegramToMax.solution.2',
+      'case.telegramToMax.solution.3',
+      'case.telegramToMax.solution.4',
     ],
     scenarios: [
       {
-        title: 'Дублировать важные посты',
-        text: 'Подходит, когда Telegram остаётся основным каналом, а в MAX нужно регулярно переносить только ключевые публикации.',
-        nextStep: 'Подключить Telegram-источник',
+        titleKey: 'case.telegramToMax.scenario.1.title',
+        textKey: 'case.telegramToMax.scenario.1.text',
+        nextStepKey: 'case.telegramToMax.scenario.1.nextStep',
       },
       {
-        title: 'Вести MAX параллельно Telegram',
-        text: 'Команда публикует контент один раз, а Postbridge доставляет его в нужные каналы без копипаста.',
-        nextStep: 'Добавить MAX-направление',
+        titleKey: 'case.telegramToMax.scenario.2.title',
+        textKey: 'case.telegramToMax.scenario.2.text',
+        nextStepKey: 'case.telegramToMax.scenario.2.nextStep',
       },
       {
-        title: 'Готовить публикации заранее',
-        text: 'Черновики и расписание помогают поддерживать стабильный ритм, даже если канал ведут несколько человек.',
-        nextStep: 'Создать расписание',
+        titleKey: 'case.telegramToMax.scenario.3.title',
+        textKey: 'case.telegramToMax.scenario.3.text',
+        nextStepKey: 'case.telegramToMax.scenario.3.nextStep',
       },
       {
-        title: 'Перенести редакционный процесс',
-        text: 'Сценарий для редакций и SMM-команд, где важны контроль, статусы доставки и понятные ошибки.',
-        nextStep: 'Запустить рабочий процесс',
+        titleKey: 'case.telegramToMax.scenario.4.title',
+        textKey: 'case.telegramToMax.scenario.4.text',
+        nextStepKey: 'case.telegramToMax.scenario.4.nextStep',
       },
     ],
     supported: [
-      'Текстовые посты',
-      'Посты с медиа',
-      'Плановые публикации',
-      'Статусы: опубликовано, ошибка, требует внимания',
+      'case.telegramToMax.supported.1',
+      'case.telegramToMax.supported.2',
+      'case.telegramToMax.supported.3',
+      'case.telegramToMax.supported.4',
     ],
     notPromised: [
-      'Автоматический перенос подписчиков',
-      'Обход ограничений платформ',
-      'Миграция личных чатов',
-      'Перенос стикеров или истории сообщений',
+      'case.telegramToMax.notPromised.1',
+      'case.telegramToMax.notPromised.2',
+      'case.telegramToMax.notPromised.3',
+      'case.telegramToMax.notPromised.4',
     ],
     faq: [
       {
-        question: 'Это инструкция, где нажать кнопку в MAX?',
-        answer:
-          'Нет. Страница для команд, которые регулярно публикуют контент и хотят управляемо вести MAX вместе с Telegram.',
+        questionKey: 'case.telegramToMax.faq.1.question',
+        answerKey: 'case.telegramToMax.faq.1.answer',
       },
       {
-        question: 'Можно перенести подписчиков из Telegram?',
-        answer:
-          'Нет. Postbridge помогает переносить и дублировать публикации, но не переносит аудиторию между платформами.',
+        questionKey: 'case.telegramToMax.faq.2.question',
+        answerKey: 'case.telegramToMax.faq.2.answer',
       },
       {
-        question: 'Можно начать с одного канала?',
-        answer:
-          'Да. Обычно сначала подключают Telegram-источник и один MAX-канал, затем расширяют связку.',
+        questionKey: 'case.telegramToMax.faq.3.question',
+        answerKey: 'case.telegramToMax.faq.3.answer',
       },
     ],
   },
@@ -81,4 +77,30 @@ export const caseLandings = {
 
 export function getCaseLanding(slug) {
   return caseLandings[slug] || null
+}
+
+export function translateCaseLanding(landing, t) {
+  if (!landing) return null
+  return {
+    ...landing,
+    eyebrow: t(landing.eyebrowKey),
+    title: t(landing.titleKey),
+    subtitle: t(landing.subtitleKey),
+    primaryCta: t(landing.primaryCtaKey),
+    secondaryCta: t(landing.secondaryCtaKey),
+    qualifiedFor: landing.qualifiedFor.map((key) => t(key)),
+    problem: landing.problem.map((key) => t(key)),
+    solution: landing.solution.map((key) => t(key)),
+    scenarios: landing.scenarios.map((scenario) => ({
+      title: t(scenario.titleKey),
+      text: t(scenario.textKey),
+      nextStep: t(scenario.nextStepKey),
+    })),
+    supported: landing.supported.map((key) => t(key)),
+    notPromised: landing.notPromised.map((key) => t(key)),
+    faq: landing.faq.map((item) => ({
+      question: t(item.questionKey),
+      answer: t(item.answerKey),
+    })),
+  }
 }

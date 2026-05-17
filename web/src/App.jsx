@@ -12,6 +12,7 @@ import LoadingSkeleton from './components/LoadingSkeleton'
 import MiniAppAuthGate from './components/MiniAppAuthGate'
 import { setToken } from './adapters/sessionToken'
 import { hitMetrika, reachMetrikaGoal } from './metrika'
+import { useI18n } from './i18n'
 
 const Home = lazy(() => import('./pages/Home'))
 const News = lazy(() => import('./pages/News'))
@@ -74,12 +75,12 @@ class AppErrorBoundary extends Component {
         <main className="public-main">
           <div className="container">
             <div className="card" style={{ maxWidth: '36rem', margin: '4rem auto' }}>
-              <h1 style={{ marginTop: 0 }}>Не удалось загрузить интерфейс</h1>
+              <h1 style={{ marginTop: 0 }}>{this.props.errorTitle}</h1>
               <p className="muted">
-                Обновите страницу. Если проблема повторится, новая версия приложения ещё разворачивается.
+                {this.props.errorText}
               </p>
               <button type="button" className="btn" onClick={() => window.location.reload()}>
-                Обновить страницу
+                {this.props.reloadLabel}
               </button>
             </div>
           </div>
@@ -139,8 +140,8 @@ function MetrikaRouteTracker() {
 function OAuthTokenHandler({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
-  // Синхронно извлекаем токен из hash до рендера ProtectedRoute — иначе useAuth
-  // не видит токен и редиректит на главную до того, как useEffect успеет setToken
+  // Read the hash token before ProtectedRoute renders, otherwise useAuth redirects
+  // to the home page before useEffect can persist the token.
   const hash = window.location.hash || '';
   const tokenMatch = hash.match(/[#&]token=([^&]+)/);
   if (tokenMatch) {
@@ -158,8 +159,14 @@ function OAuthTokenHandler({ children }) {
 }
 
 export default function App() {
+  const { t } = useI18n()
+
   return (
-    <AppErrorBoundary>
+    <AppErrorBoundary
+      errorTitle={t('app.errorBoundary.title')}
+      errorText={t('app.errorBoundary.text')}
+      reloadLabel={t('app.errorBoundary.reload')}
+    >
     <OAuthTokenHandler>
     <MiniAppAuthGate>
       <MetrikaRouteTracker />

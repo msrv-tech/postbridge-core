@@ -6,7 +6,27 @@ on:
   pull_request:
 
 jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        run: |
+          docker run --rm \
+            -v "$PWD:/repo" \
+            ghcr.io/gitleaks/gitleaks:latest \
+            detect --source /repo --config /repo/.gitleaks.toml --redact --verbose
+          docker run --rm \
+            -v "$PWD:/repo" \
+            ghcr.io/gitleaks/gitleaks:latest \
+            detect --source /repo --config /repo/.gitleaks.toml --redact --verbose --no-git
+
   test:
+    needs: secret-scan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -24,6 +44,9 @@ jobs:
 
       - name: Install web dependencies
         run: npm ci --prefix web
+
+      - name: Check frontend i18n boundaries
+        run: npm --prefix web run check:i18n
 
       - name: Install Playwright browser
         run: npm --prefix web exec playwright install --with-deps chromium
@@ -54,7 +77,9 @@ jobs:
           if-no-files-found: warn
 
   deploy:
-    needs: test
+    needs:
+      - secret-scan
+      - test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on:
       - self-hosted

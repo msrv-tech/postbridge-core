@@ -1,7 +1,13 @@
-# Миграции Alembic
+# Alembic Migrations
 
-История до **squash** доступна в git до коммита с baseline.
+The public repository starts from a squashed baseline migration.
 
-**Текущий корень:** одна ревизия `20260326_core_squash` в `versions/20260326_squash_core_greenfield.py` — полная схема Core (baseline + `bot_fsm_state` + `bridges` / `rss_feeds`, без удалённого `live_sync_failed_posts`).
+Current root revision: `20260516_public_baseline` in `versions/20260516_public_baseline.py`.
 
-Новые БД: `alembic upgrade head`. Greenfield: пересоздание БД предпочтительнее, чем стыковка старой `alembic_version` с новой линией.
+New databases should run:
+
+```bash
+alembic upgrade head
+```
+
+Existing private or hosted databases should be stamped only after their schema has been verified against the baseline.

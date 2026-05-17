@@ -135,7 +135,7 @@ export default function Channels() {
   const [plans, setPlans] = useState([]);
   const [tariffLoading, setTariffLoading] = useState(false);
   const [tariffError, setTariffError] = useState('');
-  const [tariffStarsWaiting, setTariffStarsWaiting] = useState(null); // plan_code при ожидании оплаты credits
+  const [tariffStarsWaiting, setTariffStarsWaiting] = useState(null); // plan_code while credits payment is pending
   const [disableLoadingId, setDisableLoadingId] = useState(null);
   const [deleteChannelLoadingId, setDeleteChannelLoadingId] = useState(null);
   const [adaptationLoadingId, setAdaptationLoadingId] = useState(null);
@@ -144,7 +144,7 @@ export default function Channels() {
   const openHistoryHandled = useRef(false);
   const pendingTbankAfterEmailRef = useRef(null);
   const [billingEmailModal, setBillingEmailModal] = useState(null);
-  /** Промежуточный шаг: согласие на рекуррент только при оплате ₽ (card payment), не при credits. */
+  /** Intermediate consent step for recurring card payments, not credits payments. */
   const [tbankSubscriptionConsentModal, setTbankSubscriptionConsentModal] = useState(null);
   const [tbankSubscriptionConsentChecked, setTbankSubscriptionConsentChecked] = useState(false);
   const workspaceId = workspaceIdParam || user?.workspaces?.[0]?.id || '';
@@ -281,7 +281,7 @@ export default function Channels() {
         setJobs(jobItems);
         setChannels(channelItems);
         setChannelRegistry(responseItems(reg));
-        // Раскрыть каналы с историческими переносами, чтобы результат был виден сразу
+        // Expand channels with historical imports so the result is visible immediately.
         const withJobs = new Set(
           channelItems.filter(
             (ch) =>
@@ -308,7 +308,7 @@ export default function Channels() {
       .finally(() => setLoading(false));
   }, [workspaceId]);
 
-  // При загрузке с openHistory=channel_id — открыть модалку исторического переноса
+  // Open the historical import modal when the page loads with openHistory=channel_id.
   useEffect(() => {
     if (loading || !channels.length || openHistoryHandled.current) return;
     const params = new URLSearchParams(location.search);
@@ -343,7 +343,7 @@ export default function Channels() {
     }
   }, [location.search]);
 
-  // Polling статуса подписки после оплаты credits (invoice открыт в новой вкладке)
+  // Poll subscription status after a credits payment invoice opens in a new tab.
   useEffect(() => {
     if (!tariffStarsWaiting || !workspaceId) return;
     const interval = setInterval(async () => {
@@ -1248,7 +1248,7 @@ export default function Channels() {
               <strong>{tbankSubscriptionConsentModal.plan.price_rub} ₽</strong>
               <br />
               {t('channels.tbank.period', {
-                period: formatSubscriptionPeriod(tbankSubscriptionConsentModal.plan.period, locale),
+                period: formatSubscriptionPeriod(tbankSubscriptionConsentModal.plan.period, t),
               })}
             </div>
             <label className="tbank-consent-checkbox-row" htmlFor="tbank-subscription-recurrent-consent">

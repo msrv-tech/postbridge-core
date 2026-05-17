@@ -2,7 +2,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../useAuth'
 import LoadingSkeleton from '../components/LoadingSkeleton'
 
-/** Редирект с глобального /settings на настройки первого workspace. */
+/** Redirects global /settings to the first workspace settings page. */
 export default function SettingsRedirect() {
   const { user, loading } = useAuth()
   if (loading) return <LoadingSkeleton />
