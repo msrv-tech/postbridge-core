@@ -6,7 +6,7 @@ from uuid import uuid4
 import sentry_sdk
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from postbridge.api.app_public import router as app_public_router
 from postbridge.api.live_sync import router as live_sync_router
 from postbridge.api.publication_internal import router as publication_internal_router
@@ -233,6 +233,8 @@ def _root_frontend_response(path: str = ""):
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def root_web_ui():
+    if get_settings().postbridge_app_mode == "selfhost":
+        return RedirectResponse(url="/web", status_code=307)
     return _root_frontend_response()
 
 

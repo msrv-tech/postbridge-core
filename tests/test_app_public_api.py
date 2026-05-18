@@ -77,6 +77,16 @@ def test_web_serves_selfhost_app_shell(monkeypatch):
     assert asset.status_code == 200
 
 
+def test_root_redirects_to_web_in_selfhost_mode(monkeypatch):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    client = TestClient(app, follow_redirects=False)
+
+    response = client.get("/")
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/web"
+
+
 def test_app_runtime_config_saas_mode(monkeypatch):
     monkeypatch.setenv("POSTBRIDGE_APP_MODE", "saas")
     monkeypatch.setenv("POSTBRIDGE_DEFAULT_LOCALE", "ru")
