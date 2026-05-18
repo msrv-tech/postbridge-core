@@ -6,7 +6,7 @@ Postbridge Core uses a fetcher/publisher registry selected by `source_platform` 
 
 | Key | Fetcher | Publisher | Notes |
 | --- | --- | --- | --- |
-| `postbridge` | PostbridgeWorkspaceFetcher | - | Built-in Core content source. |
+| `postbridge` | PostbridgeWorkspaceFetcher | - | Built-in Core content source. It cannot be used as a target. |
 | `telegram` | TelegramFetcher | TelegramPublisher | History import through Telethon; publishing through Bot API. |
 | `max` | MaxFetcher | MaxPublisher | Import and publish through MAX API. |
 | `vk` | VKFetcher | VKPublisher | Import and publish through VK wall APIs. |

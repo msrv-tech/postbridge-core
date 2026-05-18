@@ -2,7 +2,7 @@
 
 This walkthrough helps new users verify that a self-host Postbridge Core stack is running and understand the main product loop.
 
-It avoids platform credentials so it can be used on a fresh local machine.
+It avoids external platform credentials so it can be used on a fresh local machine.
 
 ## 1. Start the Stack
 
@@ -37,14 +37,13 @@ Check the session:
 curl -fsS http://127.0.0.1:8000/api/app/session
 ```
 
-## 3. Create Local Channels
+## 3. Create a Local Source
 
-In the UI, open **Channels** and create:
+In the UI, open **Channels** and create a built-in source:
 
 | Channel | Platform | Kind | Notes |
 | --- | --- | --- | --- |
 | Local Source | `postbridge` | source | Built-in content source. |
-| Local Target | `postbridge` | target | Target used for a credential-free demo. |
 
 For a real external target, configure platform credentials first. See [platforms.md](platforms.md).
 
@@ -64,9 +63,9 @@ Save it as a draft first. Then publish or create publication targets from the ed
 
 ## 5. Try a Bridge
 
-Open **Channels** and create a bridge from the local source to the local target.
+Open **Channels**, start **New bridge**, choose the local Postbridge source, and choose **RSS feed** as the target.
 
-Use this step to inspect the bridge form, status badge, and mode settings. Real live-sync publishing requires a source event and a target integration that can publish externally.
+Postbridge is a source only; it is not a bridge target. The RSS target is created automatically and stores generated feed items inside Core.
 
 ## 6. Verify Background Services
 

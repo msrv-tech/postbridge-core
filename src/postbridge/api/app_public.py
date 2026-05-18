@@ -570,6 +570,8 @@ def _require_selfhost_channels(
         raise HTTPException(status_code=404, detail="source channel not found")
     if target is None or target.tenant_id != tenant_id:
         raise HTTPException(status_code=404, detail="target channel not found")
+    if target.platform == "postbridge":
+        raise HTTPException(status_code=400, detail="postbridge channel cannot be a bridge target")
     return source, target
 
 
@@ -930,21 +932,25 @@ def create_connection_from_wizard(
 ) -> dict[str, Any]:
     """Create a live-sync bridge from the legacy SaaS wizard payload."""
     tenant = _require_selfhost_tenant(session)
+    source_platform = body.source_platform.strip().lower()
+    target_platform = body.target_platform.strip().lower()
+    if target_platform == "postbridge":
+        raise HTTPException(status_code=400, detail="postbridge channel cannot be a bridge target")
     source = _find_selfhost_channel(
         session,
         tenant_id=tenant.id,
-        platform=body.source_platform,
+        platform=source_platform,
         channel_ref=body.source_channel_id,
     )
     if source is None:
         raise HTTPException(status_code=404, detail="source channel not found")
-    if body.target_platform == "rss":
+    if target_platform == "rss":
         target = _get_or_create_selfhost_rss_target(session, tenant_id=tenant.id, title=body.target_display)
     else:
         target = _find_selfhost_channel(
             session,
             tenant_id=tenant.id,
-            platform=body.target_platform,
+            platform=target_platform,
             channel_ref=body.target_channel_id,
         )
     if target is None:
@@ -1527,14 +1533,19 @@ def create_channel(
 ) -> dict[str, Any]:
     """Create a channel for the self-host tenant."""
     tenant = _require_selfhost_tenant(session)
+    platform = body.platform.strip().lower()
+    can_write = bool(body.can_write)
+    kind = (
+        body.kind.strip().lower()
+        if body.kind
+        else ("both" if body.can_read and body.can_write else "source" if body.can_read else "destination")
+    )
+    if platform == "postbridge" and (can_write or kind in {"destination", "target", "both"}):
+        raise HTTPException(status_code=400, detail="postbridge channel cannot be a target")
     credentials_channel = session.get(ChannelOrm, body.credentials_ref) if body.credentials_ref else None
     if credentials_channel is not None and credentials_channel.tenant_id == tenant.id:
-        credentials_channel.platform = body.platform.strip().lower()
-        credentials_channel.kind = (
-            body.kind.strip().lower()
-            if body.kind
-            else ("both" if body.can_read and body.can_write else "source" if body.can_read else "destination")
-        )
+        credentials_channel.platform = platform
+        credentials_channel.kind = kind
         credentials_channel.title = body.title
         credentials_channel.external_id = body.external_id or body.platform_channel_id
         credentials_channel.status = body.status.strip().lower()
@@ -1560,12 +1571,8 @@ def create_channel(
     row = ChannelOrm(
         id=str(uuid4()),
         tenant_id=tenant.id,
-        platform=body.platform.strip().lower(),
-        kind=(
-            body.kind.strip().lower()
-            if body.kind
-            else ("both" if body.can_read and body.can_write else "source" if body.can_read else "destination")
-        ),
+        platform=platform,
+        kind=kind,
         title=body.title,
         external_id=body.external_id or body.platform_channel_id,
         status=body.status.strip().lower(),

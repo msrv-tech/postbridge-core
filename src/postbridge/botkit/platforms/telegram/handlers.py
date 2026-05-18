@@ -51,7 +51,8 @@ def build_router(backend: BotBackend) -> Router:
             return None
 
     def _telegram_bot_link() -> str:
-        return f"https://t.me/{get_settings().telegram_bot_username}"
+        username = get_settings().telegram_bot_username
+        return f"https://t.me/{username}" if username else get_settings().core_base_url
 
     def _resolve_locale() -> str:
         return i18n.resolve_locale(explicit=get_settings().postbridge_default_locale).locale

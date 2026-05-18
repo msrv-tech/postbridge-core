@@ -196,8 +196,7 @@ def get_settings() -> Settings:
         bot_webhook_base_url=_strip_optional_env(os.getenv("BOT_WEBHOOK_BASE_URL")),
         web_app_base_url=_strip_optional_env(os.getenv("WEB_APP_BASE_URL")),
         magic_link_base_url=_strip_optional_env(os.getenv("MAGIC_LINK_BASE_URL")),
-        telegram_bot_username=os.getenv("TELEGRAM_BOT_USERNAME", "postbridge_bot").strip()
-        or "postbridge_bot",
+        telegram_bot_username=(os.getenv("TELEGRAM_BOT_USERNAME") or "").strip().lstrip("@"),
         core_service_token=_strip_optional_env(os.getenv("CORE_SERVICE_TOKEN")),
         status_event_outbox_batch_size=int(
             os.getenv("STATUS_EVENT_OUTBOX_BATCH_SIZE", "100")

@@ -16,6 +16,7 @@ from postbridge.infrastructure.crypto.credentials import decrypt_credential_secr
 from postbridge.models.domain import (
     AgentRunOrm,
     BridgeOrm,
+    ChannelOrm,
     ChannelCredentialOrm,
     ContentItemAiChatMessageOrm,
     ContentItemOrm,
@@ -262,6 +263,27 @@ def test_app_channels_create_list_get_delete(monkeypatch):
     deleted = client.delete(f"/api/app/channels/{channel['id']}")
     assert deleted.status_code == 204
     assert client.get(f"/api/app/channels/{channel['id']}").status_code == 404
+
+
+def test_app_channels_reject_postbridge_target(monkeypatch):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000041")
+    client = TestClient(app)
+    assert client.post("/api/app/bootstrap", json={"tenant_name": "Local"}).status_code == 200
+
+    response = client.post(
+        "/api/app/channels",
+        json={
+            "platform": "postbridge",
+            "kind": "destination",
+            "title": "Postbridge Target",
+            "external_id": "local",
+            "can_write": True,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "postbridge channel cannot be a target"
 
 
 def test_app_channels_saas_mode_is_not_served_by_core(monkeypatch):
@@ -697,6 +719,78 @@ def test_app_bridges_duplicate_returns_conflict(monkeypatch):
 
     assert first.status_code == 200
     assert second.status_code == 409
+
+
+def test_app_bridges_reject_postbridge_target(monkeypatch):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000042")
+    client = TestClient(app)
+    assert client.post("/api/app/bootstrap", json={"tenant_name": "Local"}).status_code == 200
+    source = client.post(
+        "/api/app/channels",
+        json={
+            "platform": "telegram",
+            "kind": "source",
+            "title": "Telegram Source",
+            "external_id": "-1001",
+        },
+    ).json()
+    session = SESSION_LOCAL()
+    try:
+        target = ChannelOrm(
+            id="20000000-0000-4000-8000-000000000042",
+            tenant_id="10000000-0000-4000-8000-000000000042",
+            platform="postbridge",
+            kind="source",
+            title="Postbridge Source",
+            external_id="local",
+            status="connected",
+        )
+        session.add(target)
+        session.commit()
+    finally:
+        session.close()
+
+    response = client.post(
+        "/api/app/bridges",
+        json={
+            "source_channel_id": source["id"],
+            "target_channel_id": "20000000-0000-4000-8000-000000000042",
+            "mode": "live_sync",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "postbridge channel cannot be a bridge target"
+
+
+def test_app_connection_wizard_rejects_postbridge_target(monkeypatch):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000043")
+    client = TestClient(app)
+    assert client.post("/api/app/bootstrap", json={"tenant_name": "Local"}).status_code == 200
+    source = client.post(
+        "/api/app/channels",
+        json={
+            "platform": "telegram",
+            "kind": "source",
+            "title": "Telegram Source",
+            "external_id": "-1001",
+        },
+    ).json()
+
+    response = client.post(
+        "/api/app/connections/create",
+        json={
+            "source_platform": "telegram",
+            "source_channel_id": source["id"],
+            "target_platform": "postbridge",
+            "target_channel_id": "local",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "postbridge channel cannot be a bridge target"
 
 
 def test_app_bridges_non_duplicate_integrity_error_is_not_reported_as_duplicate(monkeypatch):

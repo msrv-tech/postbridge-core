@@ -36,7 +36,10 @@ const PLACEHOLDERS = {
   postbridge: 'Workspace is used automatically',
 }
 
-const TELEGRAM_BOT_LINK = `https://t.me/${import.meta.env.VITE_TELEGRAM_BOT_NAME || 'postbridge_bot'}`
+const TELEGRAM_BOT_NAME = typeof import.meta.env.VITE_TELEGRAM_BOT_NAME === 'string'
+  ? import.meta.env.VITE_TELEGRAM_BOT_NAME.trim().replace(/^@/, '')
+  : ''
+const TELEGRAM_BOT_LINK = TELEGRAM_BOT_NAME ? `https://t.me/${TELEGRAM_BOT_NAME}` : ''
 const MAX_BOT_LINK = import.meta.env.VITE_MAX_BOT_URL || ''
 
 export default function AddChannel() {
@@ -340,7 +343,12 @@ export default function AddChannel() {
           </div>
           {platform === 'telegram' && (
             <p className="section-copy">
-              {t('addChannel.botAdminPrefix')} <a href={TELEGRAM_BOT_LINK} target="_blank" rel="noopener noreferrer">{t('addChannel.openBot')}</a>
+              {t('addChannel.botAdminPrefix')}{' '}
+              {TELEGRAM_BOT_LINK ? (
+                <a href={TELEGRAM_BOT_LINK} target="_blank" rel="noopener noreferrer">{t('addChannel.openBot')}</a>
+              ) : (
+                t('addChannel.telegram.botNotConfigured')
+              )}
             </p>
           )}
           {platform === 'telegram' && showLinkTelegram && (

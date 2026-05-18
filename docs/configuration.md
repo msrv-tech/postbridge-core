@@ -61,6 +61,37 @@ Only configure the integrations you plan to use.
 
 See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md) for the full reference.
 
+## How Users Provide Secrets
+
+For Docker Compose installs, users put server-side secrets in the private `.env` file before starting or restarting the stack:
+
+```bash
+cp .env.example .env
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Then edit `.env`, keep it out of Git, and restart services that read those values:
+
+```bash
+docker compose -f deploy/docker-compose.self-host.yml --env-file .env up -d --build
+```
+
+Use environment variables for install-wide secrets:
+
+| Area | Configure in `.env` |
+| --- | --- |
+| Database | `POSTGRES_PASSWORD`, matching `DATABASE_URL` |
+| Encryption | `CREDENTIALS_ENCRYPTION_KEY` |
+| AI | `AI_GATEWAY_ENABLED=1`, `AI_GATEWAY_BASE_URL`, `AI_GATEWAY_API_KEY`, model variables as needed |
+| Telegram import | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING` |
+| Telegram bot | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `BOT_BACKEND=core_db`, `BOT_MODE=long_polling` or webhook settings |
+| Email | No required SMTP secret in Core self-host today; email delivery remains optional until a mail provider adapter is configured in code |
+| MAX/VK/LinkedIn fallback credentials | `MAX_API_*`, `VK_*`, `LINKEDIN_*` |
+| Media | `MEDIA_STORAGE_TYPE`, local path or `S3_*` |
+| Internal service access | `CORE_SERVICE_TOKEN` only when another trusted backend calls Core |
+
+Use the UI for per-channel credentials when possible. Those values are encrypted with `CREDENTIALS_ENCRYPTION_KEY` and stored in Core as channel credentials. Environment variables are best for install-wide defaults, local development, and integrations that do not yet have a UI credential flow.
+
 ## Secret Hygiene
 
 - Keep `.env` out of Git.

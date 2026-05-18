@@ -18,7 +18,7 @@ These are Vite build-time flags for `web/`. The public Core defaults are intenti
 | `VITE_BASE_PATH` | `/web/` | Base path for the built frontend. Use `/` for hosted root deployments. |
 | `VITE_POSTBRIDGE_APP_MODE` | `selfhost` | Frontend mode: `selfhost` uses Core `/api/app/*`, `saas` uses the private BFF paths. |
 | `VITE_YANDEX_METRIKA_COUNTER_ID` | empty | Optional analytics counter. Empty disables Metrika. |
-| `VITE_TELEGRAM_BOT_NAME` | `postbridge_bot` | Optional Telegram bot username used in UI links. |
+| `VITE_TELEGRAM_BOT_NAME` | empty | Optional Telegram bot username used in UI links. Empty hides the bot link in self-host builds. |
 | `VITE_MAX_BOT_URL` | empty | Optional MAX bot URL used in UI hints. |
 | `VITE_BILLING_SUPPORT_EMAIL` | `support@example.com` | Optional support address shown in billing UI. |
 
