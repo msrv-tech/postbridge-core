@@ -13,6 +13,8 @@ cp .env.example .env
 docker compose -f deploy/docker-compose.self-host.yml --env-file .env up -d --build
 ```
 
+Before starting the stack, fill the required values listed in [quickstart.md](quickstart.md), including `POSTGRES_PASSWORD`, `DATABASE_URL`, and `CREDENTIALS_ENCRYPTION_KEY`.
+
 Open:
 
 ```text
@@ -98,4 +100,3 @@ docker compose -f deploy/docker-compose.self-host.yml --env-file .env down -v
 - Read [configuration.md](configuration.md) for environment variables.
 - Read [architecture.md](architecture.md) for API and worker boundaries.
 - Open a deployment help issue if the stack behaves differently on your host.
-
