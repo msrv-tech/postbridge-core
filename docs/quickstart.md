@@ -22,7 +22,7 @@ Fill at least these values:
 
 Generate strong random values. Keep `.env` local and never commit it.
 
-`DATABASE_URL` must use the same PostgreSQL password as `POSTGRES_PASSWORD`.
+`DATABASE_URL` must use the same PostgreSQL password as `POSTGRES_PASSWORD`. Keep the compose host as `postgres` unless you run PostgreSQL outside the provided compose stack.
 
 Set `CORE_SERVICE_TOKEN` only if a trusted server-side component calls `/internal/service/*`.
 

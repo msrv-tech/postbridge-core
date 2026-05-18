@@ -6,7 +6,7 @@ Minimal stack for running Core without a hosted backend: Postgres, Redis, HTTP A
 
 1. Copy `.env.example` to `.env`.
 2. Set `CREDENTIALS_ENCRYPTION_KEY` (Fernet; see [credentials-encryption.md](credentials-encryption.md)).
-3. Set `POSTGRES_PASSWORD` and make sure `DATABASE_URL` uses the same password.
+3. Set `POSTGRES_PASSWORD` and make sure `DATABASE_URL` uses the same password. Keep the database host as `postgres` for the provided compose stack.
 4. Set `CORE_SERVICE_TOKEN` if a trusted backend calls the internal Service API.
 5. Set `STATUS_EVENT_WEBHOOK_*` if Core should deliver status events to a hosted receiver.
 
