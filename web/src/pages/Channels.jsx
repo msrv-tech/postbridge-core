@@ -68,6 +68,15 @@ function adaptationModeHint(mode, t) {
   return t('channels.adaptation.hint.ruleOnly')
 }
 
+function HelpTip({ text }) {
+  return (
+    <span className="help-tip" tabIndex={0} aria-label={text}>
+      ?
+      <span className="help-tip-content" role="tooltip">{text}</span>
+    </span>
+  )
+}
+
 function bridgeLinkBackDraft(ch, drafts) {
   return drafts[ch.id] ?? {
     enabled: Boolean(ch.link_back_enabled),
@@ -150,6 +159,10 @@ export default function Channels() {
   const workspaceId = workspaceIdParam || user?.workspaces?.[0]?.id || '';
   const billingEnabled = isBillingEnabled(user);
   const canUseAiPlatformAdapt = summary?.billing?.ai_platform_adapt_enabled === true;
+  const hasActiveBridge = channels.length > 0;
+  const hasAnyChannel = channelRegistry.length > 0;
+  const hasExternalChannel = channelRegistry.some((ch) => ch.platform !== 'postbridge');
+  const onboardingAction = !hasExternalChannel ? 'add-channel' : !hasActiveBridge ? 'create-bridge' : 'create-post';
 
   const channelIdsInBridges = useMemo(
     () => new Set(channels.flatMap((c) => [c.source_channel_id, c.target_channel_id]).filter(Boolean)),
@@ -609,6 +622,39 @@ export default function Channels() {
         </div>
       )}
 
+      {!loading && hasAnyChannel && !hasActiveBridge && (
+        <div className="card" style={{ borderColor: 'var(--primary)', background: 'rgba(59, 130, 246, 0.08)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 18rem' }}>
+              <h3>{t('channels.onboarding.title')}</h3>
+              <p className="section-copy">
+                {hasExternalChannel ? t('channels.onboarding.bridgeText') : t('channels.onboarding.externalText')}
+              </p>
+              <ol className="check-list" style={{ marginTop: '0.75rem' }}>
+                <li>{t('channels.onboarding.step.workspace')}</li>
+                <li className={hasExternalChannel ? '' : 'muted'}>{t('channels.onboarding.step.external')}</li>
+                <li className={hasActiveBridge ? '' : 'muted'}>{t('channels.onboarding.step.bridge')}</li>
+              </ol>
+            </div>
+            <div className="inline-actions" style={{ justifyContent: 'flex-end', marginTop: '0.25rem' }}>
+              {onboardingAction === 'add-channel' && (
+                <Link to={`/workspaces/${workspaceId}/channels/add`} className="btn">
+                  {t('channels.onboarding.addChannel')}
+                </Link>
+              )}
+              {onboardingAction === 'create-bridge' && (
+                <Link to={`/workspaces/${workspaceId}/migrate`} className="btn">
+                  {t('channels.onboarding.createBridge')}
+                </Link>
+              )}
+              <Link to={`/workspaces/${workspaceId}/content/new`} className="btn btn-secondary">
+                {t('channels.onboarding.createDraft')}
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
       {!loading && channelRegistry.length === 0 && user.workspaces?.length > 0 && workspaceId && (
         <div className="card empty-state">
           <h3>{t('channels.empty.title')}</h3>
@@ -620,14 +666,11 @@ export default function Channels() {
       )}
 
       {!loading && channelRegistry.length > 0 && (
-        <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
-            <h3 style={{ margin: 0 }}>{t('channels.registry.title')}</h3>
-            <Link to={`/workspaces/${workspaceId}/channels/add`} className="btn btn-secondary btn-small">
-              {t('addChannel.title')}
-            </Link>
+        <div className="card channels-panel">
+          <div className="channels-panel-head">
+            <h3>{t('channels.registry.title')}</h3>
           </div>
-          <div className="sync-tree-channel-links" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+          <div className="sync-tree-channel-links channels-registry-list">
             {channelRegistry.map((ch) => {
               const link = channelUrl(ch.platform, ch.platform_channel_id, ch.rss_feed_url);
               const label = platformBadgeLabel(ch.platform, t);
@@ -702,8 +745,10 @@ export default function Channels() {
       )}
 
       {!loading && summary && channels.length > 0 && (
-        <div className="card">
-          <h3>{t('channels.bridges.title')}</h3>
+        <div className="card bridges-panel">
+          <div className="channels-panel-head">
+            <h3>{t('channels.bridges.title')}</h3>
+          </div>
           <div className="sync-tree">
             {channels.map((ch) => {
               const srcLink = channelUrl(ch.source_platform, ch.source_platform_channel_id)
@@ -751,6 +796,7 @@ export default function Channels() {
                           <span className="channel-link-badge-name">{ch.source_display}</span>
                         </span>
                       )}
+                      <span className="bridge-direction" aria-hidden="true">→</span>
                       {tgtLink ? (
                         <a
                           href={tgtLink}
@@ -773,41 +819,48 @@ export default function Channels() {
                         </span>
                       )}
                     </div>
-                    {ch.live_sync_source_supported ? (
-                      <span
-                        className="badge badge-running bridge-live-sync-badge"
-                        title={t('channels.liveSync.title')}
+                    <div className="bridge-row-meta">
+                      {ch.live_sync_source_supported ? (
+                        <span
+                          className="badge badge-running bridge-live-sync-badge"
+                          title={t('channels.liveSync.title')}
+                        >
+                          Live sync
+                        </span>
+                      ) : (
+                        <span
+                          className="bridge-live-sync-off muted"
+                          title={t('channels.liveSync.offTitle')}
+                        >
+                          {t('channels.liveSync.off')}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={() => openHistoryModal(ch)}
                       >
-                        Live sync
-                      </span>
-                    ) : (
-                      <span
-                        className="bridge-live-sync-off muted"
-                        title={t('channels.liveSync.offTitle')}
+                        {t('channels.history.button')}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={() => handleDisableSync(ch)}
+                        disabled={disableLoadingId === ch.id}
                       >
-                        {t('channels.liveSync.off')}
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-small"
-                      onClick={() => openHistoryModal(ch)}
-                    >
-                      {t('channels.history.button')}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-small"
-                      onClick={() => handleDisableSync(ch)}
-                      disabled={disableLoadingId === ch.id}
-                    >
-                      {disableLoadingId === ch.id ? t('channels.disable.loading') : t('channels.disable')}
-                    </button>
+                        {disableLoadingId === ch.id ? t('channels.disable.loading') : t('channels.disable')}
+                      </button>
+                    </div>
                   </div>
-                  <div className="bridge-settings-panel">
+                  <details className="bridge-settings-details">
+                    <summary>{t('channels.bridgeSettings')}</summary>
+                    <div className="bridge-settings-panel">
                     <div className="bridge-adaptation-settings">
                       <div className="bridge-adaptation-mode">
-                        <label htmlFor={`bridge-adaptation-${ch.id}`}>{t('channels.adaptation.mode')}</label>
+                        <label className="field-label-with-help" htmlFor={`bridge-adaptation-${ch.id}`}>
+                          <span>{t('channels.adaptation.mode')}</span>
+                          <HelpTip text={adaptationModeHint(adaptationMode, t)} />
+                        </label>
                         <select
                           id={`bridge-adaptation-${ch.id}`}
                           value={adaptationMode}
@@ -828,7 +881,6 @@ export default function Channels() {
                             {t('channels.adaptation.aiReview')}
                           </option>
                         </select>
-                        <p>{adaptationModeHint(adaptationMode, t)}</p>
                         {aiAdaptationLocked && billingEnabled && (
                           <p className="bridge-adaptation-upgrade">
                             {t('channels.adaptation.upgradeHint')}{' '}
@@ -839,14 +891,13 @@ export default function Channels() {
                         )}
                       </div>
                       {adaptationMode === 'rule_only' ? (
-                        <div className="bridge-adaptation-note">
-                          {t('channels.adaptation.instructionUnused')}
-                        </div>
+                        <div className="bridge-adaptation-spacer" aria-hidden="true" />
                       ) : (
                         <>
                           <div className="bridge-adaptation-instructions">
-                            <label htmlFor={`bridge-adaptation-instructions-${ch.id}`}>
-                              {t('channels.adaptation.instructions')}
+                            <label className="field-label-with-help" htmlFor={`bridge-adaptation-instructions-${ch.id}`}>
+                              <span>{t('channels.adaptation.instructions')}</span>
+                              <HelpTip text={t('channels.adaptation.placeholder')} />
                             </label>
                             <textarea
                               id={`bridge-adaptation-instructions-${ch.id}`}
@@ -881,11 +932,9 @@ export default function Channels() {
                     </div>
                     <div className="bridge-link-back-settings">
                       <div className="bridge-link-back-head">
-                        <div>
+                        <div className="bridge-link-back-title-row">
                           <span className="bridge-link-back-title">{t('channels.linkBack.title')}</span>
-                          <p>
-                            {t('channels.linkBack.text')}
-                          </p>
+                          <HelpTip text={t('channels.linkBack.text')} />
                         </div>
                         <label className="bridge-link-back-checkbox">
                           <input
@@ -909,48 +958,51 @@ export default function Channels() {
                           <span>{t('channels.linkBack.toggle')}</span>
                         </label>
                       </div>
-                      <div className="bridge-link-back-controls">
-                        <label htmlFor={`bridge-link-back-site-${ch.id}`}>
-                          {t('channels.linkBack.url')}
-                        </label>
-                        <input
-                          id={`bridge-link-back-site-${ch.id}`}
-                          className="bridge-link-back-url"
-                          type="url"
-                          value={linkBack.siteUrl}
-                          disabled={adaptationLoadingId === ch.id || !linkBack.enabled}
-                          placeholder="https://site.ru/news"
-                          onChange={(e) =>
-                            setLinkBackDrafts((drafts) => ({
-                              ...drafts,
-                              [ch.id]: { ...linkBack, siteUrl: e.target.value },
-                            }))
-                          }
-                        />
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-small"
-                          disabled={adaptationLoadingId === ch.id || !linkBack.enabled}
-                          onClick={() =>
-                            handleBridgeAdaptationSave(
-                              ch,
-                              adaptationMode,
-                              adaptationInstructions,
-                              linkBack,
-                            )
-                          }
-                        >
-                          {adaptationLoadingId === ch.id ? t('common.saving') : t('channels.linkBack.save')}
-                        </button>
-                      </div>
-                      <p className="bridge-adaptation-note">
-                        {t('channels.linkBack.note', {
-                          example: '/news/chto-takoe-postbridge-a1b2c3d4',
-                          section: '/news',
-                        })}
-                      </p>
+                      {linkBack.enabled && (
+                        <div className="bridge-link-back-controls">
+                          <label className="field-label-with-help" htmlFor={`bridge-link-back-site-${ch.id}`}>
+                            <span>{t('channels.linkBack.url')}</span>
+                            <HelpTip
+                              text={t('channels.linkBack.note', {
+                                example: '/news/chto-takoe-postbridge-a1b2c3d4',
+                                section: '/news',
+                              })}
+                            />
+                          </label>
+                          <input
+                            id={`bridge-link-back-site-${ch.id}`}
+                            className="bridge-link-back-url"
+                            type="url"
+                            value={linkBack.siteUrl}
+                            disabled={adaptationLoadingId === ch.id}
+                            placeholder="https://site.ru/news"
+                            onChange={(e) =>
+                              setLinkBackDrafts((drafts) => ({
+                                ...drafts,
+                                [ch.id]: { ...linkBack, siteUrl: e.target.value },
+                              }))
+                            }
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-small"
+                            disabled={adaptationLoadingId === ch.id}
+                            onClick={() =>
+                              handleBridgeAdaptationSave(
+                                ch,
+                                adaptationMode,
+                                adaptationInstructions,
+                                linkBack,
+                              )
+                            }
+                          >
+                            {adaptationLoadingId === ch.id ? t('common.saving') : t('channels.linkBack.save')}
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  </div>
+                    </div>
+                  </details>
                   {isExpanded && channelJobs.length > 0 && (
                     <div className="sync-tree-children">
                       {channelJobs.map((job) => {
