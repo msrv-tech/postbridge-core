@@ -6,17 +6,63 @@ import logging
 import json
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from postbridge.db import SESSION_LOCAL
-from postbridge.domain.errors import PostbridgeError
-from postbridge.models.domain import ContentItemOrm, MediaGenerationJobOrm, TenantOrm
+from postbridge.domain.errors import PostbridgeError, ValidationError
+from postbridge.infrastructure.crypto.credentials import decrypt_credential_secret
+from postbridge.models.domain import ContentItemOrm, InstallationSecretOrm, MediaGenerationJobOrm, TenantOrm
 from postbridge.services.ai_image_generation import build_post_image_prompt, generate_image_bytes
 from postbridge.services.media_assets import store_media_asset
 from postbridge.services.postbridge_workspace_content import update_postbridge_content_item
 from postbridge.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
+
+
+def _tenant_ai_gateway_payload(session: Session, tenant_id: str) -> tuple[dict, dict]:
+    row = session.scalar(
+        select(InstallationSecretOrm).where(
+            InstallationSecretOrm.tenant_id == tenant_id,
+            InstallationSecretOrm.category == "ai_gateway",
+        )
+    )
+    if row is None:
+        return {}, {}
+    config = {}
+    if row.config_json:
+        try:
+            loaded = json.loads(row.config_json)
+            if isinstance(loaded, dict):
+                config = loaded
+        except json.JSONDecodeError as exc:
+            raise ValidationError(
+                code="VALIDATION_INSTALLATION_SECRET_CONFIG_JSON",
+                message="AI gateway installation config is not valid JSON",
+                details={"category": "ai_gateway"},
+            ) from exc
+    secret = {}
+    try:
+        raw = decrypt_credential_secret(row.encrypted_secret)
+    except PostbridgeError as exc:
+        raise ValidationError(
+            code="VALIDATION_INSTALLATION_SECRET_DECRYPT_FAILED",
+            message="AI gateway installation secret could not be decrypted",
+            details={"category": "ai_gateway", "reason": exc.code},
+        ) from exc
+    if raw:
+        try:
+            loaded = json.loads(raw)
+            if isinstance(loaded, dict):
+                secret = loaded
+        except json.JSONDecodeError as exc:
+            raise ValidationError(
+                code="VALIDATION_INSTALLATION_SECRET_JSON",
+                message="AI gateway installation secret is not valid JSON",
+                details={"category": "ai_gateway"},
+            ) from exc
+    return config, secret
 
 
 def _mark_failed(session: Session, job: MediaGenerationJobOrm, exc: Exception) -> None:
@@ -92,9 +138,13 @@ def process_media_generation_job_task(job_id: str, correlation_id: str | None = 
                 content_md=payload.get("content_md"),
                 style_prompt=payload.get("style_prompt") or (tenant.image_style_prompt or ""),
             )
+            ai_config, ai_secret = _tenant_ai_gateway_payload(session, job.tenant_id)
             result = generate_image_bytes(
                 final_prompt,
-                model=payload.get("model"),
+                model=payload.get("model") or ai_config.get("image_model") or ai_secret.get("image_model"),
+                base_url=ai_config.get("base_url") or ai_secret.get("base_url"),
+                api_key=ai_secret.get("api_key"),
+                image_size=ai_config.get("image_size") or ai_secret.get("image_size"),
                 correlation_id=correlation_id or job.correlation_id,
             )
             stored = store_media_asset(

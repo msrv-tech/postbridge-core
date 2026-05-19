@@ -13,7 +13,7 @@ cp .env.example .env
 docker compose -f deploy/docker-compose.self-host.yml --env-file .env up -d --build
 ```
 
-Before starting the stack, fill the required values listed in [quickstart.md](quickstart.md), including `POSTGRES_PASSWORD`, `DATABASE_URL`, and `CREDENTIALS_ENCRYPTION_KEY`.
+Before starting the stack, generate the private local `.env` described in [quickstart.md](quickstart.md). You do not need external platform credentials for this walkthrough.
 
 Open:
 

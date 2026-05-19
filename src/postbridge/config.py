@@ -1,6 +1,14 @@
 from dataclasses import dataclass
 import os
 
+from importlib.metadata import PackageNotFoundError, version
+
+
+def _package_version() -> str:
+    try:
+        return version("postbridge-core")
+    except PackageNotFoundError:
+        return "0.1.0"
 from postbridge.domain.errors import ConfigurationError
 
 
@@ -8,6 +16,9 @@ from postbridge.domain.errors import ConfigurationError
 class Settings:
     app_env: str
     postbridge_app_mode: str
+    postbridge_version: str
+    postbridge_release_repository: str
+    postbridge_container_image: str
     postbridge_selfhost_tenant_id: str
     database_url: str
     redis_url: str
@@ -60,6 +71,7 @@ class Settings:
     ai_gateway_default_model: str | None
     ai_gateway_default_response_language: str | None
     ai_image_generation_model: str | None
+    ai_image_generation_timeout_seconds: int
     ai_image_generation_size: str
     ai_image_style_prompt: str | None
     credentials_encryption_key: str | None
@@ -138,10 +150,20 @@ def _first_optional_env(*names: str) -> str | None:
 
 def get_settings() -> Settings:
     """Возвращает настройки из переменных окружения."""
+    app_mode = os.getenv("POSTBRIDGE_APP_MODE", "selfhost").strip().lower() or "selfhost"
+    ai_gateway_timeout_default = "300" if app_mode == "selfhost" else "60"
+    ai_image_timeout_default = "300" if app_mode == "selfhost" else "120"
     return Settings(
         app_env=os.getenv("APP_ENV", "dev"),
-        postbridge_app_mode=(
-            os.getenv("POSTBRIDGE_APP_MODE", "selfhost").strip().lower() or "selfhost"
+        postbridge_app_mode=app_mode,
+        postbridge_version=(os.getenv("POSTBRIDGE_VERSION", "").strip() or _package_version()),
+        postbridge_release_repository=(
+            os.getenv("POSTBRIDGE_RELEASE_REPOSITORY", "msrv-tech/postbridge-core").strip()
+            or "msrv-tech/postbridge-core"
+        ),
+        postbridge_container_image=(
+            os.getenv("POSTBRIDGE_CONTAINER_IMAGE", "ghcr.io/msrv-tech/postbridge-core").strip()
+            or "ghcr.io/msrv-tech/postbridge-core"
         ),
         postbridge_selfhost_tenant_id=(
             os.getenv("POSTBRIDGE_SELFHOST_TENANT_ID", "00000000-0000-4000-8000-000000000001").strip()
@@ -220,12 +242,17 @@ def get_settings() -> Settings:
         ai_gateway_enabled=_to_bool(os.getenv("AI_GATEWAY_ENABLED"), False),
         ai_gateway_base_url=_strip_optional_env(os.getenv("AI_GATEWAY_BASE_URL")),
         ai_gateway_api_key=_strip_optional_env(os.getenv("AI_GATEWAY_API_KEY")),
-        ai_gateway_timeout_seconds=int(os.getenv("AI_GATEWAY_TIMEOUT_SECONDS", "60")),
+        ai_gateway_timeout_seconds=int(
+            os.getenv("AI_GATEWAY_TIMEOUT_SECONDS", ai_gateway_timeout_default)
+        ),
         ai_gateway_default_model=_strip_optional_env(os.getenv("AI_GATEWAY_DEFAULT_MODEL")),
         ai_gateway_default_response_language=_strip_optional_env(
             os.getenv("AI_GATEWAY_DEFAULT_RESPONSE_LANGUAGE")
         ),
         ai_image_generation_model=_strip_optional_env(os.getenv("AI_IMAGE_GENERATION_MODEL")),
+        ai_image_generation_timeout_seconds=int(
+            os.getenv("AI_IMAGE_GENERATION_TIMEOUT_SECONDS", ai_image_timeout_default)
+        ),
         ai_image_generation_size=(
             os.getenv("AI_IMAGE_GENERATION_SIZE", "1536x1024").strip() or "1536x1024"
         ),
@@ -360,6 +387,8 @@ def validate_base_settings(settings: Settings) -> None:
         raise ConfigurationError("STATUS_EVENT_OUTBOX_RETRY_MAX_DELAY_SECONDS must be > 0.")
     if settings.ai_gateway_timeout_seconds <= 0:
         raise ConfigurationError("AI_GATEWAY_TIMEOUT_SECONDS must be > 0.")
+    if settings.ai_image_generation_timeout_seconds <= 0:
+        raise ConfigurationError("AI_IMAGE_GENERATION_TIMEOUT_SECONDS must be > 0.")
     if not settings.credentials_encryption_key or not settings.credentials_encryption_key.strip():
         raise ConfigurationError(
             "CREDENTIALS_ENCRYPTION_KEY must be set (Fernet key: "

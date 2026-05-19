@@ -4,6 +4,8 @@ import { updateCurrentUser } from '../adapters/account'
 import { getWorkspaceAgentPolicy, upsertWorkspaceAgentPolicy } from '../adapters/agent'
 import { getDashboardSummary } from '../adapters/dashboard'
 import { dispatchPublicationTarget, listPublicationTargetProjections } from '../adapters/publicationTargets'
+import { isSelfhostMode } from '../adapters/runtime'
+import { getVersionCheck } from '../adapters/version'
 import { getWorkspaceSettings, updateWorkspaceSettings } from '../adapters/workspaceSettings'
 import { useAuth } from '../useAuth'
 import AppShell from '../components/AppShell'
@@ -144,6 +146,11 @@ export default function WorkspaceSettings() {
   const [workspaceSettings, setWorkspaceSettings] = useState({ image_style_prompt: '' })
   const [workspaceSettingsLoading, setWorkspaceSettingsLoading] = useState(true)
   const [workspaceSettingsError, setWorkspaceSettingsError] = useState('')
+  const [versionCheck, setVersionCheck] = useState(null)
+  const [versionLoading, setVersionLoading] = useState(false)
+  const [versionError, setVersionError] = useState('')
+  const [showUpdateCommand, setShowUpdateCommand] = useState(false)
+  const [updateCommandCopied, setUpdateCommandCopied] = useState(false)
 
   const preferredDomainsText = useMemo(
     () => (workspaceAgentPolicy.preferred_domains || []).join('\n'),
@@ -203,6 +210,24 @@ export default function WorkspaceSettings() {
   useEffect(() => {
     loadBillingSummary()
   }, [loadBillingSummary])
+
+  const loadVersionCheck = useCallback(() => {
+    if (!isSelfhostMode()) return
+    setVersionLoading(true)
+    setVersionError('')
+    getVersionCheck()
+      .then((result) => {
+        setVersionCheck(result)
+        setShowUpdateCommand(false)
+        setUpdateCommandCopied(false)
+      })
+      .catch((e) => setVersionError(e.message || t('settings.updates.loadFailed')))
+      .finally(() => setVersionLoading(false))
+  }, [t])
+
+  useEffect(() => {
+    loadVersionCheck()
+  }, [loadVersionCheck])
 
   useEffect(() => {
     if (!workspaceId) return
@@ -326,6 +351,17 @@ export default function WorkspaceSettings() {
     } finally {
       setDispatchingId(null)
     }
+  }
+
+  const handleUpdateClick = () => {
+    setShowUpdateCommand((value) => !value)
+    setUpdateCommandCopied(false)
+  }
+
+  const handleCopyUpdateCommand = async () => {
+    if (!versionCheck?.update_command || typeof navigator === 'undefined' || !navigator.clipboard) return
+    await navigator.clipboard.writeText(versionCheck.update_command)
+    setUpdateCommandCopied(true)
   }
 
   const parseLineList = (raw) =>
@@ -644,6 +680,91 @@ export default function WorkspaceSettings() {
           </div>
         </div>
       </div>
+
+      {isSelfhostMode() && (
+        <div className="card" style={{ marginBottom: '1.5rem' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: '1rem',
+              flexWrap: 'wrap',
+            }}
+          >
+            <div>
+              <h3 className="h-small" style={{ marginTop: 0 }}>
+                {t('settings.updates.title')}
+              </h3>
+              <p className="muted post-editor-hint">
+                {t('settings.updates.text')}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-small"
+              onClick={loadVersionCheck}
+              disabled={versionLoading}
+            >
+              {versionLoading ? t('common.checking') : t('common.refresh')}
+            </button>
+          </div>
+          {versionError && <p className="error">{versionError}</p>}
+          {!versionError && (
+            <div className="status-row" style={{ alignItems: 'flex-start' }}>
+              <span className="status-label">{t('settings.updates.current')}</span>
+              <div className="app-header-actions" style={{ justifyContent: 'flex-start', alignItems: 'center' }}>
+                <span className="plan-badge">{versionCheck?.current_version || '—'}</span>
+                {versionCheck?.latest_version && (
+                  <span className="muted">
+                    {t('settings.updates.latest', { version: versionCheck.latest_version })}
+                  </span>
+                )}
+                {versionCheck?.release_url && (
+                  <a href={versionCheck.release_url} target="_blank" rel="noreferrer">
+                    {t('settings.updates.releaseNotes')}
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
+          {versionCheck?.check_status && versionCheck.check_status !== 'ok' && (
+            <p className="muted post-editor-hint">
+              {t('settings.updates.unavailable')}
+            </p>
+          )}
+          {versionCheck?.check_status === 'ok' && !versionCheck.update_available && (
+            <p className="muted post-editor-hint">
+              {t('settings.updates.upToDate')}
+            </p>
+          )}
+          {versionCheck?.update_available && (
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              <div className="toolbar" style={{ marginTop: 0 }}>
+                <span className="plan-requested-badge">
+                  {t('settings.updates.available', { version: versionCheck.latest_version })}
+                </span>
+                <button type="button" className="btn btn-small" onClick={handleUpdateClick}>
+                  {t('settings.updates.updateTo', { version: versionCheck.latest_version })}
+                </button>
+              </div>
+              {showUpdateCommand && (
+                <div className="empty-state" style={{ padding: '1rem' }}>
+                  <p className="muted post-editor-hint" style={{ marginTop: 0 }}>
+                    {t('settings.updates.commandText')}
+                  </p>
+                  <pre className="code-block" style={{ whiteSpace: 'pre-wrap', overflowX: 'auto' }}>
+                    {versionCheck.update_command}
+                  </pre>
+                  <button type="button" className="btn btn-secondary btn-small" onClick={handleCopyUpdateCommand}>
+                    {updateCommandCopied ? t('settings.updates.copied') : t('settings.updates.copyCommand')}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: '1.5rem' }}>
         <h3 className="h-small" style={{ marginTop: 0 }}>

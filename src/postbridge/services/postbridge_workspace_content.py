@@ -109,6 +109,8 @@ def content_item_to_api_dict(row: ContentItemOrm) -> dict[str, Any]:
     src_ch = extra.get("live_sync_source_core_channel_id")
     if not isinstance(src_ch, str):
         src_ch = None
+    if status == "draft" and scheduled_publish_at is None:
+        src_ch = None
     ws_id = extra.get("saas_workspace_id")
     if not isinstance(ws_id, str):
         ws_id = None
@@ -163,6 +165,12 @@ def create_postbridge_content_item(
             details={"status": status},
         )
     if scheduled_publish_at is not None:
+        if status == "published":
+            raise ValidationError(
+                code="VALIDATION_SCHEDULE_CONFLICT",
+                message="cannot set scheduled_publish_at when publishing",
+                details={},
+            )
         if status != "draft":
             raise ValidationError(
                 code="VALIDATION_SCHEDULE_REQUIRES_DRAFT",
@@ -175,12 +183,22 @@ def create_postbridge_content_item(
                 message="live_sync_source_core_channel_id is required when scheduling",
                 details={},
             )
-        _validate_scheduled_publish_at(scheduled_publish_at)
         _assert_live_sync_source_channel(
             session,
             tenant_id=tenant_id,
             channel_id=live_sync_source_core_channel_id,
         )
+        _validate_scheduled_publish_at(scheduled_publish_at)
+    elif status == "published" and live_sync_source_core_channel_id:
+        _assert_live_sync_source_channel(
+            session,
+            tenant_id=tenant_id,
+            channel_id=live_sync_source_core_channel_id,
+        )
+    should_store_live_sync_source = (
+        bool(live_sync_source_core_channel_id)
+        and (scheduled_publish_at is not None or status == "published")
+    )
     extra: dict[str, Any] = {
         "content_plain": content_plain,
         "summary": summary,
@@ -192,9 +210,10 @@ def create_postbridge_content_item(
     }
     if status == "published":
         extra["published_at"] = datetime.now(UTC).isoformat()
-    elif scheduled_publish_at is not None:
-        extra["scheduled_publish_at"] = scheduled_publish_at.astimezone(UTC).isoformat()
+    if should_store_live_sync_source:
         extra["live_sync_source_core_channel_id"] = live_sync_source_core_channel_id
+    if scheduled_publish_at is not None:
+        extra["scheduled_publish_at"] = scheduled_publish_at.astimezone(UTC).isoformat()
         if saas_workspace_id:
             extra["saas_workspace_id"] = saas_workspace_id
     structured = _dump_extra(extra)
@@ -308,6 +327,7 @@ def update_postbridge_content_item(
     if scheduled_publish_at is not _SCHEDULE_UNSET:
         if scheduled_publish_at is None:
             extra.pop("scheduled_publish_at", None)
+            extra.pop("live_sync_source_core_channel_id", None)
         else:
             eff_status = status if status is not None else row.status
             if eff_status == "published":
@@ -344,6 +364,9 @@ def update_postbridge_content_item(
             extra.pop("scheduled_publish_at", None)
             if not extra.get("published_at"):
                 extra["published_at"] = datetime.now(UTC).isoformat()
+    effective_status = status if status is not None else row.status
+    if effective_status == "draft" and "scheduled_publish_at" not in extra:
+        extra.pop("live_sync_source_core_channel_id", None)
     structured = _dump_extra(extra)
     row.body_structured_json = structured
     row.updated_at = datetime.now(UTC)

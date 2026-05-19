@@ -48,8 +48,12 @@ Core serves the self-host app without exposing internal service credentials.
 
 See [docs/quickstart.md](docs/quickstart.md) for the complete self-host walkthrough.
 
-1. Copy `.env.example` to `.env` and fill the required secrets.
-   Generate unique values for `POSTGRES_PASSWORD`, `DATABASE_URL`, `CREDENTIALS_ENCRYPTION_KEY`, and any platform credentials you enable.
+1. Generate a private `.env` with local random bootstrap secrets:
+
+```bash
+python3 scripts/init_self_host_env.py
+```
+
 2. Start the stack:
 
 ```bash
@@ -133,6 +137,7 @@ ghcr.io/msrv-tech/postbridge-core
 - [docs/demo-walkthrough.md](docs/demo-walkthrough.md)
 - [docs/configuration.md](docs/configuration.md)
 - [docs/self-host.md](docs/self-host.md)
+- [docs/update.md](docs/update.md)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/saas-vs-self-host.md](docs/saas-vs-self-host.md)
 - [docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md)

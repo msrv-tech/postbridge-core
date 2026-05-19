@@ -29,7 +29,6 @@ export default function AppShell({
   onLogout,
   children,
   actions,
-  showAdminLink = false,
   workspaceId: workspaceIdProp = '',
 }) {
   const location = useLocation()
@@ -50,8 +49,6 @@ export default function AppShell({
   const isChannelsActive = location.pathname.includes('/channels')
   const isAgentsActive = location.pathname.includes('/agents/')
   const isSettingsActive = location.pathname.includes('/settings')
-  const isAdminActive = location.pathname === '/admin' || location.pathname.includes('/agents/ops')
-
   const navClassName = (active) => `app-nav-link${active ? ' is-active' : ''}`
   const visibleImageJobs = useMemo(
     () =>
@@ -123,11 +120,6 @@ export default function AppShell({
                 <NavLink to={settingsHref} className={navClassName(isSettingsActive)}>
                   {t('app.nav.settings')}
                 </NavLink>
-                {showAdminLink && (
-                  <NavLink to="/admin" className={navClassName(isAdminActive)}>
-                    {t('app.nav.admin')}
-                  </NavLink>
-                )}
                 <LanguageSelect compact />
               </nav>
             </div>

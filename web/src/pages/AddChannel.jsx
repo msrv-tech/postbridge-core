@@ -12,6 +12,8 @@ import {
 } from '../adapters/channels'
 import AppShell from '../components/AppShell'
 import TelegramDeepLinkField from '../components/TelegramDeepLinkField'
+import { listInstallationSecrets } from '../adapters/installationSecrets'
+import { isSelfhostMode } from '../adapters/runtime'
 import { fetchTelegramWebLinkStatus, startTelegramWebLinkSession } from '../telegramWebLinkFlow'
 import { useI18n } from '../i18n'
 
@@ -36,10 +38,9 @@ const PLACEHOLDERS = {
   postbridge: 'Workspace is used automatically',
 }
 
-const TELEGRAM_BOT_NAME = typeof import.meta.env.VITE_TELEGRAM_BOT_NAME === 'string'
+const DEFAULT_TELEGRAM_BOT_NAME = typeof import.meta.env.VITE_TELEGRAM_BOT_NAME === 'string'
   ? import.meta.env.VITE_TELEGRAM_BOT_NAME.trim().replace(/^@/, '')
   : ''
-const TELEGRAM_BOT_LINK = TELEGRAM_BOT_NAME ? `https://t.me/${TELEGRAM_BOT_NAME}` : ''
 const MAX_BOT_LINK = import.meta.env.VITE_MAX_BOT_URL || ''
 
 export default function AddChannel() {
@@ -65,6 +66,7 @@ export default function AddChannel() {
   const [tgBindDeepLink, setTgBindDeepLink] = useState(null)
   const [tgBindSessionToken, setTgBindSessionToken] = useState(null)
   const [bindSuccess, setBindSuccess] = useState('')
+  const [telegramBotName, setTelegramBotName] = useState(DEFAULT_TELEGRAM_BOT_NAME)
   // VK: community token, access_token and credential_ref after validation.
   const [vkAccessToken, setVkAccessToken] = useState('')
   const [vkCredentialsRef, setVkCredentialsRef] = useState('')
@@ -72,6 +74,18 @@ export default function AddChannel() {
   const [linkedinCredentialsRef, setLinkedinCredentialsRef] = useState('')
   const [linkedinOrganizations, setLinkedinOrganizations] = useState([])
   const hasValidatedAccess = platform === 'linkedin' ? validatedWrite : validatedRead
+  const telegramBotLink = telegramBotName ? `https://t.me/${telegramBotName}` : ''
+
+  useEffect(() => {
+    if (!isSelfhostMode() || !workspaceId) return
+    listInstallationSecrets(workspaceId)
+      .then((result) => {
+        const telegramBot = (result.items || []).find((item) => item.category === 'telegram_bot')
+        const name = String(telegramBot?.config?.bot_username || '').trim().replace(/^@/, '')
+        setTelegramBotName(name)
+      })
+      .catch(() => setTelegramBotName(''))
+  }, [workspaceId])
 
   const handleValidate = async () => {
     setError('')
@@ -344,8 +358,8 @@ export default function AddChannel() {
           {platform === 'telegram' && (
             <p className="section-copy">
               {t('addChannel.botAdminPrefix')}{' '}
-              {TELEGRAM_BOT_LINK ? (
-                <a href={TELEGRAM_BOT_LINK} target="_blank" rel="noopener noreferrer">{t('addChannel.openBot')}</a>
+              {telegramBotLink ? (
+                <a href={telegramBotLink} target="_blank" rel="noopener noreferrer">{t('addChannel.openBot')}</a>
               ) : (
                 t('addChannel.telegram.botNotConfigured')
               )}
