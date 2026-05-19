@@ -8,6 +8,8 @@ import { fetchTelegramWebLinkStatus, startTelegramWebLinkSession } from '../tele
 import { reachMetrikaGoal } from '../metrika'
 import { useI18n } from '../i18n'
 
+const DEFAULT_AUTH_PROVIDERS = ['telegram', 'vk', 'email']
+
 function AuthProviderLogo({ provider }) {
   if (provider === 'telegram') {
     return (
@@ -65,7 +67,9 @@ export default function Landing() {
   const [authProviders, setAuthProviders] = useState(null)
 
   const providerEnabled = (providerId) => {
-    if (!Array.isArray(authProviders)) return ['telegram', 'vk', 'email'].includes(providerId)
+    if (!Array.isArray(authProviders) || authProviders.length === 0) {
+      return DEFAULT_AUTH_PROVIDERS.includes(providerId)
+    }
     return authProviders.some((provider) => provider?.id === providerId)
   }
 

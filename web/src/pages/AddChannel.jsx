@@ -29,6 +29,8 @@ const PLATFORMS = [
   { id: 'postbridge', label: 'Postbridge' },
 ]
 
+const DEFAULT_TARGET_PLATFORMS = new Set(['telegram', 'max', 'vk'])
+
 const PLACEHOLDERS = {
   telegram: 'https://t.me/c/1234567890 or -1001234567890',
   max: 'https://web.max.ru/-71838... or -71838691591553',
@@ -50,7 +52,7 @@ export default function AddChannel() {
   const [platform, setPlatform] = useState('telegram')
   const [channelId, setChannelId] = useState('')
   const [title, setTitle] = useState('')
-  const [asTarget, setAsTarget] = useState(false)
+  const [asTarget, setAsTarget] = useState(DEFAULT_TARGET_PLATFORMS.has('telegram'))
   const [validatedRead, setValidatedRead] = useState(false)
   const [validatedWrite, setValidatedWrite] = useState(false)
   const [validatedDisplay, setValidatedDisplay] = useState(null)
@@ -218,6 +220,7 @@ export default function AddChannel() {
     setValidatedWrite(false)
     setValidatedDisplay(null)
     setError('')
+    setAsTarget(DEFAULT_TARGET_PLATFORMS.has(newPlatform))
     if (newPlatform === 'postbridge' && workspaceId) {
       setChannelId(workspaceId)
       setAsTarget(false)
@@ -319,7 +322,11 @@ export default function AddChannel() {
         createPayload.credentials_ref = linkedinCredentialsRef
       }
       await createChannelRegistryItem(workspaceId, createPayload)
-      navigate(`/workspaces/${workspaceId}/channels?success=channel_added`)
+      if (platform === 'postbridge') {
+        navigate(`/workspaces/${workspaceId}/channels?success=channel_added`)
+      } else {
+        navigate(`/workspaces/${workspaceId}/migrate?success=channel_added`)
+      }
     } catch (e) {
       setError(e.message)
     } finally {
