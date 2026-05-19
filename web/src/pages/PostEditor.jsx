@@ -1999,9 +1999,13 @@ export default function PostEditor() {
                 </p>
               )}
               {!platformPreviewsLoading && !platformPreviewsError && platformPreviews.length === 0 && (
-                <p className="muted post-editor-hint">
-                  {t('postEditor.bridgePreview.noBridges')}
-                </p>
+                <div className="post-editor-review-gate">
+                  <strong>{t('postEditor.bridgePreview.noBridgesTitle')}</strong>
+                  <p>{t('postEditor.bridgePreview.noBridges')}</p>
+                  <Link to={`/workspaces/${workspaceId}/channels`} className="btn btn-secondary btn-small">
+                    {t('postEditor.bridgePreview.openChannels')}
+                  </Link>
+                </div>
               )}
               {platformPreviews.map((item) => {
                 const statusText = bridgeAdaptationStatusText(item, t)

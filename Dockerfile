@@ -1,4 +1,4 @@
-FROM node:24-slim AS web-build
+FROM node:26-slim AS web-build
 
 WORKDIR /web
 COPY web/package*.json /web/
@@ -18,7 +18,7 @@ ENV VITE_MAX_BOT_URL=${VITE_MAX_BOT_URL}
 ENV VITE_BILLING_SUPPORT_EMAIL=${VITE_BILLING_SUPPORT_EMAIL}
 RUN npm run build
 
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
