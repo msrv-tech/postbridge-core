@@ -5,6 +5,11 @@ import { LanguageSelect, useI18n } from '../i18n'
 
 const brandMarkSrc = `${import.meta.env.BASE_URL}postbridge-mark.svg`
 
+const publicCaseLinks = [
+  { to: '/cases/ai-telegram-posts', labelKey: 'public.nav.cases.aiTelegramPosts' },
+  { to: '/cases/telegram-to-max', labelKey: 'public.nav.cases.telegramToMax' },
+]
+
 export default function PublicLayout({ children, compact = false }) {
   const { t } = useI18n()
   const selfhost = isSelfhostMode()
@@ -19,7 +24,16 @@ export default function PublicLayout({ children, compact = false }) {
           </Link>
           <nav className="public-nav" aria-label={t('public.nav.aria')}>
             {!selfhost && <Link to="/news">{t('common.news')}</Link>}
-            <Link to="/cases/telegram-to-max">{t('common.cases')}</Link>
+            <details className="public-nav-menu">
+              <summary>{t('common.cases')}</summary>
+              <div className="public-nav-menu-list">
+                {publicCaseLinks.map((item) => (
+                  <Link to={item.to} key={item.to}>
+                    {t(item.labelKey)}
+                  </Link>
+                ))}
+              </div>
+            </details>
             <Link to="/agents/help">{t('common.faq')}</Link>
             {!selfhost && <Link to="/pricing">{t('common.pricing')}</Link>}
             <LanguageSelect compact />

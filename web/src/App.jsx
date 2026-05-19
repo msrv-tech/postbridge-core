@@ -37,6 +37,7 @@ const AgentFaq = lazy(() => import('./pages/AgentFaq'))
 const AgentOps = lazy(() => import('./pages/AgentOps'))
 const WorkspaceSettings = lazy(() => import('./pages/WorkspaceSettings'))
 const SettingsRedirect = lazy(() => import('./pages/SettingsRedirect'))
+const SelfhostSetup = lazy(() => import('./pages/SelfhostSetup'))
 
 const CHUNK_RELOAD_STORAGE_KEY = 'postbridge.chunk-reload-attempted'
 
@@ -93,6 +94,7 @@ class AppErrorBoundary extends Component {
 function HomeRoute() {
   const { user, loading } = useAuth();
   if (loading) return <LoadingSkeleton />;
+  if (!user && isSelfhostMode()) return <Navigate to="/setup" replace />;
   if (!user) return <Home />;
   return <Navigate to={workspaceEntryPath(user)} replace />;
 }
@@ -173,6 +175,7 @@ export default function App() {
       <Suspense fallback={<LoadingSkeleton />}>
         <Routes>
           <Route path="/" element={<HomeRoute />} />
+          <Route path="/setup" element={<SelfhostSetup />} />
           <Route path="/home" element={<Home />} />
           <Route path="/news" element={isSelfhostMode() ? <Navigate to="/" replace /> : <News />} />
           <Route path="/news/:slug" element={isSelfhostMode() ? <Navigate to="/" replace /> : <NewsDetail />} />
@@ -180,9 +183,11 @@ export default function App() {
           <Route path="/agents/help" element={<AgentFaq publicView />} />
           <Route path="/pricing" element={isSelfhostMode() ? <Navigate to="/" replace /> : <Pricing />} />
           <Route path="/login" element={
-            <GuestRoute>
-              <Landing />
-            </GuestRoute>
+            isSelfhostMode() ? <SelfhostSetup /> : (
+              <GuestRoute>
+                <Landing />
+              </GuestRoute>
+            )
           } />
           <Route path="/settings" element={
             <ProtectedRoute>

@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
+import time
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
+import httpx
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
@@ -45,16 +51,22 @@ from postbridge.api.agent_internal import (
     run_service_agent_task,
     upsert_service_agent_policy,
 )
+from postbridge.ai.client import HttpAiGatewayClient
 from postbridge.ai.factory import get_ai_gateway_client
 from postbridge.config import get_settings
 from postbridge.db import BatchImportFetchedPostOrm, BatchImportRunOrm, get_db_session
-from postbridge.infrastructure.crypto.credentials import encrypt_credential_secret
+from postbridge.infrastructure.crypto.credentials import (
+    decrypt_credential_secret,
+    encrypt_credential_secret,
+    get_fernet_for_credentials,
+)
 from postbridge.integrations.registry import get_platform_capabilities
 from postbridge.models.domain import (
     BridgeOrm,
     ChannelCredentialOrm,
     ChannelOrm,
     ContentItemOrm,
+    InstallationSecretOrm,
     MediaGenerationJobOrm,
     PublicationPlanOrm,
     PublicationTargetOrm,
@@ -83,18 +95,218 @@ from postbridge.services.postbridge_workspace_content import (
     update_postbridge_content_item,
 )
 from postbridge.storage.batch_import_run_store import BatchImportRunStore
+from postbridge.versioning import build_release_update_command, is_newer_version, normalize_version_tag
 from postbridge.workers.media_generation_tasks import process_media_generation_job_task
 from postbridge.workers.tasks import process_batch_import_run_task, process_publication_target_task
 
-router = APIRouter(prefix="/api/app")
-
 LOCAL_ADMIN_USER_ID = "local-admin"
+LOCAL_ADMIN_SECRET_CATEGORY = "local_admin"
 BRIDGE_MODES = frozenset({"live_sync", "migration"})
 BRIDGE_STATUSES = frozenset({"active", "paused", "error"})
+INSTALLATION_SECRET_CATEGORIES = frozenset(
+    {
+        "ai_gateway",
+        "telegram_bot",
+        "telegram_import",
+        "media_storage",
+        "max",
+        "vk",
+        "linkedin",
+    }
+)
+INSTALLATION_SECRET_LABELS = {
+    "ai_gateway": "AI Gateway",
+    "telegram_bot": "Telegram Bot",
+    "telegram_import": "Telegram Import",
+    "media_storage": "Media Storage",
+    "max": "MAX",
+    "vk": "VK",
+    "linkedin": "LinkedIn",
+}
+
+AUTH_EXEMPT_PREFIXES = (
+    "/api/app/auth/",
+    "/api/app/gitsell-device/",
+)
+AUTH_EXEMPT_PATHS = {
+    "/api/app/runtime-config",
+    "/api/app/session",
+    "/api/app/bootstrap",
+    "/api/app/version-check",
+    "/api/app/news",
+}
+
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(data: str) -> bytes:
+    padding = "=" * (-len(data) % 4)
+    return base64.urlsafe_b64decode((data + padding).encode("ascii"))
+
+
+def _local_auth_secret() -> bytes:
+    settings = get_settings()
+    raw = settings.core_service_token or settings.credentials_encryption_key or ""
+    if not raw.strip():
+        raise HTTPException(status_code=503, detail="local auth secret is not configured")
+    return raw.encode("utf-8")
+
+
+def _hash_password(password: str, *, salt: str | None = None) -> str:
+    salt_hex = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        bytes.fromhex(salt_hex),
+        260_000,
+    ).hex()
+    return f"pbkdf2_sha256$260000${salt_hex}${digest}"
+
+
+def _verify_password(password: str, stored: str) -> bool:
+    try:
+        algorithm, iterations, salt_hex, expected = stored.split("$", 3)
+        if algorithm != "pbkdf2_sha256":
+            return False
+        digest = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            bytes.fromhex(salt_hex),
+            int(iterations),
+        ).hex()
+        return hmac.compare_digest(digest, expected)
+    except Exception:
+        return False
+
+
+def _make_local_session_token(username: str) -> str:
+    exp = int(time.time()) + 30 * 24 * 60 * 60
+    payload = _b64url(json.dumps({"sub": LOCAL_ADMIN_USER_ID, "username": username, "exp": exp}, separators=(",", ":")).encode("utf-8"))
+    sig = _b64url(hmac.new(_local_auth_secret(), payload.encode("ascii"), hashlib.sha256).digest())
+    return f"{payload}.{sig}"
+
+
+def _verify_local_session_token(token: str) -> dict[str, Any] | None:
+    if "." not in token:
+        return None
+    payload, sig = token.rsplit(".", 1)
+    expected = _b64url(hmac.new(_local_auth_secret(), payload.encode("ascii"), hashlib.sha256).digest())
+    if not hmac.compare_digest(sig, expected):
+        return None
+    try:
+        data = json.loads(_b64url_decode(payload))
+    except Exception:
+        return None
+    if data.get("sub") != LOCAL_ADMIN_USER_ID or int(data.get("exp") or 0) < int(time.time()):
+        return None
+    return data
+
+
+def _require_bootstrap_crypto() -> None:
+    try:
+        get_fernet_for_credentials()
+        _local_auth_secret()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "CREDENTIALS_ENCRYPTION_KEY must be set to a valid Fernet key before self-host setup. "
+                "Run scripts/init_self_host_env.py or generate one with Fernet.generate_key()."
+            ),
+        ) from exc
+
+
+def _find_selfhost_tenant_for_auth(session: Session) -> TenantOrm | None:
+    settings = get_settings()
+    row = session.get(TenantOrm, settings.postbridge_selfhost_tenant_id)
+    if row is not None:
+        return row
+    count = int(session.scalar(select(func.count()).select_from(TenantOrm)) or 0)
+    if count == 1:
+        return session.scalar(select(TenantOrm).limit(1))
+    return None
+
+
+def _local_admin_secret_row(session: Session, tenant_id: str) -> InstallationSecretOrm | None:
+    return session.scalar(
+        select(InstallationSecretOrm).where(
+            InstallationSecretOrm.tenant_id == tenant_id,
+            InstallationSecretOrm.category == LOCAL_ADMIN_SECRET_CATEGORY,
+        )
+    )
+
+
+def _decode_local_admin_secret(row: InstallationSecretOrm | None) -> dict[str, Any]:
+    if row is None:
+        return {}
+    raw = decrypt_credential_secret(row.encrypted_secret)
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _is_auth_exempt(path: str) -> bool:
+    is_news_path = path == "/api/app/news" or bool(re.fullmatch(r"/api/app/news/[^/]+", path))
+    return (
+        path in AUTH_EXEMPT_PATHS
+        or is_news_path
+        or any(path.startswith(prefix) for prefix in AUTH_EXEMPT_PREFIXES)
+    )
+
+
+def require_selfhost_app_auth(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    session: Session = Depends(get_db_session),
+) -> None:
+    settings = get_settings()
+    if settings.postbridge_app_mode != "selfhost" or _is_auth_exempt(request.url.path):
+        return
+    if settings.app_env == "test" and os.getenv("POSTBRIDGE_TEST_REQUIRE_AUTH") != "1":
+        return
+    tenant = _find_selfhost_tenant_for_auth(session)
+    if tenant is None:
+        raise HTTPException(status_code=409, detail="self-host tenant is not bootstrapped")
+    if _local_admin_secret_row(session, tenant.id) is None:
+        raise HTTPException(status_code=403, detail="self-host admin is not configured")
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not token.strip() or _verify_local_session_token(token.strip()) is None:
+        raise HTTPException(status_code=401, detail="authentication required")
+
+
+public_router = APIRouter(prefix="/api/app")
+router = APIRouter(prefix="/api/app", dependencies=[Depends(require_selfhost_app_auth)])
 
 
 class BootstrapRequest(BaseModel):
     tenant_name: str | None = Field(default="Postbridge Self-host", max_length=256)
+    admin_username: str = Field(default="admin", min_length=1, max_length=128)
+    admin_password: str | None = Field(default=None, min_length=8, max_length=512)
+    current_admin_password: str | None = Field(default=None, min_length=8, max_length=512)
+    locale: str | None = Field(default=None, max_length=16)
+    installation_secrets: dict[str, "InstallationSecretUpsertRequest"] | None = None
+
+
+class LocalLoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=512)
+
+
+class GitsellDeviceStartRequest(BaseModel):
+    locale: str = Field(default="en", min_length=2, max_length=16)
+    instance_id: str = Field(min_length=8, max_length=128)
+    instance_label: str | None = Field(default="Postbridge Self-host", max_length=128)
+
+
+class GitsellDevicePollRequest(BaseModel):
+    locale: str = Field(default="en", min_length=2, max_length=16)
+    device_code: str = Field(min_length=8, max_length=512)
 
 
 class ChannelCreateRequest(BaseModel):
@@ -115,6 +327,12 @@ class ChannelCredentialUpsertRequest(BaseModel):
     auth_type: str = Field(default="api_key", min_length=1, max_length=32)
     secret: dict[str, Any] | None = None
     status: str = Field(default="active", min_length=1, max_length=32)
+
+
+class InstallationSecretUpsertRequest(BaseModel):
+    secret: dict[str, Any] | None = None
+    config: dict[str, Any] | None = None
+    status: str = Field(default="configured", min_length=1, max_length=32)
 
 
 class ChannelValidateRequest(BaseModel):
@@ -371,10 +589,11 @@ def _tenant_public_dict(row: TenantOrm) -> dict[str, Any]:
     }
 
 
-def _local_admin_public_dict() -> dict[str, Any]:
+def _local_admin_public_dict(username: str = "admin") -> dict[str, Any]:
     return {
         "id": LOCAL_ADMIN_USER_ID,
-        "display_name": "Local Admin",
+        "display_name": username or "admin",
+        "username": username or "admin",
         "role": "admin",
     }
 
@@ -441,6 +660,262 @@ def _credential_public_dict(row: ChannelCredentialOrm) -> dict[str, Any]:
         "created_at": row.created_at.isoformat(),
         "updated_at": row.updated_at.isoformat(),
     }
+
+
+def _installation_secret_public_dict(row: InstallationSecretOrm) -> dict[str, Any]:
+    return {
+        "category": row.category,
+        "label": INSTALLATION_SECRET_LABELS.get(row.category, row.category),
+        "status": row.status,
+        "configured": bool((row.encrypted_secret or "").strip()),
+        "config": _json_loads_or_empty(row.config_json),
+        "created_at": row.created_at.isoformat(),
+        "updated_at": row.updated_at.isoformat(),
+    }
+
+
+def _empty_installation_secret_public_dict(category: str) -> dict[str, Any]:
+    return {
+        "category": category,
+        "label": INSTALLATION_SECRET_LABELS.get(category, category),
+        "status": "missing",
+        "configured": False,
+        "config": {},
+        "created_at": None,
+        "updated_at": None,
+    }
+
+
+def _gitsell_origin_for_locale(locale: str) -> str:
+    normalized = (locale or "").strip().lower()
+    return "https://gitsell.ru" if normalized.startswith("ru") else "https://gitsell.tech"
+
+
+def _gitsell_gateway_config(locale: str) -> dict[str, str]:
+    settings = get_settings()
+    origin = _gitsell_origin_for_locale(locale)
+    return {
+        "origin": origin,
+        "base_url": f"{origin}/api/v1",
+        "default_model": settings.ai_gateway_default_model or settings.agent_llm_default_model or "gpt-5.4-mini",
+        "image_model": settings.ai_image_generation_model or "gpt-image-2",
+        "image_size": settings.ai_image_generation_size or "1536x1024",
+    }
+
+
+def _gitsell_error_message(response: httpx.Response) -> str:
+    try:
+        data = response.json()
+    except ValueError:
+        return response.text[:300] or f"HTTP {response.status_code}"
+    if isinstance(data, dict):
+        return str(
+            data.get("error_description")
+            or data.get("detail")
+            or data.get("message")
+            or data.get("error")
+            or f"HTTP {response.status_code}"
+        )
+    return f"HTTP {response.status_code}"
+
+
+def _welcome_post_locale(locale: str | None) -> str:
+    normalized = (locale or "").strip().lower()
+    if normalized.startswith("ru"):
+        return "ru"
+    return "en"
+
+
+def _welcome_post_payload(locale: str | None) -> dict[str, Any]:
+    if _welcome_post_locale(locale) == "ru":
+        return {
+            "title": "\u0414\u043e\u0431\u0440\u043e \u043f\u043e\u0436\u0430\u043b\u043e\u0432\u0430\u0442\u044c \u0432 Postbridge",
+            "summary": "\u0421\u0442\u0430\u0440\u0442\u043e\u0432\u044b\u0439 \u043f\u043e\u0441\u0442 \u0434\u043b\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0438 self-host \u0440\u0430\u0431\u043e\u0447\u0435\u0433\u043e \u043f\u0440\u043e\u0441\u0442\u0440\u0430\u043d\u0441\u0442\u0432\u0430.",
+            "content_md": "\n".join(
+                [
+                    "# \u0414\u043e\u0431\u0440\u043e \u043f\u043e\u0436\u0430\u043b\u043e\u0432\u0430\u0442\u044c \u0432 Postbridge",
+                    "",
+                    "\u042d\u0442\u043e \u043f\u0435\u0440\u0432\u044b\u0439 \u043f\u043e\u0441\u0442 \u0432 \u0432\u0430\u0448\u0435\u043c self-host workspace. \u0415\u0433\u043e \u043c\u043e\u0436\u043d\u043e \u0438\u0437\u043c\u0435\u043d\u0438\u0442\u044c, \u0430\u0434\u0430\u043f\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0447\u0435\u0440\u0435\u0437 \u0418\u0418 \u0438 \u043e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0432 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0451\u043d\u043d\u044b\u0435 \u043a\u0430\u043d\u0430\u043b\u044b.",
+                    "",
+                    "\u0427\u0442\u043e \u0434\u0430\u043b\u044c\u0448\u0435:",
+                    "",
+                    "1. \u0414\u043e\u0431\u0430\u0432\u044c\u0442\u0435 \u043a\u0430\u043d\u0430\u043b-\u043f\u0440\u0438\u0451\u043c\u043d\u0438\u043a: RSS, Telegram, VK, MAX \u0438\u043b\u0438 \u0434\u0440\u0443\u0433\u0443\u044e \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0443.",
+                    "2. \u0421\u043e\u0437\u0434\u0430\u0439\u0442\u0435 \u043c\u043e\u0441\u0442 \u0438\u0437 Postbridge Source \u0432 \u0446\u0435\u043b\u0435\u0432\u043e\u0439 \u043a\u0430\u043d\u0430\u043b.",
+                    "3. \u041e\u0442\u0440\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u0443\u0439\u0442\u0435 \u044d\u0442\u043e\u0442 \u043f\u043e\u0441\u0442 \u0438\u043b\u0438 \u0441\u043e\u0437\u0434\u0430\u0439\u0442\u0435 \u043d\u043e\u0432\u044b\u0439.",
+                ]
+            ),
+        }
+    return {
+        "title": "Welcome to Postbridge",
+        "summary": "A starter post for checking your self-host workspace.",
+        "content_md": "\n".join(
+            [
+                "# Welcome to Postbridge",
+                "",
+                "This is the first post in your self-host workspace. You can edit it, adapt it with AI, and send it to connected channels.",
+                "",
+                "Next steps:",
+                "",
+                "1. Add a target channel: RSS, Telegram, VK, MAX, or another platform.",
+                "2. Create a bridge from Postbridge Source to that target channel.",
+                "3. Edit this post or create a new one.",
+            ]
+        ),
+    }
+
+
+def _ensure_selfhost_welcome_content(
+    session: Session,
+    *,
+    tenant_id: str,
+    locale: str | None,
+) -> None:
+    source = session.scalar(
+        select(ChannelOrm)
+        .where(
+            ChannelOrm.tenant_id == tenant_id,
+            ChannelOrm.platform == "postbridge",
+            ChannelOrm.external_id == "postbridge-local",
+        )
+        .limit(1)
+    )
+    now = datetime.now(UTC)
+    if source is None:
+        source = ChannelOrm(
+            id=str(uuid4()),
+            tenant_id=tenant_id,
+            platform="postbridge",
+            kind="source",
+            title="Postbridge Source",
+            external_id="postbridge-local",
+            status="connected",
+            config_json=_json_dumps_or_none({}),
+            capabilities_json=_json_dumps_or_none(
+                {"can_read": True, "can_write": False, "live_sync_source_supported": True}
+            ),
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(source)
+        session.flush()
+    existing_welcome_id = session.scalar(
+        select(ContentItemOrm.id)
+        .where(
+            ContentItemOrm.tenant_id == tenant_id,
+            ContentItemOrm.source_type == "postbridge",
+            ContentItemOrm.body_structured_json.contains('"welcome"'),
+        )
+        .limit(1)
+    )
+    if existing_welcome_id:
+        return
+    payload = _welcome_post_payload(locale)
+    row = create_postbridge_content_item(
+        session,
+        tenant_id=tenant_id,
+        author_user_id=LOCAL_ADMIN_USER_ID,
+        content_md=payload["content_md"],
+        content_plain=None,
+        media_url=None,
+        media_urls=None,
+        title=payload["title"],
+        summary=payload["summary"],
+        link_url=None,
+        cta=None,
+        tags=["welcome"],
+        author="Postbridge",
+        cover_image_url=None,
+        status="draft",
+        live_sync_source_core_channel_id=None,
+    )
+    row.language = _welcome_post_locale(locale)
+    session.add(row)
+
+
+def _require_installation_secret_category(category: str) -> str:
+    normalized = category.strip().lower().replace("-", "_")
+    if normalized not in INSTALLATION_SECRET_CATEGORIES:
+        raise HTTPException(status_code=404, detail="installation secret category not found")
+    return normalized
+
+
+def _installation_secret_payload(
+    session: Session,
+    *,
+    tenant_id: str,
+    category: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    row = session.scalar(
+        select(InstallationSecretOrm).where(
+            InstallationSecretOrm.tenant_id == tenant_id,
+            InstallationSecretOrm.category == category,
+        )
+    )
+    if row is None:
+        return {}, {}
+    config = _json_loads_or_empty(row.config_json)
+    secret: dict[str, Any] = {}
+    if not (row.encrypted_secret or "").strip():
+        return config, secret
+    raw_secret = decrypt_credential_secret(row.encrypted_secret)
+    if raw_secret:
+        try:
+            parsed = json.loads(raw_secret)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{category} installation secret payload is not valid JSON",
+            ) from exc
+        if isinstance(parsed, dict):
+            secret = parsed
+    return config, secret
+
+
+def _has_installation_secret_payload(secret: dict[str, Any] | None) -> bool:
+    if not secret:
+        return False
+    return any(value is not None and str(value).strip() for value in secret.values())
+
+
+def _upsert_installation_secret_row(
+    session: Session,
+    *,
+    tenant_id: str,
+    category: str,
+    secret: dict[str, Any] | None,
+    config: dict[str, Any] | None = None,
+    status: str = "configured",
+) -> InstallationSecretOrm:
+    now = datetime.now(UTC)
+    row = session.scalar(
+        select(InstallationSecretOrm).where(
+            InstallationSecretOrm.tenant_id == tenant_id,
+            InstallationSecretOrm.category == category,
+        )
+    )
+    encrypted_secret = (
+        encrypt_credential_secret(_json_dumps_or_none(secret))
+        if _has_installation_secret_payload(secret)
+        else None
+    )
+    if row is None:
+        row = InstallationSecretOrm(
+            id=str(uuid4()),
+            tenant_id=tenant_id,
+            category=category,
+            status=status.strip().lower(),
+            encrypted_secret=encrypted_secret,
+            config_json=_json_dumps_or_none(config or {}),
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(row)
+    else:
+        row.status = status.strip().lower()
+        row.encrypted_secret = encrypted_secret
+        row.config_json = _json_dumps_or_none(config or {})
+        row.updated_at = now
+    return row
 
 
 def _require_selfhost_channel(session: Session, channel_id: str) -> tuple[TenantOrm, ChannelOrm]:
@@ -848,9 +1323,56 @@ def _locale_locked() -> bool:
     return raw_env_locale == "ru"
 
 
-def _require_ai_enabled() -> None:
-    if not get_settings().ai_gateway_enabled:
+def _release_latest_api_url(release_source: str) -> str | None:
+    value = (release_source or "").strip()
+    if not value:
+        return None
+    parsed = urlparse(value)
+    if parsed.scheme in {"http", "https"}:
+        if parsed.netloc == "api.github.com" and parsed.path.endswith("/releases/latest"):
+            return value
+        if parsed.netloc in {"github.com", "www.github.com"}:
+            parts = [part for part in parsed.path.strip("/").split("/") if part]
+            if len(parts) >= 2:
+                return f"https://api.github.com/repos/{parts[0]}/{parts[1]}/releases/latest"
+        return None
+    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value):
+        owner, repo = value.split("/", 1)
+        return f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+    return None
+
+
+def _require_ai_enabled(session: Session, tenant_id: str) -> None:
+    if get_settings().ai_gateway_enabled:
+        return
+    config, secret = _installation_secret_payload(
+        session,
+        tenant_id=tenant_id,
+        category="ai_gateway",
+    )
+    if config.get("base_url") or secret.get("base_url"):
+        return
+    raise HTTPException(status_code=422, detail="AI gateway is disabled")
+
+
+def _ai_gateway_client_for_tenant(session: Session, tenant_id: str):
+    settings = get_settings()
+    if settings.ai_gateway_enabled:
+        return get_ai_gateway_client(settings)
+    config, secret = _installation_secret_payload(
+        session,
+        tenant_id=tenant_id,
+        category="ai_gateway",
+    )
+    base_url = str(config.get("base_url") or secret.get("base_url") or "").strip()
+    if not base_url:
         raise HTTPException(status_code=422, detail="AI gateway is disabled")
+    return HttpAiGatewayClient(
+        base_url=base_url,
+        api_key=str(secret.get("api_key") or "").strip() or None,
+        timeout_seconds=float(settings.ai_gateway_timeout_seconds),
+        default_model=str(config.get("default_model") or secret.get("default_model") or "").strip() or None,
+    )
 
 
 def _effective_ai_response_language(explicit: str | None) -> str | None:
@@ -1163,6 +1685,143 @@ def update_workspace_settings(
     return _workspace_settings_public_dict(tenant)
 
 
+@router.get("/installation-secrets", include_in_schema=False)
+def list_installation_secrets(session: Session = Depends(get_db_session)) -> dict[str, Any]:
+    """Return install-wide integration secret metadata without plaintext values."""
+    tenant = _require_selfhost_tenant(session)
+    rows = session.scalars(
+        select(InstallationSecretOrm).where(InstallationSecretOrm.tenant_id == tenant.id)
+    ).all()
+    by_category = {row.category: row for row in rows}
+    return {
+        "items": [
+            _installation_secret_public_dict(by_category[category])
+            if category in by_category
+            else _empty_installation_secret_public_dict(category)
+            for category in sorted(INSTALLATION_SECRET_CATEGORIES)
+        ]
+    }
+
+
+@router.put("/installation-secrets/{category}", include_in_schema=False)
+def upsert_installation_secret(
+    category: str,
+    body: InstallationSecretUpsertRequest,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Store one install-wide integration secret encrypted at rest."""
+    tenant = _require_selfhost_tenant(session)
+    normalized = _require_installation_secret_category(category)
+    row = _upsert_installation_secret_row(
+        session,
+        tenant_id=tenant.id,
+        category=normalized,
+        secret=body.secret,
+        config=body.config,
+        status=body.status,
+    )
+    session.commit()
+    session.refresh(row)
+    return _installation_secret_public_dict(row)
+
+
+@router.delete("/installation-secrets/{category}", status_code=204, include_in_schema=False)
+def delete_installation_secret(category: str, session: Session = Depends(get_db_session)) -> Response:
+    """Remove one install-wide integration secret."""
+    tenant = _require_selfhost_tenant(session)
+    normalized = _require_installation_secret_category(category)
+    row = session.scalar(
+        select(InstallationSecretOrm).where(
+            InstallationSecretOrm.tenant_id == tenant.id,
+            InstallationSecretOrm.category == normalized,
+        )
+    )
+    if row is not None:
+        session.delete(row)
+        session.commit()
+    return Response(status_code=204)
+
+
+@router.post("/gitsell-device/start", include_in_schema=False)
+def start_gitsell_device_flow(body: GitsellDeviceStartRequest) -> dict[str, Any]:
+    """Start GitSell OAuth device flow for self-host AI Gateway onboarding."""
+    gateway = _gitsell_gateway_config(body.locale)
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            response = client.post(
+                f"{gateway['origin']}/api/oauth/device_authorization",
+                json={
+                    "client_id": "1c-agent",
+                    "scope": "agent:read agent:write profile:read",
+                    "instance_id": body.instance_id,
+                    "instance_label": body.instance_label or "Postbridge Self-host",
+                },
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"GitSell device flow request failed: {exc}") from exc
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail=_gitsell_error_message(response))
+    data = response.json()
+    return {
+        "status": "pending",
+        "device_code": data.get("device_code"),
+        "user_code": data.get("user_code"),
+        "verification_uri": data.get("verification_uri"),
+        "verification_uri_complete": data.get("verification_uri_complete"),
+        "expires_in": data.get("expires_in"),
+        "interval": data.get("interval") or 3,
+        "ai_gateway": {
+            "base_url": gateway["base_url"],
+            "default_model": gateway["default_model"],
+            "image_model": gateway["image_model"],
+            "image_size": gateway["image_size"],
+        },
+    }
+
+
+@router.post("/gitsell-device/poll", include_in_schema=False)
+def poll_gitsell_device_flow(body: GitsellDevicePollRequest) -> dict[str, Any]:
+    """Poll GitSell OAuth device flow and return the AI Proxy token when approved."""
+    gateway = _gitsell_gateway_config(body.locale)
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            response = client.post(
+                f"{gateway['origin']}/api/oauth/token",
+                data={
+                    "client_id": "1c-agent",
+                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                    "device_code": body.device_code,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"GitSell token request failed: {exc}") from exc
+    data = response.json()
+    if response.status_code == 400 and isinstance(data, dict):
+        error = data.get("error")
+        if error in {"authorization_pending", "slow_down"}:
+            return {"status": "pending", "error": error, "interval": 5 if error == "slow_down" else 3}
+        if error in {"expired_token", "access_denied"}:
+            return {"status": error}
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail=_gitsell_error_message(response))
+    ai_proxy_token = data.get("ai_proxy_token") if isinstance(data, dict) else None
+    if not ai_proxy_token:
+        raise HTTPException(status_code=502, detail="GitSell did not return an AI Proxy token")
+    return {
+        "status": "approved",
+        "ai_gateway": {
+            "base_url": gateway["base_url"],
+            "default_model": gateway["default_model"],
+            "image_model": gateway["image_model"],
+            "image_size": gateway["image_size"],
+            "api_key": ai_proxy_token,
+            "token_name": data.get("ai_proxy_token_name"),
+            "token_id": data.get("ai_proxy_token_id"),
+        },
+    }
+
+
 @router.get("/runtime-config", include_in_schema=False)
 def get_app_runtime_config() -> dict[str, Any]:
     """Return non-secret runtime config for the browser app."""
@@ -1173,6 +1832,10 @@ def get_app_runtime_config() -> dict[str, Any]:
         "app_mode": app_mode,
         "api": {
             "base_path": "/api/app",
+        },
+        "version": {
+            "current": normalize_version_tag(settings.postbridge_version),
+            "release_repository": settings.postbridge_release_repository,
         },
         "i18n": {
             "default_locale": _default_locale(),
@@ -1203,6 +1866,63 @@ def get_app_runtime_config() -> dict[str, Any]:
             "reviewQueue": {"enabled": True},
         },
     }
+
+
+@router.get("/version-check", include_in_schema=False)
+def get_app_version_check() -> dict[str, Any]:
+    """Return the current Core version and the latest public release tag."""
+    settings = get_settings()
+    current = normalize_version_tag(settings.postbridge_version)
+    latest_api_url = _release_latest_api_url(settings.postbridge_release_repository)
+    response: dict[str, Any] = {
+        "current_version": current,
+        "latest_version": None,
+        "update_available": False,
+        "release_url": None,
+        "check_status": "unknown",
+        "update_command": None,
+    }
+    if latest_api_url is None:
+        response["check_status"] = "release_source_unavailable"
+        return response
+    try:
+        github_response = httpx.get(
+            latest_api_url,
+            timeout=5.0,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "postbridge-core-selfhost",
+            },
+        )
+    except httpx.HTTPError:
+        response["check_status"] = "unreachable"
+        return response
+    if github_response.status_code == 404:
+        response["check_status"] = "not_found"
+        return response
+    if github_response.status_code >= 400:
+        response["check_status"] = "error"
+        return response
+    try:
+        data = github_response.json()
+    except ValueError:
+        response["check_status"] = "error"
+        return response
+    latest_tag = data.get("tag_name") if isinstance(data, dict) else None
+    if not latest_tag:
+        response["check_status"] = "error"
+        return response
+    latest = normalize_version_tag(latest_tag)
+    response["latest_version"] = latest
+    response["release_url"] = data.get("html_url")
+    response["update_available"] = is_newer_version(latest, current)
+    response["check_status"] = "ok"
+    if response["update_available"]:
+        response["update_command"] = build_release_update_command(
+            image=settings.postbridge_container_image,
+            version=latest,
+        )
+    return response
 
 
 @router.get("/auth/providers", include_in_schema=False)
@@ -1335,7 +2055,10 @@ def handle_disabled_agent_cleanup(session: Session = Depends(get_db_session)) ->
 
 
 @router.get("/session", include_in_schema=False)
-def get_app_session(session: Session = Depends(get_db_session)) -> dict[str, Any]:
+def get_app_session(
+    authorization: str | None = Header(default=None),
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
     """Return local browser session context for the shared frontend."""
     settings = get_settings()
     if settings.postbridge_app_mode != "selfhost":
@@ -1351,20 +2074,44 @@ def get_app_session(session: Session = Depends(get_db_session)) -> dict[str, Any
         return {
             "app_mode": "selfhost",
             "bootstrapped": False,
+            "setup_required": True,
             "authenticated": False,
             "user": None,
             "tenant": None,
         }
+    admin_row = _local_admin_secret_row(session, tenant.id)
+    if admin_row is None:
+        return {
+            "app_mode": "selfhost",
+            "bootstrapped": True,
+            "setup_required": True,
+            "authenticated": False,
+            "user": None,
+            "tenant": _tenant_public_dict(tenant),
+        }
+    scheme, _, token = (authorization or "").partition(" ")
+    token_payload = _verify_local_session_token(token.strip()) if scheme.lower() == "bearer" else None
+    if token_payload is None:
+        return {
+            "app_mode": "selfhost",
+            "bootstrapped": True,
+            "setup_required": False,
+            "authenticated": False,
+            "user": None,
+            "tenant": _tenant_public_dict(tenant),
+        }
+    admin = _decode_local_admin_secret(admin_row)
     return {
         "app_mode": "selfhost",
         "bootstrapped": True,
+        "setup_required": False,
         "authenticated": True,
-        "user": _local_admin_public_dict(),
+        "user": _local_admin_public_dict(str(admin.get("username") or token_payload.get("username") or "admin")),
         "tenant": _tenant_public_dict(tenant),
     }
 
 
-@router.post("/bootstrap", include_in_schema=False)
+@public_router.post("/bootstrap", include_in_schema=False)
 def bootstrap_app(
     body: BootstrapRequest,
     session: Session = Depends(get_db_session),
@@ -1379,20 +2126,103 @@ def bootstrap_app(
             "user": None,
             "tenant": None,
         }
+    _require_bootstrap_crypto()
     tenant = _selfhost_tenant(session)
+    admin_row = _local_admin_secret_row(session, tenant.id) if tenant is not None else None
+    if tenant is not None and admin_row is not None:
+        admin = _decode_local_admin_secret(admin_row)
+        username = str(admin.get("username") or "admin")
+        password_hash = str(admin.get("password_hash") or "")
+        login_password = body.current_admin_password or body.admin_password
+        authenticated = bool(login_password and _verify_password(login_password, password_hash))
+        return {
+            "app_mode": "selfhost",
+            "bootstrapped": True,
+            "setup_required": False,
+            "authenticated": authenticated,
+            "token": _make_local_session_token(username) if authenticated else None,
+            "user": _local_admin_public_dict(username) if authenticated else None,
+            "tenant": _tenant_public_dict(tenant),
+        }
     if tenant is None:
         tenant = TenantOrm(
             id=settings.postbridge_selfhost_tenant_id,
             name=body.tenant_name or "Postbridge Self-host",
         )
         session.add(tenant)
-        session.commit()
-        session.refresh(tenant)
+        session.flush()
+    admin_password = body.admin_password
+    if not admin_password:
+        if settings.app_env == "test":
+            admin_password = "postbridge-test-admin"
+        else:
+            raise HTTPException(status_code=422, detail="new admin password is required")
+    username = body.admin_username.strip()
+    _upsert_installation_secret_row(
+        session,
+        tenant_id=tenant.id,
+        category=LOCAL_ADMIN_SECRET_CATEGORY,
+        secret={
+            "username": username,
+            "password_hash": _hash_password(admin_password),
+        },
+        config={},
+        status="configured",
+    )
+    for category, payload in (body.installation_secrets or {}).items():
+        normalized = _require_installation_secret_category(category)
+        if not payload.secret and not payload.config:
+            continue
+        _upsert_installation_secret_row(
+            session,
+            tenant_id=tenant.id,
+            category=normalized,
+            secret=payload.secret,
+            config=payload.config,
+            status=payload.status,
+        )
+    session.commit()
+    session.refresh(tenant)
+    _ensure_selfhost_welcome_content(
+        session,
+        tenant_id=tenant.id,
+        locale=body.locale or settings.postbridge_default_locale,
+    )
+    session.commit()
+    session.refresh(tenant)
+    token = _make_local_session_token(username)
     return {
         "app_mode": "selfhost",
         "bootstrapped": True,
+        "setup_required": False,
         "authenticated": True,
-        "user": _local_admin_public_dict(),
+        "token": token,
+        "user": _local_admin_public_dict(username),
+        "tenant": _tenant_public_dict(tenant),
+    }
+
+
+@router.post("/auth/login", include_in_schema=False)
+def local_admin_login(
+    body: LocalLoginRequest,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Authenticate the local self-host admin."""
+    tenant = _selfhost_tenant(session)
+    if tenant is None:
+        raise HTTPException(status_code=409, detail="self-host tenant is not bootstrapped")
+    admin = _decode_local_admin_secret(_local_admin_secret_row(session, tenant.id))
+    username = str(admin.get("username") or "")
+    password_hash = str(admin.get("password_hash") or "")
+    if not username or not password_hash:
+        raise HTTPException(status_code=403, detail="self-host admin is not configured")
+    if body.username.strip() != username or not _verify_password(body.password, password_hash):
+        raise HTTPException(status_code=401, detail="invalid username or password")
+    token = _make_local_session_token(username)
+    return {
+        "ok": True,
+        "token": token,
+        "user": _local_admin_public_dict(username),
         "tenant": _tenant_public_dict(tenant),
     }
 
@@ -2109,7 +2939,7 @@ def generate_content_item(
 ) -> dict[str, Any]:
     """Generate a new self-host content item or refine an existing one."""
     tenant = _require_selfhost_tenant(session)
-    _require_ai_enabled()
+    _require_ai_enabled(session, tenant.id)
     if body.content_item_id:
         row = get_postbridge_content_item(
             session,
@@ -2119,7 +2949,7 @@ def generate_content_item(
         if row is None:
             raise HTTPException(status_code=404, detail="content item not found")
     correlation_id = getattr(request.state, "correlation_id", None) or "selfhost-app"
-    client = get_ai_gateway_client()
+    client = _ai_gateway_client_for_tenant(session, tenant.id)
     result = generate_and_plan(
         session,
         tenant_id=tenant.id,
@@ -2147,11 +2977,11 @@ def adapt_content_item(
 ) -> dict[str, Any]:
     """Adapt one self-host content item for a target channel."""
     tenant = _require_selfhost_tenant(session)
-    _require_ai_enabled()
+    _require_ai_enabled(session, tenant.id)
     row = get_postbridge_content_item(session, tenant_id=tenant.id, content_id=content_id)
     if row is None:
         raise HTTPException(status_code=404, detail="content item not found")
-    client = get_ai_gateway_client()
+    client = _ai_gateway_client_for_tenant(session, tenant.id)
     result = adapt_content_for_channel(
         session,
         tenant_id=tenant.id,
@@ -2181,11 +3011,11 @@ def translate_content_item(
 ) -> dict[str, Any]:
     """Translate one self-host content item for a target channel."""
     tenant = _require_selfhost_tenant(session)
-    _require_ai_enabled()
+    _require_ai_enabled(session, tenant.id)
     row = get_postbridge_content_item(session, tenant_id=tenant.id, content_id=content_id)
     if row is None:
         raise HTTPException(status_code=404, detail="content item not found")
-    client = get_ai_gateway_client()
+    client = _ai_gateway_client_for_tenant(session, tenant.id)
     result = translate_content_for_channel(
         session,
         tenant_id=tenant.id,
@@ -2504,9 +3334,8 @@ def create_media_generation_job(
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Queue one self-host media generation job."""
-    if not get_settings().ai_gateway_enabled:
-        raise HTTPException(status_code=422, detail="AI gateway is disabled")
     tenant = _require_selfhost_tenant(session)
+    _require_ai_enabled(session, tenant.id)
     correlation_id = getattr(request.state, "correlation_id", None) or "selfhost-app"
     if not any(
         (value or "").strip()

@@ -1,4 +1,9 @@
 export const caseLandings = {
+  'ai-telegram-posts': {
+    slug: 'ai-telegram-posts',
+    kind: 'aiTelegramPosts',
+    metrikaCase: 'ai_telegram_posts',
+  },
   'telegram-to-max': {
     slug: 'telegram-to-max',
     metrikaCase: 'telegram_to_max',
@@ -81,6 +86,9 @@ export function getCaseLanding(slug) {
 
 export function translateCaseLanding(landing, t) {
   if (!landing) return null
+  if (landing.kind === 'aiTelegramPosts') {
+    return landing
+  }
   return {
     ...landing,
     eyebrow: t(landing.eyebrowKey),

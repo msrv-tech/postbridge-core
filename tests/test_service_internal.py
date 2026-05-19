@@ -216,6 +216,7 @@ def test_generate_image_bytes_requests_url_and_parses_usage(monkeypatch: pytest.
     monkeypatch.setenv("AI_GATEWAY_API_KEY", "gt-test")
     monkeypatch.setenv("AI_IMAGE_GENERATION_MODEL", "gpt-image-2")
     monkeypatch.setenv("AI_GATEWAY_TIMEOUT_SECONDS", "90")
+    monkeypatch.setenv("AI_IMAGE_GENERATION_TIMEOUT_SECONDS", "90")
 
     captured: dict[str, object] = {}
 
@@ -414,8 +415,12 @@ def test_service_media_generation_job_queues_and_worker_completes(
         prompt: str,
         *,
         model: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        image_size: str | None = None,
         correlation_id: str | None = None,
     ) -> ImageGenerationResult:
+        _ = base_url, api_key, image_size
         assert "Async launch" in prompt
         assert model == "image-test-model"
         assert correlation_id is not None
@@ -525,6 +530,60 @@ def test_service_media_generation_job_records_queue_failure(
     body = r.json()
     assert body["status"] == "failed"
     assert body["error_code"] == "MEDIA_GENERATION_QUEUE_FAILED"
+
+
+def test_service_media_generation_worker_records_bad_installation_secret(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from postbridge.db import SESSION_LOCAL
+    from postbridge.models.domain import InstallationSecretOrm, MediaGenerationJobOrm
+    from postbridge.workers.media_generation_tasks import process_media_generation_job_task
+
+    monkeypatch.setenv("AI_GATEWAY_ENABLED", "0")
+    tid = str(uuid4())
+    h = _headers(tid)
+    client.post("/internal/service/tenants/ensure", json={"name": "W"}, headers=h)
+    job_id = str(uuid4())
+    session = SESSION_LOCAL()
+    try:
+        session.add(
+            InstallationSecretOrm(
+                id=str(uuid4()),
+                tenant_id=tid,
+                category="ai_gateway",
+                status="configured",
+                config_json='{"base_url": "https://gitsell.test/api/v1"}',
+                encrypted_secret="not-a-fernet-token",
+            )
+        )
+        session.add(
+            MediaGenerationJobOrm(
+                id=job_id,
+                tenant_id=tid,
+                requester_user_id="user-admin",
+                target="cover",
+                status="pending",
+                request_payload={"title": "Async launch"},
+                correlation_id=h["X-Correlation-Id"],
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    result = process_media_generation_job_task.run(job_id, h["X-Correlation-Id"])
+
+    assert result["status"] == "failed"
+    session = SESSION_LOCAL()
+    try:
+        job = session.get(MediaGenerationJobOrm, job_id)
+        assert job is not None
+        assert job.status == "failed"
+        assert job.error_code == "VALIDATION_INSTALLATION_SECRET_DECRYPT_FAILED"
+        assert job.error_payload["details"]["category"] == "ai_gateway"
+    finally:
+        session.close()
 
 
 def test_service_media_generate_requires_prompt_or_post_context(client: TestClient, monkeypatch: pytest.MonkeyPatch):

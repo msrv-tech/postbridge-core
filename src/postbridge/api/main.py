@@ -7,6 +7,7 @@ import sentry_sdk
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from postbridge.api.app_public import public_router as app_public_public_router
 from postbridge.api.app_public import router as app_public_router
 from postbridge.api.live_sync import router as live_sync_router
 from postbridge.api.publication_internal import router as publication_internal_router
@@ -38,6 +39,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="postbridge-core", version="0.1.0", lifespan=lifespan)
 setup_telegram_bot_webhook(app)
+app.include_router(app_public_public_router)
 app.include_router(app_public_router)
 app.include_router(live_sync_router)
 app.include_router(publication_internal_router)
@@ -180,7 +182,7 @@ def web_ui():
         title = _translate_message_key("web.core.title", default="Postbridge Core")
         body = _translate_message_key("web.core.not_found", default="Web UI not found")
         return HTMLResponse(f"<h1>{title}</h1><p>{body}</p>", status_code=404)
-    return FileResponse(web_dir / "index.html")
+    return FileResponse(web_dir / "index.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/web/{path:path}", include_in_schema=False)
@@ -192,7 +194,7 @@ def web_asset_or_route(path: str):
     full = (web_dir / path).resolve()
     if str(full).startswith(str(web_dir.resolve())) and full.is_file():
         return FileResponse(full)
-    return FileResponse(web_dir / "index.html")
+    return FileResponse(web_dir / "index.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/health")

@@ -9,10 +9,11 @@ from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from postbridge.api.main import app
 from postbridge.db import Base, BatchImportRunOrm, ENGINE, SESSION_LOCAL, init_db
-from postbridge.infrastructure.crypto.credentials import decrypt_credential_secret
+from postbridge.infrastructure.crypto.credentials import decrypt_credential_secret, encrypt_credential_secret
 from postbridge.models.domain import (
     AgentRunOrm,
     BridgeOrm,
@@ -21,6 +22,7 @@ from postbridge.models.domain import (
     ContentItemAiChatMessageOrm,
     ContentItemOrm,
     ContentCandidateOrm,
+    InstallationSecretOrm,
     MediaGenerationJobOrm,
     PublicationPlanOrm,
     PublicationTargetOrm,
@@ -40,6 +42,7 @@ def reset_db():
 def test_app_runtime_config_defaults_to_selfhost(monkeypatch):
     monkeypatch.delenv("POSTBRIDGE_APP_MODE", raising=False)
     monkeypatch.delenv("POSTBRIDGE_DEFAULT_LOCALE", raising=False)
+    monkeypatch.setenv("POSTBRIDGE_VERSION", "v0.1.2")
     client = TestClient(app)
 
     response = client.get("/api/app/runtime-config")
@@ -55,7 +58,60 @@ def test_app_runtime_config_defaults_to_selfhost(monkeypatch):
     assert body["features"]["managed_credentials"] == {"enabled": True, "mode": "core"}
     assert body["capabilities"]["managedCredentials"] == {"enabled": True, "mode": "core"}
     assert body["features"]["agent"]["enabled"] is True
+    assert body["version"]["current"] == "v0.1.2"
+    assert body["version"]["release_repository"] == "msrv-tech/postbridge-core"
     assert "core_service_token" not in str(body).lower()
+
+
+def test_app_version_check_returns_update_command(monkeypatch):
+    from postbridge.api import app_public
+
+    monkeypatch.setenv("POSTBRIDGE_VERSION", "v0.1.2")
+    monkeypatch.setenv("POSTBRIDGE_RELEASE_REPOSITORY", "https://github.com/msrv-tech/postbridge-core")
+    monkeypatch.setenv("POSTBRIDGE_CONTAINER_IMAGE", "ghcr.io/example/postbridge-core")
+    calls: list[str] = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "tag_name": "v0.1.3",
+                "html_url": "https://github.com/msrv-tech/postbridge-core/releases/tag/v0.1.3",
+            }
+
+    def fake_get(url, *args, **kwargs):
+        _ = args, kwargs
+        calls.append(url)
+        return FakeResponse()
+
+    monkeypatch.setattr(app_public.httpx, "get", fake_get)
+    client = TestClient(app)
+
+    response = client.get("/api/app/version-check")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["current_version"] == "v0.1.2"
+    assert body["latest_version"] == "v0.1.3"
+    assert body["update_available"] is True
+    assert "repository" not in body
+    assert calls == ["https://api.github.com/repos/msrv-tech/postbridge-core/releases/latest"]
+    assert "ghcr.io/example/postbridge-core:v0.1.3" in body["update_command"]
+    assert "docker compose" in body["update_command"]
+
+
+def test_app_version_check_hides_invalid_release_source(monkeypatch):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_RELEASE_REPOSITORY", "not a release source")
+    client = TestClient(app)
+
+    response = client.get("/api/app/version-check")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["check_status"] == "release_source_unavailable"
+    assert "repository" not in body
 
 
 def test_web_serves_selfhost_app_shell(monkeypatch):
@@ -105,6 +161,234 @@ def test_app_runtime_config_saas_mode(monkeypatch):
     assert body["features"]["managed_credentials"] == {"enabled": True, "mode": "bff"}
 
 
+def test_app_installation_secrets_encrypt_and_hide_plaintext(monkeypatch):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000044")
+    client = TestClient(app)
+    assert client.post("/api/app/bootstrap", json={"tenant_name": "Local"}).status_code == 200
+
+    response = client.put(
+        "/api/app/installation-secrets/ai-gateway",
+        json={
+            "secret": {"api_key": "sk-local-test"},
+            "config": {"base_url": "https://api.example.com/v1", "default_model": "gpt-test"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["category"] == "ai_gateway"
+    assert body["configured"] is True
+    assert body["config"] == {"base_url": "https://api.example.com/v1", "default_model": "gpt-test"}
+    assert "sk-local-test" not in json.dumps(body)
+
+    session = SESSION_LOCAL()
+    try:
+        row = session.scalar(
+            select(InstallationSecretOrm).where(InstallationSecretOrm.category == "ai_gateway")
+        )
+        assert row is not None
+        assert "sk-local-test" not in row.encrypted_secret
+        assert json.loads(decrypt_credential_secret(row.encrypted_secret)) == {"api_key": "sk-local-test"}
+    finally:
+        session.close()
+
+    listed = client.get("/api/app/installation-secrets")
+    assert listed.status_code == 200
+    assert "sk-local-test" not in json.dumps(listed.json())
+
+
+def test_app_installation_secret_config_without_secret_stays_unconfigured(monkeypatch):
+    from postbridge.api import app_public
+
+    tenant_id = "10000000-0000-4000-8000-000000000049"
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", tenant_id)
+    client = TestClient(app)
+    assert client.post("/api/app/bootstrap", json={"tenant_name": "Local"}).status_code == 200
+
+    response = client.put(
+        "/api/app/installation-secrets/ai-gateway",
+        json={"config": {"base_url": "https://api.example.com/v1"}},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["configured"] is False
+    session = SESSION_LOCAL()
+    try:
+        row = session.scalar(
+            select(InstallationSecretOrm).where(InstallationSecretOrm.category == "ai_gateway")
+        )
+        assert row is not None
+        assert row.encrypted_secret is None
+        assert app_public._installation_secret_payload(
+            session,
+            tenant_id=tenant_id,
+            category="ai_gateway",
+        ) == ({"base_url": "https://api.example.com/v1"}, {})
+    finally:
+        session.close()
+
+
+def test_app_installation_secret_payload_rejects_invalid_secret_json(monkeypatch):
+    from fastapi import HTTPException
+    from postbridge.api import app_public
+
+    tenant_id = "10000000-0000-4000-8000-000000000055"
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", tenant_id)
+    client = TestClient(app)
+    assert client.post("/api/app/bootstrap", json={"tenant_name": "Local"}).status_code == 200
+
+    session = SESSION_LOCAL()
+    try:
+        row = session.scalar(
+            select(InstallationSecretOrm).where(
+                InstallationSecretOrm.tenant_id == tenant_id,
+                InstallationSecretOrm.category == "ai_gateway",
+            )
+        )
+        assert row is None
+        session.add(
+            InstallationSecretOrm(
+                id="10000000-0000-4000-8000-000000000056",
+                tenant_id=tenant_id,
+                category="ai_gateway",
+                status="configured",
+                encrypted_secret=encrypt_credential_secret("not json"),
+                config_json='{"base_url": "https://api.example.com/v1"}',
+            )
+        )
+        session.commit()
+        with pytest.raises(HTTPException) as exc_info:
+            app_public._installation_secret_payload(
+                session,
+                tenant_id=tenant_id,
+                category="ai_gateway",
+            )
+        assert exc_info.value.status_code == 422
+    finally:
+        session.close()
+
+
+def test_app_bootstrap_commits_installation_secrets_before_welcome_content(monkeypatch):
+    from postbridge.api import app_public
+
+    tenant_id = "10000000-0000-4000-8000-000000000054"
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", tenant_id)
+
+    def fail_welcome(*args, **kwargs):
+        _ = args, kwargs
+        raise RuntimeError("welcome failed")
+
+    monkeypatch.setattr(app_public, "_ensure_selfhost_welcome_content", fail_welcome)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    response = client.post(
+        "/api/app/bootstrap",
+        json={
+            "tenant_name": "Local",
+            "installation_secrets": {
+                "ai_gateway": {
+                    "config": {"base_url": "https://gitsell.test/api/v1"},
+                    "secret": {"api_key": "gsa-test"},
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 500
+    session = SESSION_LOCAL()
+    try:
+        rows = {
+            row.category: row
+            for row in session.scalars(
+                select(InstallationSecretOrm).where(InstallationSecretOrm.tenant_id == tenant_id)
+            ).all()
+        }
+        assert "local_admin" in rows
+        assert "ai_gateway" in rows
+        assert rows["ai_gateway"].encrypted_secret
+    finally:
+        session.close()
+
+
+def test_app_gitsell_device_flow_uses_locale_domain_and_returns_ai_gateway(monkeypatch):
+    from postbridge.api import app_public
+
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("AGENT_LLM_DEFAULT_MODEL", "gpt-5.4-mini")
+    monkeypatch.setenv("AI_IMAGE_GENERATION_MODEL", "gpt-image-2")
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+            self.text = json.dumps(payload)
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def post(self, url, **kwargs):
+            calls.append((url, kwargs))
+            if url.endswith("/device_authorization"):
+                return FakeResponse(
+                    200,
+                    {
+                        "device_code": "device-token",
+                        "user_code": "ABCD-EFGH",
+                        "verification_uri_complete": "https://gitsell.ru/device?user_code=ABCD-EFGH",
+                        "interval": 3,
+                    },
+                )
+            return FakeResponse(
+                200,
+                {
+                    "ai_proxy_token": "gsa-test-token",
+                    "ai_proxy_token_id": 42,
+                    "ai_proxy_token_name": "postbridge",
+                },
+            )
+
+    monkeypatch.setattr(app_public.httpx, "Client", FakeClient)
+    client = TestClient(app)
+
+    start = client.post(
+        "/api/app/gitsell-device/start",
+        json={"locale": "ru", "instance_id": "postbridge-test", "instance_label": "Local"},
+    )
+    assert start.status_code == 200
+    assert calls[0][0] == "https://gitsell.ru/api/oauth/device_authorization"
+    assert start.json()["ai_gateway"]["base_url"] == "https://gitsell.ru/api/v1"
+    assert start.json()["ai_gateway"]["default_model"] == "gpt-5.4-mini"
+    assert start.json()["ai_gateway"]["image_model"] == "gpt-image-2"
+
+    poll = client.post(
+        "/api/app/gitsell-device/poll",
+        json={"locale": "en", "device_code": "device-token"},
+    )
+    assert poll.status_code == 200
+    body = poll.json()
+    assert calls[1][0] == "https://gitsell.tech/api/oauth/token"
+    assert body["status"] == "approved"
+    assert body["ai_gateway"]["base_url"] == "https://gitsell.tech/api/v1"
+    assert body["ai_gateway"]["default_model"] == "gpt-5.4-mini"
+    assert body["ai_gateway"]["image_model"] == "gpt-image-2"
+    assert body["ai_gateway"]["api_key"] == "gsa-test-token"
+
+
 def test_app_session_reports_unbootstrapped_selfhost(monkeypatch):
     monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
     client = TestClient(app)
@@ -115,6 +399,7 @@ def test_app_session_reports_unbootstrapped_selfhost(monkeypatch):
     assert response.json() == {
         "app_mode": "selfhost",
         "bootstrapped": False,
+        "setup_required": True,
         "authenticated": False,
         "user": None,
         "tenant": None,
@@ -135,7 +420,8 @@ def test_app_bootstrap_creates_selfhost_tenant(monkeypatch):
     assert body["authenticated"] is True
     assert body["user"] == {
         "id": "local-admin",
-        "display_name": "Local Admin",
+        "display_name": "admin",
+        "username": "admin",
         "role": "admin",
     }
     assert body["tenant"]["id"] == tenant_id
@@ -146,6 +432,38 @@ def test_app_bootstrap_creates_selfhost_tenant(monkeypatch):
         row = session.get(TenantOrm, tenant_id)
         assert row is not None
         assert row.name == "Acme Local"
+    finally:
+        session.close()
+
+
+def test_app_bootstrap_creates_postbridge_source_and_welcome_post(monkeypatch):
+    tenant_id = "10000000-0000-4000-8000-000000000046"
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", tenant_id)
+    client = TestClient(app)
+
+    response = client.post("/api/app/bootstrap", json={"tenant_name": "Acme Local", "locale": "ru"})
+
+    assert response.status_code == 200
+    channels = client.get("/api/app/channels")
+    assert channels.status_code == 200
+    source = next(item for item in channels.json()["items"] if item["platform"] == "postbridge")
+    assert source["kind"] == "source"
+    assert source["external_id"] == "postbridge-local"
+    assert source["can_read"] is True
+    assert source["can_write"] is False
+    content = client.get("/api/app/content-items")
+    assert content.status_code == 200
+    welcome = content.json()["items"][0]
+    assert welcome["title"] == "Добро пожаловать в Postbridge"
+    assert welcome["live_sync_source_core_channel_id"] is None
+    assert "Добавьте канал" in welcome["content_md"]
+
+    session = SESSION_LOCAL()
+    try:
+        row = session.get(ContentItemOrm, welcome["id"])
+        assert row is not None
+        assert row.language == "ru"
     finally:
         session.close()
 
@@ -161,8 +479,148 @@ def test_app_bootstrap_is_idempotent(monkeypatch):
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert second.json()["tenant"]["id"] == tenant_id
-    assert second.json()["tenant"]["name"] == "First"
+    assert second.json()["bootstrapped"] is True
+    assert second.json()["authenticated"] is False
+
+    session = SESSION_LOCAL()
+    try:
+        welcome_rows = session.scalars(
+            select(ContentItemOrm).where(
+                ContentItemOrm.tenant_id == tenant_id,
+                ContentItemOrm.source_type == "postbridge",
+                ContentItemOrm.body_structured_json.contains('"welcome"'),
+            )
+        ).all()
+        assert len(welcome_rows) == 1
+    finally:
+        session.close()
+
+
+def test_app_selfhost_welcome_content_is_idempotent(monkeypatch):
+    from postbridge.api import app_public
+
+    tenant_id = "10000000-0000-4000-8000-000000000059"
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", tenant_id)
+    client = TestClient(app)
+
+    setup = client.post("/api/app/bootstrap", json={"tenant_name": "Local", "locale": "en"})
+
+    assert setup.status_code == 200
+    session = SESSION_LOCAL()
+    try:
+        app_public._ensure_selfhost_welcome_content(session, tenant_id=tenant_id, locale="en")
+        app_public._ensure_selfhost_welcome_content(session, tenant_id=tenant_id, locale="ru")
+        session.commit()
+        welcome_rows = session.scalars(
+            select(ContentItemOrm).where(
+                ContentItemOrm.tenant_id == tenant_id,
+                ContentItemOrm.source_type == "postbridge",
+                ContentItemOrm.body_structured_json.contains('"welcome"'),
+            )
+        ).all()
+        assert len(welcome_rows) == 1
+    finally:
+        session.close()
+
+
+def test_app_bootstrap_repeated_call_with_password_returns_session(monkeypatch):
+    tenant_id = "10000000-0000-4000-8000-000000000047"
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", tenant_id)
+    client = TestClient(app)
+
+    first = client.post(
+        "/api/app/bootstrap",
+        json={"tenant_name": "First", "admin_username": "owner", "admin_password": "strong-password"},
+    )
+    second = client.post(
+        "/api/app/bootstrap",
+        json={"tenant_name": "Second", "admin_username": "owner", "admin_password": "strong-password"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["authenticated"] is True
+    assert second.json()["token"]
+
+
+def test_app_bootstrap_repeated_call_accepts_current_admin_password(monkeypatch):
+    tenant_id = "10000000-0000-4000-8000-000000000051"
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", tenant_id)
+    client = TestClient(app)
+
+    first = client.post(
+        "/api/app/bootstrap",
+        json={"tenant_name": "First", "admin_username": "owner", "admin_password": "strong-password"},
+    )
+    second = client.post(
+        "/api/app/bootstrap",
+        json={"tenant_name": "Second", "current_admin_password": "strong-password"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["authenticated"] is True
+    assert second.json()["token"]
+
+
+def test_app_bootstrap_reports_missing_encryption_key_as_validation_error(monkeypatch):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000048")
+    monkeypatch.delenv("CREDENTIALS_ENCRYPTION_KEY", raising=False)
+    monkeypatch.delenv("CORE_SERVICE_TOKEN", raising=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/app/bootstrap",
+        json={"tenant_name": "Local", "admin_password": "strong-password"},
+    )
+
+    assert response.status_code == 422
+    assert "CREDENTIALS_ENCRYPTION_KEY" in str(response.json())
+
+
+def test_app_bootstrap_requires_new_admin_password_outside_tests(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000050")
+    client = TestClient(app)
+
+    response = client.post("/api/app/bootstrap", json={"tenant_name": "Local"})
+
+    assert response.status_code == 422
+    assert "new admin password is required" in str(response.json())
+
+
+def test_app_selfhost_requires_local_admin_token(monkeypatch):
+    tenant_id = "10000000-0000-4000-8000-000000000045"
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("POSTBRIDGE_TEST_REQUIRE_AUTH", "1")
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", tenant_id)
+    client = TestClient(app)
+
+    setup = client.post(
+        "/api/app/bootstrap",
+        json={"tenant_name": "Private", "admin_username": "owner", "admin_password": "strong-password"},
+    )
+    assert setup.status_code == 200
+    token = setup.json()["token"]
+
+    assert client.get("/api/app/channels").status_code == 401
+    assert client.get("/api/app/channels", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+    authorized_session = client.get("/api/app/session", headers={"Authorization": f"Bearer {token}"})
+    assert authorized_session.status_code == 200
+    assert authorized_session.json()["authenticated"] is True
+    assert authorized_session.json()["user"]["username"] == "owner"
+
+    bad_login = client.post("/api/app/auth/login", json={"username": "owner", "password": "wrong"})
+    assert bad_login.status_code == 401
+    good_login = client.post("/api/app/auth/login", json={"username": "owner", "password": "strong-password"})
+    assert good_login.status_code == 200
+    assert good_login.json()["token"]
 
 
 def test_app_session_uses_existing_single_tenant(monkeypatch):
@@ -593,6 +1051,29 @@ def test_app_selfhost_disabled_saas_surfaces_are_explicit_core_endpoints(monkeyp
     assert news_detail.json()["slug"] == "product-update"
     assert previews.status_code == 200
     assert previews.json()["items"] == []
+
+
+def test_app_selfhost_news_auth_exemption_is_not_prefix_wide(monkeypatch):
+    from postbridge.api import app_public
+
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("POSTBRIDGE_TEST_REQUIRE_AUTH", "1")
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000058")
+    client = TestClient(app)
+    setup = client.post(
+        "/api/app/bootstrap",
+        json={"tenant_name": "Local", "admin_username": "owner", "admin_password": "strong-password"},
+    )
+    assert setup.status_code == 200
+
+    assert client.get("/api/app/news").status_code == 200
+    assert client.get("/api/app/news/product-update").status_code == 200
+    assert app_public._is_auth_exempt("/api/app/news") is True
+    assert app_public._is_auth_exempt("/api/app/news/product-update") is True
+    assert app_public._is_auth_exempt("/api/app/newsletter") is False
+    assert app_public._is_auth_exempt("/api/app/news/product-update/extra") is False
+    assert app_public._is_auth_exempt("/api/app/news-archive/product-update") is False
 
 
 def test_app_selfhost_agent_policy_and_embeddings_disabled_contracts(monkeypatch):
@@ -1028,9 +1509,9 @@ def test_app_dashboard_summary_and_jobs_use_core_data(monkeypatch):
 
     assert summary.status_code == 200
     assert summary.json()["billing"]["plan_code"] == "selfhost"
-    assert summary.json()["channels_count"] == 2
+    assert summary.json()["channels_count"] == 3
     assert summary.json()["bridges_count"] == 1
-    assert summary.json()["content_items_count"] == 1
+    assert summary.json()["content_items_count"] == 2
     assert summary.json()["pending_publication_targets_count"] == 1
     assert jobs.status_code == 200
     assert jobs.json()["items"][0]["id"] == job["id"]
@@ -1092,7 +1573,7 @@ def test_app_content_items_create_list_patch_get_delete(monkeypatch):
 
     listed = client.get("/api/app/content-items", params={"status": "draft"})
     assert listed.status_code == 200
-    assert [row["id"] for row in listed.json()["items"]] == [item["id"]]
+    assert item["id"] in [row["id"] for row in listed.json()["items"]]
 
     fetched = client.get(f"/api/app/content-items/{item['id']}")
     assert fetched.status_code == 200
@@ -1134,6 +1615,29 @@ def test_app_content_items_published_requires_content(monkeypatch):
     assert response.status_code == 422
 
 
+def test_app_content_items_published_rejects_schedule(monkeypatch):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000057")
+    client = TestClient(app)
+    assert client.post("/api/app/bootstrap", json={"tenant_name": "Local"}).status_code == 200
+    future = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=10)
+    minute_adjust = future.minute % 5
+    if minute_adjust:
+        future += timedelta(minutes=5 - minute_adjust)
+
+    response = client.post(
+        "/api/app/content-items",
+        json={
+            "content_md": "Ready now",
+            "status": "published",
+            "scheduled_publish_at": future.isoformat(),
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_SCHEDULE_CONFLICT"
+
+
 def test_app_content_items_schedule_with_postbridge_source(monkeypatch):
     monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
     monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000015")
@@ -1167,6 +1671,88 @@ def test_app_content_items_schedule_with_postbridge_source(monkeypatch):
     body = response.json()
     assert body["scheduled_publish_at"] is not None
     assert body["live_sync_source_core_channel_id"] == source["id"]
+
+
+def test_app_content_items_ignore_source_on_unscheduled_draft(monkeypatch):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000052")
+    client = TestClient(app)
+    assert client.post("/api/app/bootstrap", json={"tenant_name": "Local"}).status_code == 200
+    source = client.post(
+        "/api/app/channels",
+        json={
+            "platform": "postbridge",
+            "kind": "source",
+            "title": "Postbridge Source",
+            "external_id": "postbridge-local",
+        },
+    ).json()
+
+    response = client.post(
+        "/api/app/content-items",
+        json={
+            "content_md": "Plain draft",
+            "status": "draft",
+            "live_sync_source_core_channel_id": source["id"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["scheduled_publish_at"] is None
+    assert body["live_sync_source_core_channel_id"] is None
+    session = SESSION_LOCAL()
+    try:
+        row = session.get(ContentItemOrm, body["id"])
+        assert row is not None
+        assert "live_sync_source_core_channel_id" not in (row.body_structured_json or "")
+        row.body_structured_json = json.dumps(
+            {"postbridge_extra": {"live_sync_source_core_channel_id": source["id"]}}
+        )
+        session.commit()
+    finally:
+        session.close()
+    fetched = client.get(f"/api/app/content-items/{body['id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["live_sync_source_core_channel_id"] is None
+
+
+def test_app_content_items_clear_source_when_schedule_removed(monkeypatch):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000053")
+    client = TestClient(app)
+    assert client.post("/api/app/bootstrap", json={"tenant_name": "Local"}).status_code == 200
+    source = client.post(
+        "/api/app/channels",
+        json={
+            "platform": "postbridge",
+            "kind": "source",
+            "title": "Postbridge Source",
+            "external_id": "postbridge-local",
+        },
+    ).json()
+    future = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=10)
+    minute_adjust = future.minute % 5
+    if minute_adjust:
+        future += timedelta(minutes=5 - minute_adjust)
+    created = client.post(
+        "/api/app/content-items",
+        json={
+            "content_md": "Scheduled body",
+            "status": "draft",
+            "scheduled_publish_at": future.isoformat(),
+            "live_sync_source_core_channel_id": source["id"],
+        },
+    ).json()
+
+    patched = client.patch(
+        f"/api/app/content-items/{created['id']}",
+        json={"scheduled_publish_at": None},
+    )
+
+    assert patched.status_code == 200
+    assert patched.json()["scheduled_publish_at"] is None
+    assert patched.json()["live_sync_source_core_channel_id"] is None
 
 
 def test_app_content_items_saas_mode_is_not_served_by_core(monkeypatch):
@@ -1425,6 +2011,43 @@ def test_app_media_generation_job_requires_ai_enabled(monkeypatch):
     )
 
     assert response.status_code == 422
+
+
+def test_app_media_generation_job_allows_installation_ai_gateway(monkeypatch):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000024")
+    monkeypatch.setenv("AI_GATEWAY_ENABLED", "0")
+    client = TestClient(app)
+    assert client.post(
+        "/api/app/bootstrap",
+        json={
+            "tenant_name": "Local",
+            "installation_secrets": {
+                "ai_gateway": {
+                    "config": {
+                        "base_url": "https://gitsell.test/api/v1",
+                        "default_model": "gpt-5.4-mini",
+                        "image_model": "gpt-image-2",
+                        "image_size": "1536x1024",
+                    },
+                    "secret": {"api_key": "gsa-test"},
+                }
+            },
+        },
+    ).status_code == 200
+    queued: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(
+        "postbridge.api.app_public.process_media_generation_job_task.delay",
+        lambda job_id, correlation_id=None: queued.append((job_id, correlation_id)),
+    )
+
+    response = client.post(
+        "/api/app/media/generation-jobs",
+        json={"target": "cover", "title": "Image post"},
+    )
+
+    assert response.status_code == 202, response.text
+    assert queued
 
 
 def test_app_media_saas_mode_is_not_served_by_core(monkeypatch):

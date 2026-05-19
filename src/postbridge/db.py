@@ -348,6 +348,7 @@ def init_db() -> None:
         "tenants",
         "channels",
         "channel_credentials",
+        "installation_secrets",
         "content_items",
         "render_variants",
         "publication_plans",
