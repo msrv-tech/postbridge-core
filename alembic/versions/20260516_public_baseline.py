@@ -1,7 +1,7 @@
 """public baseline
 
 Revision ID: 20260516_public_baseline
-Revises:
+Revises: 20260421_tenant_image_style
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from sqlalchemy import text
 from postbridge.db import Base
 
 revision: str = "20260516_public_baseline"
-down_revision: Union[str, None] = None
+down_revision: Union[str, None] = "20260421_tenant_image_style"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
