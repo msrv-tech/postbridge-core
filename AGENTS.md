@@ -6,6 +6,16 @@
 - Hosted deployments may add a private product layer outside this repository.
 - Prefer English for product-facing text, docs, tests, and code. Russian may appear only where already established in comments or user-provided fixtures.
 
+## Local dev mode
+
+- In this workspace, the default browser dev target is the hosted/SaaS flow, not self-host.
+- Self-host UI checks are handled in the separate Proxmox container 115 (`postbridge-demo-check`).
+- When running the Vite web dev server for this repo, do not force `VITE_POSTBRIDGE_APP_MODE=selfhost` unless explicitly working on the self-host container flow.
+
+## Frontend UI behavior
+
+- Do not render disabled configuration fields for features that are turned off by a user-facing toggle. Show the toggle and reveal the related inputs only after the toggle is enabled.
+
 ## Running tests
 
 - Do not assume host Python is the right way to run tests here.
