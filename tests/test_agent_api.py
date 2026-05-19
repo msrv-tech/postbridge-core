@@ -4097,6 +4097,9 @@ def test_topic_scout_task_config_generate_images_queues_media_job(
         prompt: str,
         *,
         model: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        image_size: str | None = None,
         correlation_id: str | None = None,
     ) -> ImageGenerationResult:
         assert "Generated image headline" in prompt
