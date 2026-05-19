@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Link, useParams, useNavigate } from 'react-router-dom'
+import { useState, useEffect, useMemo } from 'react'
+import { Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { createConnection, listChannelRegistry } from '../adapters/channels'
 import AppShell from '../components/AppShell'
 import { useI18n } from '../i18n'
@@ -13,6 +13,7 @@ export default function Wizard() {
   const { t } = useI18n()
   const { workspaceId } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const [channels, setChannels] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -29,12 +30,28 @@ export default function Wizard() {
       .finally(() => setLoading(false))
   }, [workspaceId])
 
-  const sourceChannels = channels.filter((ch) => ch.can_read)
-  const targetChannels = channels.filter((ch) => ch.can_write)
+  const sourceChannels = useMemo(() => channels.filter((ch) => ch.can_read), [channels])
+  const targetChannels = useMemo(() => channels.filter((ch) => ch.can_write), [channels])
 
   const sourceChannel = sourceChannels.find((ch) => ch.id === sourceChannelId)
   const targetRss = targetValue === 'rss'
   const targetChannel = targetValue && targetValue !== 'rss' ? targetChannels.find((ch) => ch.id === targetValue) : null
+
+  useEffect(() => {
+    if (!channels.length) return
+    const externalTarget = targetChannels.find((ch) => ch.platform !== 'postbridge')
+    const postbridgeSource = sourceChannels.find((ch) => ch.platform === 'postbridge')
+    const externalSource = sourceChannels.find((ch) => ch.platform !== 'postbridge')
+    if (!sourceChannelId && sourceChannels.length > 0) {
+      const preferredSource = externalTarget
+        ? postbridgeSource || externalSource || sourceChannels[0]
+        : externalSource || postbridgeSource || sourceChannels[0]
+      setSourceChannelId(preferredSource.id)
+    }
+    if (!targetValue) {
+      setTargetValue(externalTarget?.id || 'rss')
+    }
+  }, [channels, sourceChannelId, sourceChannels, targetChannels, targetValue])
 
   const handleCreate = async () => {
     if (!sourceChannel) return
@@ -139,6 +156,11 @@ export default function Wizard() {
       }
     >
       <div className="wizard-layout">
+        {new URLSearchParams(location.search).get('success') === 'channel_added' && (
+          <div className="card" style={{ borderColor: 'var(--primary)', background: 'rgba(59, 130, 246, 0.08)', gridColumn: '1 / -1' }}>
+            <p className="success">{t('wizard.channelAdded')}</p>
+          </div>
+        )}
         <div className="card">
           <h3>{t('wizard.create.title')}</h3>
           <p className="section-copy muted">
