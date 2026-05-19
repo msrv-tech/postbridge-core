@@ -37,7 +37,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="postbridge-core", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="postbridge-core", version="0.1.2", lifespan=lifespan)
 setup_telegram_bot_webhook(app)
 app.include_router(app_public_public_router)
 app.include_router(app_public_router)
