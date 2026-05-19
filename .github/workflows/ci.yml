@@ -65,14 +65,14 @@ jobs:
           docker compose --progress=plain -f ci/docker-compose.yml build
           docker compose -f ci/docker-compose.yml run --rm test
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report
           path: web/playwright-report
           if-no-files-found: ignore
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: openapi-core
