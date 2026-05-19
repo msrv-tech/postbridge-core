@@ -91,6 +91,32 @@ class ChannelCredentialOrm(Base):
     )
 
 
+class InstallationSecretOrm(Base):
+    __tablename__ = "installation_secrets"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "category", name="uq_installation_secrets_tenant_category"),
+        Index("ix_installation_secrets_tenant_id", "tenant_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    category: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="configured")
+    encrypted_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    config_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
 class ContentItemOrm(Base):
     __tablename__ = "content_items"
     __table_args__ = (Index("ix_content_items_tenant_id", "tenant_id"),)

@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 
+from postbridge.ai.urls import join_openai_compatible_path
 from postbridge.config import get_settings
 from postbridge.domain.errors import ConfigurationError, ExternalApiError
 from postbridge.models.domain import LlmProviderConfigOrm
@@ -140,7 +141,7 @@ class OpenAICompatibleProvider:
         return self._post_to("/v1/chat/completions", payload)
 
     def _post_to(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        url = f"{self.base_url.rstrip('/')}{path}"
+        url = join_openai_compatible_path(self.base_url, path)
         try:
             with httpx.Client(timeout=httpx.Timeout(self.timeout_seconds)) as client:
                 response = client.post(url, json=payload, headers=self._headers())

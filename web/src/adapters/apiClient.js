@@ -35,6 +35,8 @@ function mapSelfhostPath(path) {
     [/^\/dashboard\/summary(\?.*)?$/, '/dashboard/summary$1'],
     [/^\/dashboard\/jobs(\?.*)?$/, '/dashboard/jobs$1'],
     [/^\/settings(\?.*)?$/, '/settings$1'],
+    [/^\/installation-secrets(\?.*)?$/, '/installation-secrets$1'],
+    [/^\/installation-secrets\/([^/?]+)(\?.*)?$/, '/installation-secrets/$1$2'],
     [/^\/billing\/plans(\?.*)?$/, '/billing/plans$1'],
     [/^\/billing\/(.+)$/, '/billing/$1'],
     [/^\/posts\/platform-previews(\?.*)?$/, '/platform-previews$1'],
@@ -105,15 +107,30 @@ function normalizeSelfhostOptions(originalPath, mappedPath, options) {
 
 function normalizeSelfhostResponse(originalPath, data) {
   if (!isSelfhostMode()) return data;
-  if (originalPath === '/me' && data?.authenticated) {
-    return {
-      ...data.user,
-      is_platform_admin: true,
-      workspaces: [buildSelfhostWorkspace(data.tenant)],
-      current_workspace_id: SELFHOST_WORKSPACE_ID,
-      app_mode: data.app_mode,
-      tenant: data.tenant,
-    };
+  if (originalPath === '/me') {
+    if (data?.authenticated) {
+      return {
+        ...data.user,
+        authenticated: true,
+        is_platform_admin: true,
+        workspaces: [buildSelfhostWorkspace(data.tenant)],
+        current_workspace_id: SELFHOST_WORKSPACE_ID,
+        app_mode: data.app_mode,
+        tenant: data.tenant,
+      };
+    }
+    if (data?.app_mode === 'selfhost') {
+      return {
+        __selfhost_auth_status: true,
+        authenticated: false,
+        bootstrapped: Boolean(data.bootstrapped),
+        setup_required: Boolean(data.setup_required),
+        app_mode: data.app_mode,
+        tenant: data.tenant || null,
+        workspaces: data.tenant ? [buildSelfhostWorkspace(data.tenant)] : [],
+        current_workspace_id: SELFHOST_WORKSPACE_ID,
+      };
+    }
   }
   return data;
 }
@@ -237,6 +254,5 @@ export function clearToken() {
 }
 
 export function isAuthenticated() {
-  if (isSelfhostMode()) return true;
-  return !!getToken();
+  return isSelfhostMode() || !!getToken();
 }

@@ -134,4 +134,8 @@ jobs:
           sudo cp /opt/postbridge-core/.env /tmp/postbridge-core-env.bak 2>/dev/null || true
           sudo rsync -a --delete postbridge-core/ /opt/postbridge-core/
           sudo cp /tmp/postbridge-core-env.bak /opt/postbridge-core/.env 2>/dev/null || true
-          sudo bash /opt/postbridge-core/scripts/deploy-prod.sh
+          sudo env \
+            POSTBRIDGE_DEPLOY_COMPOSE_DIR=/opt/postbridge-saas/environments/production \
+            POSTBRIDGE_DEPLOY_COMPOSE_FILE=docker-compose.yml \
+            POSTBRIDGE_DEPLOY_ENV_FILE=/opt/postbridge-saas/environments/production/.env \
+            bash /opt/postbridge-core/scripts/deploy-prod.sh

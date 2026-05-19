@@ -15,6 +15,9 @@ if [[ ! -f "$COMPOSE_FILE" ]]; then
   exit 1
 fi
 
+echo "Deploy compose: $COMPOSE_DIR/$COMPOSE_FILE"
+echo "Deploy env file: $ENV_FILE"
+
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" > "$ENV_FILE"
 fi

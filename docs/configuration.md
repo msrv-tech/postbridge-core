@@ -45,6 +45,12 @@ POSTBRIDGE_APP_MODE=selfhost
 
 The browser must never receive `CORE_SERVICE_TOKEN`, `SYNC_PUBLISH_TOKEN`, database credentials, or platform secrets.
 
+## Release Updates
+
+Self-host Settings checks `POSTBRIDGE_RELEASE_REPOSITORY` for the latest GitHub Release and compares it to `POSTBRIDGE_VERSION`. Published GHCR images set `POSTBRIDGE_VERSION` at build time. The UI only displays the available update and a pinned GHCR command; it does not auto-update the server.
+
+Use `POSTBRIDGE_CONTAINER_IMAGE` if you publish a forked image under a different registry path.
+
 ## Platform Integrations
 
 Only configure the integrations you plan to use.
@@ -63,20 +69,19 @@ See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md) for the full reference.
 
 ## How Users Provide Secrets
 
-For Docker Compose installs, users put server-side secrets in the private `.env` file before starting or restarting the stack:
+For Docker Compose installs, users generate a private `.env` file before starting the stack:
 
 ```bash
-cp .env.example .env
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+python3 scripts/init_self_host_env.py
 ```
 
-Then edit `.env`, keep it out of Git, and restart services that read those values:
+The generated file contains random persistent bootstrap secrets and is safe to use as-is for the first launch. Keep it out of Git. If you later edit `.env`, restart services that read those values:
 
 ```bash
 docker compose -f deploy/docker-compose.self-host.yml --env-file .env up -d --build
 ```
 
-Use environment variables for install-wide secrets:
+Use the first-run setup wizard for the local administrator and for optional integration secrets that are available there. Use environment variables for bootstrap secrets and install-wide fallbacks:
 
 | Area | Configure in `.env` |
 | --- | --- |
@@ -90,7 +95,18 @@ Use environment variables for install-wide secrets:
 | Media | `MEDIA_STORAGE_TYPE`, local path or `S3_*` |
 | Internal service access | `CORE_SERVICE_TOKEN` only when another trusted backend calls Core |
 
-Use the UI for per-channel credentials when possible. Those values are encrypted with `CREDENTIALS_ENCRYPTION_KEY` and stored in Core as channel credentials. Environment variables are best for install-wide defaults, local development, and integrations that do not yet have a UI credential flow.
+Use the UI for the first-run local admin, wizard-supported install secrets, and per-channel credentials when possible. Those values are encrypted with `CREDENTIALS_ENCRYPTION_KEY` and stored in Core. Environment variables are best for bootstrap values, local development, install-wide defaults, and integrations that do not yet have a UI credential flow.
+
+Optional integrations are needed only when the matching feature is used:
+
+| Feature | Secret needed |
+| --- | --- |
+| Postbridge source + RSS demo | none beyond generated bootstrap `.env` |
+| AI text adaptation, agents, image generation | AI gateway settings |
+| Telegram import | Telegram API ID/hash and session |
+| Telegram publishing or bot onboarding | Telegram bot token and username |
+| MAX, VK, LinkedIn | platform credentials for the selected platform |
+| Uploaded/generated media persistence | local media storage or S3 settings |
 
 ## Secret Hygiene
 

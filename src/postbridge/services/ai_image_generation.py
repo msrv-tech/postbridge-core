@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from postbridge.ai.urls import join_openai_compatible_path
 from postbridge.config import get_settings
 from postbridge.domain.errors import ExternalApiError, ValidationError
 
@@ -141,10 +142,13 @@ def generate_image_bytes(
     prompt: str,
     *,
     model: str | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    image_size: str | None = None,
     correlation_id: str | None = None,
 ) -> ImageGenerationResult:
     settings = get_settings()
-    base = (settings.ai_gateway_base_url or "").strip().rstrip("/")
+    base = (base_url or settings.ai_gateway_base_url or "").strip().rstrip("/")
     if not base:
         raise ValidationError(
             code="VALIDATION_AI_GATEWAY_DISABLED",
@@ -163,20 +167,21 @@ def generate_image_bytes(
         "model": image_model,
         "prompt": prompt,
         "n": 1,
-        "size": settings.ai_image_generation_size,
+        "size": str(image_size or settings.ai_image_generation_size).strip() or settings.ai_image_generation_size,
         "response_format": "url",
     }
     headers = {"Content-Type": "application/json"}
-    if settings.ai_gateway_api_key:
-        headers["Authorization"] = f"Bearer {settings.ai_gateway_api_key}"
+    effective_api_key = (api_key or settings.ai_gateway_api_key or "").strip()
+    if effective_api_key:
+        headers["Authorization"] = f"Bearer {effective_api_key}"
     if correlation_id:
         headers["X-Correlation-Id"] = correlation_id
 
-    gateway_timeout = max(float(settings.ai_gateway_timeout_seconds), 60.0)
+    gateway_timeout = float(settings.ai_image_generation_timeout_seconds)
 
     try:
         with httpx.Client(timeout=gateway_timeout) as client:
-            response = client.post(f"{base}{IMAGE_GENERATION_PATH}", headers=headers, json=payload)
+            response = client.post(join_openai_compatible_path(base, IMAGE_GENERATION_PATH), headers=headers, json=payload)
     except httpx.TimeoutException as exc:
         raise ExternalApiError(
             code="EXTERNAL_AI_IMAGE_TIMEOUT",

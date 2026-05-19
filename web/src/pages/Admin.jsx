@@ -16,7 +16,7 @@ export default function Admin() {
 
   useEffect(() => {
     listAdminWorkspaces()
-      .then((data) => setWorkspaces(data.items || []))
+      .then((data) => setWorkspaces(Array.isArray(data?.items) ? data.items : []))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [navigate]);
@@ -49,6 +49,7 @@ export default function Admin() {
         <div className="card">
           <h3>{t('admin.workspaces.title')}</h3>
           <div className="jobs-list">
+            {workspaces.length === 0 && <p className="muted">{t('admin.workspaces.empty')}</p>}
             {workspaces.map((ws) => (
               <div key={ws.id} className="jobs-list-item" style={{ display: 'grid', gap: '0.6rem' }}>
                 <Link to={`/workspaces/${ws.id}/channels`} className="jobs-list-link">

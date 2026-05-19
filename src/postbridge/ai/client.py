@@ -22,6 +22,7 @@ from postbridge.ai.streaming import (
     iter_openai_sse_json_payloads,
     root_total_tokens,
 )
+from postbridge.ai.urls import join_openai_compatible_path
 from postbridge.domain.errors import ExternalApiError
 
 logger = logging.getLogger(__name__)
@@ -144,7 +145,7 @@ class HttpAiGatewayClient:
         messages: list[dict[str, str]],
         json_response_format: bool = False,
     ) -> GatewayTextResponse:
-        url = f"{self._base}{OPENAI_CHAT_COMPLETIONS_PATH}"
+        url = join_openai_compatible_path(self._base, OPENAI_CHAT_COMPLETIONS_PATH)
         payload: dict[str, Any] = {"model": model, "messages": messages}
         if json_response_format:
             payload = {**payload, "response_format": {"type": "json_object"}}
