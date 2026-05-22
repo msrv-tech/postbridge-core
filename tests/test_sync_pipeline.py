@@ -1,3 +1,4 @@
+import json
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -7,7 +8,8 @@ from sqlalchemy import inspect  # noqa: E402
 from postbridge.db import Base, ENGINE, BatchImportFetchedPostOrm, SESSION_LOCAL, BatchImportRunOrm, init_db  # noqa: E402
 from postbridge.domain.errors import ExternalApiError, ValidationError  # noqa: E402
 from postbridge.domain.models import BatchImportRunStatus, PostPayload  # noqa: E402
-from postbridge.models.domain import PublicationTargetOrm  # noqa: E402
+from postbridge.infrastructure.crypto.credentials import encrypt_credential_secret  # noqa: E402
+from postbridge.models.domain import ChannelOrm, InstallationSecretOrm, PublicationTargetOrm  # noqa: E402
 from postbridge.observability.metrics import reset_for_tests  # noqa: E402
 from postbridge.storage.batch_import_run_store import BatchImportRunStore  # noqa: E402
 from postbridge.sync.batch_import_run_reconcile import reconcile_batch_import_runs  # noqa: E402
@@ -168,6 +170,128 @@ def test_pipeline_passes_channel_credentials_to_importer(monkeypatch: pytest.Mon
         assert len(received_telegram_creds) == 1
         assert received_telegram_creds[0] is not None
         assert received_telegram_creds[0].api_id == "12345"
+    finally:
+        session.close()
+
+
+def test_pipeline_uses_telegram_import_installation_secret_fallback(monkeypatch: pytest.MonkeyPatch):
+    _mock_send_task(monkeypatch)
+    source_id = "10000000-0000-4000-8000-000000000077"
+    session = SESSION_LOCAL()
+    try:
+        session.add(
+            ChannelOrm(
+                id=source_id,
+                tenant_id=T_TEST_TENANT,
+                platform="telegram",
+                kind="source",
+                title="Telegram source without channel credentials",
+                external_id="tg/fallback",
+                status="connected",
+            )
+        )
+        session.add(
+            InstallationSecretOrm(
+                id=str(uuid4()),
+                tenant_id=T_TEST_TENANT,
+                category="telegram_import",
+                status="configured",
+                encrypted_secret=encrypt_credential_secret(
+                    json.dumps(
+                        {
+                            "api_id": "67890",
+                            "api_hash": "fallback-hash",
+                            "session_string": "fallback-session",
+                        },
+                        ensure_ascii=True,
+                    )
+                ),
+            )
+        )
+        session.commit()
+        store = BatchImportRunStore(session)
+        correlation_id = str(uuid4())
+        job, _ = store.create_run(
+            T_TEST_TENANT,
+            "tg/fallback",
+            "max/target",
+            requested_limit=1,
+            correlation_id=correlation_id,
+            source_core_channel_id=source_id,
+            target_core_channel_id=CORE_MAX_CH,
+        )
+
+        received_telegram_creds = []
+
+        class CapturingTelegramImporter(FakeTelegramImporter):
+            async def fetch_posts(
+                self,
+                source_channel: str,
+                limit: int,
+                credentials=None,
+                *,
+                tenant_id: str | None = None,
+            ):
+                received_telegram_creds.append(credentials)
+                return self._posts[:limit]
+
+        service = SyncService(
+            session=session,
+            fetcher=CapturingTelegramImporter(
+                posts=[PostPayload(source_post_id="1", text="x")]
+            ),
+        )
+        service.run_job(job.id, correlation_id=correlation_id)
+        assert len(received_telegram_creds) == 1
+        assert received_telegram_creds[0] is not None
+        assert received_telegram_creds[0].api_id == "67890"
+        assert received_telegram_creds[0].api_hash == "fallback-hash"
+        assert received_telegram_creds[0].session_string == "fallback-session"
+    finally:
+        session.close()
+
+
+def test_pipeline_ignores_malformed_telegram_import_fallback_secret():
+    source_id = "10000000-0000-4000-8000-000000000078"
+    session = SESSION_LOCAL()
+    try:
+        session.add(
+            ChannelOrm(
+                id=source_id,
+                tenant_id=T_TEST_TENANT,
+                platform="telegram",
+                kind="source",
+                title="Telegram source without channel credentials",
+                external_id="tg/bad-fallback",
+                status="connected",
+            )
+        )
+        session.add(
+            InstallationSecretOrm(
+                id=str(uuid4()),
+                tenant_id=T_TEST_TENANT,
+                category="telegram_import",
+                status="configured",
+                encrypted_secret=encrypt_credential_secret("not json"),
+            )
+        )
+        session.commit()
+        store = BatchImportRunStore(session)
+        job, _ = store.create_run(
+            T_TEST_TENANT,
+            "tg/bad-fallback",
+            "max/target",
+            requested_limit=1,
+            correlation_id=str(uuid4()),
+            source_core_channel_id=source_id,
+            target_core_channel_id=CORE_MAX_CH,
+        )
+        service = SyncService(session=session, fetcher=FakeTelegramImporter(posts=[]))
+
+        with pytest.raises(ValidationError) as exc:
+            service._resolve_fetch_credentials(job, "telegram")
+
+        assert exc.value.code == "VALIDATION_CHANNEL_CREDENTIALS_MISSING"
     finally:
         session.close()
 

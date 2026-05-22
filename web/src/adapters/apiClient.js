@@ -37,6 +37,8 @@ function mapSelfhostPath(path) {
     [/^\/settings(\?.*)?$/, '/settings$1'],
     [/^\/installation-secrets(\?.*)?$/, '/installation-secrets$1'],
     [/^\/installation-secrets\/([^/?]+)(\?.*)?$/, '/installation-secrets/$1$2'],
+    [/^\/telegram-import\/start(\?.*)?$/, '/telegram-import/start$1'],
+    [/^\/telegram-import\/complete(\?.*)?$/, '/telegram-import/complete$1'],
     [/^\/billing\/plans(\?.*)?$/, '/billing/plans$1'],
     [/^\/billing\/(.+)$/, '/billing/$1'],
     [/^\/posts\/platform-previews(\?.*)?$/, '/platform-previews$1'],
@@ -163,6 +165,18 @@ function localizedApiErrorMessage(code, fallback, details = {}) {
   return template ? interpolate(template, details) : fallback
 }
 
+function localizedRawApiErrorMessage(message) {
+  const raw = typeof message === 'string' ? message.trim() : ''
+  if (!raw) return message
+  const rawKeys = {
+    'Telegram channel id is required': 'api.error.raw.telegramChannelIdRequired',
+    'invalid Telegram channel id': 'api.error.raw.invalidTelegramChannelId',
+  }
+  const key = rawKeys[raw]
+  if (!key) return message
+  return localizedClientText(key)
+}
+
 function messageFromValidationDetails(data) {
   const errors = data?.details?.errors;
   if (!Array.isArray(errors) || errors.length === 0) return '';
@@ -236,6 +250,7 @@ export async function api(path, options = {}) {
       errorMessageFromResponseBody(data, res.status);
     msg = normalizeApiErrorMessage(msg, res.status, data?.details || {});
     msg = localizedApiErrorMessage(data?.code, msg, data?.details || {});
+    msg = localizedRawApiErrorMessage(msg);
     const err = new Error(msg);
     err.status = res.status;
     err.code = data?.code;

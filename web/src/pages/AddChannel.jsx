@@ -12,7 +12,7 @@ import {
 } from '../adapters/channels'
 import AppShell from '../components/AppShell'
 import TelegramDeepLinkField from '../components/TelegramDeepLinkField'
-import { listInstallationSecrets } from '../adapters/installationSecrets'
+import { listInstallationSecrets, upsertInstallationSecret } from '../adapters/installationSecrets'
 import { isSelfhostMode } from '../adapters/runtime'
 import { fetchTelegramWebLinkStatus, startTelegramWebLinkSession } from '../telegramWebLinkFlow'
 import { useI18n } from '../i18n'
@@ -32,7 +32,7 @@ const PLATFORMS = [
 const DEFAULT_TARGET_PLATFORMS = new Set(['telegram', 'max', 'vk'])
 
 const PLACEHOLDERS = {
-  telegram: 'https://t.me/c/1234567890 or -1001234567890',
+  telegram: '@channel_name or -1001234567890',
   max: 'https://web.max.ru/-71838... or -71838691591553',
   vk: '-123456789 or vk.com/club123456789',
   linkedin: 'urn:li:organization:123456 or organization:123456',
@@ -53,6 +53,7 @@ export default function AddChannel() {
   const [channelId, setChannelId] = useState('')
   const [title, setTitle] = useState('')
   const [asTarget, setAsTarget] = useState(DEFAULT_TARGET_PLATFORMS.has('telegram'))
+  const [rssMode, setRssMode] = useState('source')
   const [validatedRead, setValidatedRead] = useState(false)
   const [validatedWrite, setValidatedWrite] = useState(false)
   const [validatedDisplay, setValidatedDisplay] = useState(null)
@@ -69,14 +70,31 @@ export default function AddChannel() {
   const [tgBindSessionToken, setTgBindSessionToken] = useState(null)
   const [bindSuccess, setBindSuccess] = useState('')
   const [telegramBotName, setTelegramBotName] = useState(DEFAULT_TELEGRAM_BOT_NAME)
+  const [telegramBotFormOpen, setTelegramBotFormOpen] = useState(false)
+  const [telegramBotDraft, setTelegramBotDraft] = useState({ bot_token: '', bot_username: '' })
+  const [telegramBotSaving, setTelegramBotSaving] = useState(false)
+  const [telegramBotError, setTelegramBotError] = useState('')
+  const [telegramBotSuccess, setTelegramBotSuccess] = useState('')
   // VK: community token, access_token and credential_ref after validation.
   const [vkAccessToken, setVkAccessToken] = useState('')
   const [vkCredentialsRef, setVkCredentialsRef] = useState('')
   const [linkedinAccessToken, setLinkedinAccessToken] = useState('')
   const [linkedinCredentialsRef, setLinkedinCredentialsRef] = useState('')
   const [linkedinOrganizations, setLinkedinOrganizations] = useState([])
-  const hasValidatedAccess = platform === 'linkedin' ? validatedWrite : validatedRead
+  const isRssSource = platform === 'rss' && rssMode === 'source'
+  const isRssTarget = platform === 'rss' && rssMode === 'target'
+  const hasValidatedAccess = platform === 'linkedin' ? validatedWrite : isRssTarget ? validatedWrite : validatedRead
   const telegramBotLink = telegramBotName ? `https://t.me/${telegramBotName}` : ''
+  const rssTargetFeedId = (channelId.trim() || 'rss').replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'rss'
+  const rssTargetUrl = `/rss/${encodeURIComponent(rssTargetFeedId)}.xml`
+  const validationMessage = (errors, fallback) => {
+    const message = (errors || [])
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+      .map((item) => item.startsWith('connections.validation.') ? t(item) : item)
+      .join(' ')
+    return message || fallback
+  }
 
   useEffect(() => {
     if (!isSelfhostMode() || !workspaceId) return
@@ -85,9 +103,38 @@ export default function AddChannel() {
         const telegramBot = (result.items || []).find((item) => item.category === 'telegram_bot')
         const name = String(telegramBot?.config?.bot_username || '').trim().replace(/^@/, '')
         setTelegramBotName(name)
+        if (name) {
+          setTelegramBotDraft((current) => ({ ...current, bot_username: name }))
+        }
       })
       .catch(() => setTelegramBotName(''))
   }, [workspaceId])
+
+  const handleTelegramBotSave = async () => {
+    const botToken = telegramBotDraft.bot_token.trim()
+    const botUsername = telegramBotDraft.bot_username.trim().replace(/^@/, '')
+    setTelegramBotError('')
+    setTelegramBotSuccess('')
+    if (!botToken || !botUsername) {
+      setTelegramBotError(t('addChannel.telegram.botFormRequired'))
+      return
+    }
+    setTelegramBotSaving(true)
+    try {
+      await upsertInstallationSecret(workspaceId, 'telegram_bot', {
+        config: { bot_username: botUsername },
+        secret: { bot_token: botToken },
+      })
+      setTelegramBotName(botUsername)
+      setTelegramBotDraft({ bot_token: '', bot_username: botUsername })
+      setTelegramBotFormOpen(false)
+      setTelegramBotSuccess(t('addChannel.telegram.botSaved'))
+    } catch (e) {
+      setTelegramBotError(e.message)
+    } finally {
+      setTelegramBotSaving(false)
+    }
+  }
 
   const handleValidate = async () => {
     setError('')
@@ -101,6 +148,14 @@ export default function AddChannel() {
         setValidatedRead(true)
         setValidatedDisplay('Postbridge')
         setValidatedWrite(false)
+        setValidating(false)
+        return
+      }
+      if (isRssTarget) {
+        setChannelId(rssTargetFeedId)
+        setValidatedRead(false)
+        setValidatedWrite(true)
+        setValidatedDisplay(title.trim() || 'RSS')
         setValidating(false)
         return
       }
@@ -174,7 +229,7 @@ export default function AddChannel() {
           role: 'source',
         })
         if (!readRes?.ok) {
-          const errMsg = readRes?.errors?.join(' ') || t('addChannel.errors.noReadAccess')
+          const errMsg = validationMessage(readRes?.errors, t('addChannel.errors.noReadAccess'))
           setError(errMsg)
           if (errMsg.includes(t('addChannel.errors.telegramLinkNeedle')) || errMsg.includes('Link Telegram')) {
             setShowLinkTelegram(true)
@@ -183,7 +238,7 @@ export default function AddChannel() {
         }
         setValidatedRead(true)
         setValidatedDisplay(readRes.display || channelId.trim())
-        if (asTarget) {
+        if (asTarget && !isRssSource) {
           const writeRes = await validateChannelRegistryItem(workspaceId, {
             platform,
             platform_channel_id: channelId.trim(),
@@ -191,7 +246,7 @@ export default function AddChannel() {
           })
           setValidatedWrite(writeRes.ok)
           if (!writeRes.ok) {
-            setError((readRes.errors || []).concat(writeRes.errors || []).join(' ') || t('addChannel.errors.noWriteAccess'))
+            setError(validationMessage(writeRes.errors, t('addChannel.errors.noWriteAccess')))
           }
         }
       }
@@ -216,6 +271,7 @@ export default function AddChannel() {
     setLinkedinAccessToken('')
     setLinkedinCredentialsRef('')
     setLinkedinOrganizations([])
+    setRssMode('source')
     setValidatedRead(false)
     setValidatedWrite(false)
     setValidatedDisplay(null)
@@ -223,6 +279,9 @@ export default function AddChannel() {
     setAsTarget(DEFAULT_TARGET_PLATFORMS.has(newPlatform))
     if (newPlatform === 'postbridge' && workspaceId) {
       setChannelId(workspaceId)
+      setAsTarget(false)
+    } else if (newPlatform === 'rss') {
+      setChannelId('')
       setAsTarget(false)
     }
   }
@@ -310,10 +369,10 @@ export default function AddChannel() {
     try {
       const createPayload = {
         platform,
-        platform_channel_id: channelId.trim(),
-        title: (title.trim() || validatedDisplay) || channelId.trim(),
-        can_read: platform === 'linkedin' ? false : true,
-        can_write: platform === 'linkedin' ? true : asTarget ? validatedWrite : false,
+        platform_channel_id: isRssTarget ? rssTargetFeedId : channelId.trim(),
+        title: (title.trim() || validatedDisplay) || (isRssTarget ? 'RSS' : channelId.trim()),
+        can_read: platform === 'linkedin' || isRssTarget ? false : true,
+        can_write: platform === 'linkedin' || isRssTarget ? true : asTarget ? validatedWrite : false,
       }
       if (platform === 'vk' && vkCredentialsRef) {
         createPayload.credentials_ref = vkCredentialsRef
@@ -372,6 +431,60 @@ export default function AddChannel() {
               )}
             </p>
           )}
+          {platform === 'telegram' && !telegramBotLink && (
+            <div className="card" style={{ marginBottom: '1rem', padding: '1rem', background: 'var(--surface-strong)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <p className="section-copy" style={{ margin: 0 }}>
+                  {t('addChannel.telegram.botSetupText')}
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-small"
+                  onClick={() => setTelegramBotFormOpen((value) => !value)}
+                >
+                  {telegramBotFormOpen ? t('common.collapse') : t('addChannel.telegram.configureBot')}
+                </button>
+              </div>
+              {telegramBotFormOpen && (
+                <div style={{ display: 'grid', gap: '0.75rem', marginTop: '1rem' }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label htmlFor="telegram-bot-token">{t('settings.integrations.telegramBot.token')}</label>
+                    <input
+                      id="telegram-bot-token"
+                      type="password"
+                      value={telegramBotDraft.bot_token}
+                      onChange={(e) => setTelegramBotDraft((current) => ({ ...current, bot_token: e.target.value }))}
+                      placeholder="123456:ABC..."
+                      className="form-control"
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label htmlFor="telegram-bot-username">{t('settings.integrations.telegramBot.username')}</label>
+                    <input
+                      id="telegram-bot-username"
+                      type="text"
+                      value={telegramBotDraft.bot_username}
+                      onChange={(e) => setTelegramBotDraft((current) => ({ ...current, bot_username: e.target.value }))}
+                      placeholder="postbridge_bot"
+                      className="form-control"
+                    />
+                  </div>
+                  {telegramBotError && <p className="error" style={{ margin: 0 }}>{telegramBotError}</p>}
+                  <div className="inline-actions">
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={handleTelegramBotSave}
+                      disabled={telegramBotSaving}
+                    >
+                      {telegramBotSaving ? t('common.saving') : t('addChannel.telegram.saveBot')}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {platform === 'telegram' && telegramBotSuccess && <p className="success">{telegramBotSuccess}</p>}
           {platform === 'telegram' && showLinkTelegram && (
             <div className="card" style={{ marginBottom: '1rem', padding: '1rem', background: 'var(--bg-secondary, #f5f5f5)' }}>
               <p className="section-copy" style={{ marginBottom: '0.5rem' }}>
@@ -448,6 +561,38 @@ export default function AddChannel() {
             <p className="section-copy">
               {t('addChannel.postbridge.instructions')}
             </p>
+          )}
+          {platform === 'rss' && (
+            <>
+              <div className="form-group">
+                <label htmlFor="rss-mode">{t('addChannel.rss.mode')}</label>
+                <select
+                  id="rss-mode"
+                  value={rssMode}
+                  onChange={(e) => {
+                    const nextMode = e.target.value
+                    setRssMode(nextMode)
+                    setChannelId(nextMode === 'target' ? 'rss' : '')
+                    setValidatedRead(false)
+                    setValidatedWrite(false)
+                    setValidatedDisplay(null)
+                    setError('')
+                  }}
+                  className="form-control"
+                >
+                  <option value="source">{t('addChannel.rss.mode.source')}</option>
+                  <option value="target">{t('addChannel.rss.mode.target')}</option>
+                </select>
+              </div>
+              <p className="section-copy">
+                {isRssTarget ? t('addChannel.rss.targetText') : t('addChannel.rss.sourceText')}
+              </p>
+              {isRssTarget && (
+                <p className="muted" style={{ fontSize: '0.9rem', marginTop: '-0.5rem', marginBottom: '1rem' }}>
+                  {t('addChannel.rss.targetUrl')} <code>{rssTargetUrl}</code>
+                </p>
+              )}
+            </>
           )}
           {platform === 'vk' && (
             <>
@@ -536,17 +681,28 @@ export default function AddChannel() {
           {platform !== 'postbridge' && platform !== 'vk' && platform !== 'linkedin' && (
           <div className="form-group">
             <label htmlFor="channel-id">
-              {platform === 'telegram' ? t('addChannel.channelId.telegram') : platform === 'rss' ? t('addChannel.channelId.rss') : t('addChannel.channelId.generic')}
+              {platform === 'telegram'
+                ? t('addChannel.channelId.telegram')
+                : platform === 'rss' && isRssTarget
+                  ? t('addChannel.channelId.rssTarget')
+                  : platform === 'rss'
+                    ? t('addChannel.channelId.rss')
+                    : t('addChannel.channelId.generic')}
             </label>
             <input
               id="channel-id"
               type="text"
               value={channelId}
               onChange={(e) => setChannelId(e.target.value)}
-              placeholder={PLACEHOLDERS[platform]}
+              placeholder={isRssTarget ? 'rss' : PLACEHOLDERS[platform]}
               className="form-control"
               required
             />
+            {platform === 'telegram' && (
+              <p className="toggle-hint">
+                {t('addChannel.telegram.channelIdHint')}
+              </p>
+            )}
           </div>
           )}
           <div className="form-group">
@@ -560,7 +716,7 @@ export default function AddChannel() {
               className="form-control"
             />
           </div>
-          {platform !== 'postbridge' && platform !== 'linkedin' && (
+          {platform !== 'postbridge' && platform !== 'linkedin' && platform !== 'rss' && (
           <div className="form-group">
             <div
               className="toggle-row"
@@ -632,7 +788,7 @@ export default function AddChannel() {
               disabled={
                 loading ||
                 !hasValidatedAccess ||
-                (platform !== 'postbridge' && platform !== 'linkedin' && asTarget && !validatedWrite)
+                (platform !== 'postbridge' && platform !== 'linkedin' && !isRssTarget && !isRssSource && asTarget && !validatedWrite)
               }
             >
               {loading ? t('addChannel.adding') : t('addChannel.title')}

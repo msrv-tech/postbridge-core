@@ -67,7 +67,7 @@ function emptyIntegrations() {
   }, {})
 }
 
-function integrationPayload(values) {
+function integrationPayload(values, enabled = {}) {
   const out = {}
   if (
     values.ai_gateway.base_url
@@ -86,13 +86,13 @@ function integrationPayload(values) {
       secret: { api_key: values.ai_gateway.api_key || undefined },
     }
   }
-  if (values.telegram_bot.bot_token || values.telegram_bot.bot_username) {
+  if (enabled.telegram_bot && (values.telegram_bot.bot_token || values.telegram_bot.bot_username)) {
     out.telegram_bot = {
       config: { bot_username: values.telegram_bot.bot_username || undefined },
       secret: { bot_token: values.telegram_bot.bot_token || undefined },
     }
   }
-  if (Object.values(values.media_storage).some(Boolean)) {
+  if (enabled.media_storage && Object.values(values.media_storage).some(Boolean)) {
     out.media_storage = {
       config: {
         storage_type: values.media_storage.storage_type || undefined,
@@ -119,6 +119,7 @@ export default function SelfhostSetup() {
   const [admin, setAdmin] = useState({ username: 'admin', password: '' })
   const [tenantName, setTenantName] = useState('Postbridge Self-host')
   const [integrations, setIntegrations] = useState(emptyIntegrations)
+  const [optionalEnabled, setOptionalEnabled] = useState({})
   const [manualAiOpen, setManualAiOpen] = useState(false)
   const [setupStep, setSetupStep] = useState(0)
   const [aiSkipped, setAiSkipped] = useState(false)
@@ -162,6 +163,12 @@ export default function SelfhostSetup() {
     setSetupStep((value) => Math.max(value - 1, 0))
   }
 
+  const localizeError = (err) => {
+    const message = String(err?.message || '').trim().toLowerCase()
+    if (message === 'invalid username or password') return t('selfhostSetup.invalidCredentials')
+    return err?.message || t('selfhostSetup.error')
+  }
+
   const skipAi = () => {
     setAiSkipped(true)
     goNext()
@@ -185,14 +192,14 @@ export default function SelfhostSetup() {
             admin_username: admin.username,
             admin_password: admin.password,
             locale,
-            installation_secrets: integrationPayload(integrations),
+            installation_secrets: integrationPayload(integrations, optionalEnabled),
           })
         : await loginSelfhost(admin)
       if (!result?.token) throw new Error(t('selfhostSetup.error'))
       setToken(result.token)
       navigate('/workspaces/local/channels', { replace: true })
     } catch (err) {
-      setError(err.message || t('selfhostSetup.error'))
+      setError(localizeError(err))
     } finally {
       setSaving(false)
     }
@@ -203,6 +210,10 @@ export default function SelfhostSetup() {
       ...current,
       [category]: { ...current[category], [key]: value },
     }))
+  }
+
+  const toggleOptionalIntegration = (category) => {
+    setOptionalEnabled((current) => ({ ...current, [category]: !current[category] }))
   }
 
   const startGitSellAiGateway = async () => {
@@ -441,26 +452,40 @@ export default function SelfhostSetup() {
       </div>
       {INTEGRATION_GROUPS.filter((group) => group.category !== 'ai_gateway').map((group) => (
         <section key={group.category} style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-          <h3 className="h-small" style={{ marginTop: 0 }}>{t(group.titleKey)}</h3>
-          <p className="muted post-editor-hint">
-            {group.category === 'media_storage' ? t('selfhostSetup.mediaFallback') : t(group.textKey)}
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
-            {group.fields.map(([name, labelKey, type, placeholder]) => (
-              <div className="form-group" style={{ marginBottom: 0 }} key={name}>
-                <label htmlFor={`setup-${group.category}-${name}`}>{t(labelKey)}</label>
-                <input
-                  id={`setup-${group.category}-${name}`}
-                  className="form-control"
-                  type={type}
-                  placeholder={placeholder}
-                  value={integrations[group.category]?.[name] || ''}
-                  onChange={(e) => setIntegration(group.category, name, e.target.value)}
-                  autoComplete="off"
-                />
-              </div>
-            ))}
+          <div style={{ display: 'flex', alignItems: 'start', justifyContent: 'space-between', gap: '1rem' }}>
+            <div>
+              <h3 className="h-small" style={{ marginTop: 0 }}>{t(group.titleKey)}</h3>
+              <p className="muted post-editor-hint">
+                {group.category === 'media_storage' ? t('selfhostSetup.mediaFallback') : t(group.textKey)}
+              </p>
+            </div>
+            <button
+              type="button"
+              className={`btn btn-small ${optionalEnabled[group.category] ? '' : 'btn-secondary'}`}
+              onClick={() => toggleOptionalIntegration(group.category)}
+              aria-pressed={Boolean(optionalEnabled[group.category])}
+            >
+              {optionalEnabled[group.category] ? t('selfhostSetup.integration.enabled') : t('selfhostSetup.integration.enable')}
+            </button>
           </div>
+          {optionalEnabled[group.category] && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
+              {group.fields.map(([name, labelKey, type, placeholder]) => (
+                <div className="form-group" style={{ marginBottom: 0 }} key={name}>
+                  <label htmlFor={`setup-${group.category}-${name}`}>{t(labelKey)}</label>
+                  <input
+                    id={`setup-${group.category}-${name}`}
+                    className="form-control"
+                    type={type}
+                    placeholder={placeholder}
+                    value={integrations[group.category]?.[name] || ''}
+                    onChange={(e) => setIntegration(group.category, name, e.target.value)}
+                    autoComplete="off"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       ))}
     </section>

@@ -16,6 +16,12 @@ import { deleteBridge, listBridges, updateBridge } from '../adapters/bridges'
 import { deleteChannelRegistryItem, listChannelRegistry } from '../adapters/channels'
 import { getDashboardSummary, listDashboardJobs } from '../adapters/dashboard'
 import { startHistoricalImportJob } from '../adapters/jobs'
+import {
+  completeTelegramImportConnection,
+  listInstallationSecrets,
+  startTelegramImportConnection,
+} from '../adapters/installationSecrets'
+import { isSelfhostMode } from '../adapters/runtime'
 import { useI18n } from '../i18n'
 
 function channelUrl(platform, platformChannelId, rssFeedUrl) {
@@ -112,6 +118,8 @@ function bridgeDisplayItems(bridgeResponse, channelRegistryResponse) {
         target_display: target?.title || target?.platform_channel_id || bridge.target_display,
         source_platform_channel_id: source?.platform_channel_id || bridge.source_platform_channel_id,
         target_platform_channel_id: target?.platform_channel_id || bridge.target_platform_channel_id,
+        source_rss_feed_url: source?.rss_feed_url || bridge.source_rss_feed_url,
+        target_rss_feed_url: target?.rss_feed_url || bridge.target_rss_feed_url,
         live_sync_source_supported:
           source?.live_sync_source_supported === true ||
           bridge.live_sync_source_supported === true,
@@ -139,6 +147,10 @@ export default function Channels() {
   const [historyPaymentNeeded, setHistoryPaymentNeeded] = useState(false);
   const [historyPaymentUrl, setHistoryPaymentUrl] = useState(null);
   const [historyInvoiceUrl, setHistoryInvoiceUrl] = useState(null);
+  const [historyTelegramCreds, setHistoryTelegramCreds] = useState({ api_id: '', api_hash: '', phone: '', code: '', password: '' });
+  const [historyTelegramConfigured, setHistoryTelegramConfigured] = useState(false);
+  const [historyTelegramManualOpen, setHistoryTelegramManualOpen] = useState(true);
+  const [historyTelegramFlow, setHistoryTelegramFlow] = useState({ status: 'idle', flow_id: null });
   const [expandedChannels, setExpandedChannels] = useState(new Set());
   const [tariffModal, setTariffModal] = useState(false);
   const [plans, setPlans] = useState([]);
@@ -161,8 +173,30 @@ export default function Channels() {
   const canUseAiPlatformAdapt = summary?.billing?.ai_platform_adapt_enabled === true;
   const hasActiveBridge = channels.length > 0;
   const hasAnyChannel = channelRegistry.length > 0;
-  const hasExternalChannel = channelRegistry.some((ch) => ch.platform !== 'postbridge');
-  const onboardingAction = !hasExternalChannel ? 'add-channel' : !hasActiveBridge ? 'create-bridge' : 'create-post';
+  const hasSourceChannel = channelRegistry.some((ch) => ch.can_read);
+  const hasTargetChannel = channelRegistry.some((ch) => ch.can_write && ch.platform !== 'postbridge');
+  const onboardingAction = !hasSourceChannel || !hasTargetChannel ? 'add-channel' : !hasActiveBridge ? 'create-bridge' : 'create-post';
+  const onboardingSteps = [
+    { id: 'workspace', done: true, current: false, label: t('channels.onboarding.step.workspace') },
+    {
+      id: 'source',
+      done: hasSourceChannel,
+      current: !hasSourceChannel,
+      label: t('channels.onboarding.step.source'),
+    },
+    {
+      id: 'target',
+      done: hasTargetChannel,
+      current: hasSourceChannel && !hasTargetChannel,
+      label: t('channels.onboarding.step.target'),
+    },
+    {
+      id: 'bridge',
+      done: hasActiveBridge,
+      current: hasSourceChannel && hasTargetChannel && !hasActiveBridge,
+      label: t('channels.onboarding.step.bridge'),
+    },
+  ];
 
   const channelIdsInBridges = useMemo(
     () => new Set(channels.flatMap((c) => [c.source_channel_id, c.target_channel_id]).filter(Boolean)),
@@ -375,6 +409,9 @@ export default function Channels() {
     return () => clearInterval(interval);
   }, [tariffStarsWaiting, workspaceId]);
 
+  const historyNeedsTelegramImportCredentials = (ch = historyModal) =>
+    isSelfhostMode() && ch?.source_platform === 'telegram';
+
   const openHistoryModal = (ch) => {
     setHistoryModal(ch);
     setHistoryLimit(20);
@@ -382,6 +419,23 @@ export default function Channels() {
     setHistoryPaymentNeeded(false);
     setHistoryPaymentUrl(null);
     setHistoryInvoiceUrl(null);
+    setHistoryTelegramCreds({ api_id: '', api_hash: '', phone: '', code: '', password: '' });
+    setHistoryTelegramConfigured(false);
+    setHistoryTelegramManualOpen(true);
+    setHistoryTelegramFlow({ status: 'idle', flow_id: null });
+    if (workspaceId && historyNeedsTelegramImportCredentials(ch)) {
+      listInstallationSecrets(workspaceId)
+        .then((result) => {
+          const row = responseItems(result).find((item) => item.category === 'telegram_import');
+          const configured = row?.configured === true || row?.status === 'configured';
+          setHistoryTelegramConfigured(Boolean(configured));
+          setHistoryTelegramManualOpen(!configured);
+        })
+        .catch(() => {
+          setHistoryTelegramConfigured(false);
+          setHistoryTelegramManualOpen(true);
+        });
+    }
   };
 
   const closeHistoryModal = () => {
@@ -393,6 +447,9 @@ export default function Channels() {
     setHistoryError('');
     setHistoryLoading(true);
     try {
+      if (historyNeedsTelegramImportCredentials() && !historyTelegramConfigured) {
+        throw new Error(t('channels.history.telegramImport.required'));
+      }
       const job = await startHistoricalImportJob(workspaceId, {
         bridge_id: historyModal.id,
         requested_limit: historyLimit,
@@ -406,6 +463,53 @@ export default function Channels() {
       } else {
         setHistoryError(e.message);
       }
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const handleTelegramImportSendCode = async () => {
+    if (!workspaceId) return;
+    setHistoryError('');
+    setHistoryLoading(true);
+    try {
+      const payload = {
+        api_id: historyTelegramCreds.api_id.trim(),
+        api_hash: historyTelegramCreds.api_hash.trim(),
+        phone: historyTelegramCreds.phone.trim(),
+      };
+      if (!payload.api_id || !payload.api_hash || !payload.phone) {
+        throw new Error(t('channels.history.telegramImport.startRequired'));
+      }
+      const result = await startTelegramImportConnection(workspaceId, payload);
+      setHistoryTelegramFlow({ status: 'code_sent', flow_id: result.flow_id });
+    } catch (e) {
+      setHistoryError(e.message);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const handleTelegramImportComplete = async () => {
+    if (!workspaceId || !historyTelegramFlow.flow_id) return;
+    setHistoryError('');
+    setHistoryLoading(true);
+    try {
+      const result = await completeTelegramImportConnection(workspaceId, {
+        flow_id: historyTelegramFlow.flow_id,
+        code: historyTelegramCreds.code.trim() || undefined,
+        password: historyTelegramCreds.password.trim() || undefined,
+      });
+      if (result.status === 'password_required') {
+        setHistoryTelegramFlow((current) => ({ ...current, status: 'password_required' }));
+        return;
+      }
+      setHistoryTelegramConfigured(true);
+      setHistoryTelegramManualOpen(false);
+      setHistoryTelegramFlow({ status: 'configured', flow_id: null });
+      setHistoryTelegramCreds((current) => ({ ...current, code: '', password: '' }));
+    } catch (e) {
+      setHistoryError(e.message);
     } finally {
       setHistoryLoading(false);
     }
@@ -628,18 +732,35 @@ export default function Channels() {
             <div style={{ flex: '1 1 18rem' }}>
               <h3>{t('channels.onboarding.title')}</h3>
               <p className="section-copy">
-                {hasExternalChannel ? t('channels.onboarding.bridgeText') : t('channels.onboarding.externalText')}
+                {!hasSourceChannel
+                  ? t('channels.onboarding.sourceText')
+                  : !hasTargetChannel
+                    ? t('channels.onboarding.targetText')
+                    : t('channels.onboarding.bridgeText')}
               </p>
-              <ol className="check-list" style={{ marginTop: '0.75rem' }}>
-                <li>{t('channels.onboarding.step.workspace')}</li>
-                <li className={hasExternalChannel ? '' : 'muted'}>{t('channels.onboarding.step.external')}</li>
-                <li className={hasActiveBridge ? '' : 'muted'}>{t('channels.onboarding.step.bridge')}</li>
+              <ol className="check-list onboarding-progress-list" style={{ marginTop: '0.75rem' }}>
+                {onboardingSteps.map((step) => (
+                  <li key={step.id} className={step.done ? 'is-done' : step.current ? 'is-current' : 'muted'}>
+                    <span>{step.label}</span>
+                    <span
+                      className={`badge ${
+                        step.done ? 'badge-completed' : step.current ? 'badge-running' : 'badge-pending'
+                      }`}
+                    >
+                      {step.done
+                        ? t('channels.onboarding.status.done')
+                        : step.current
+                          ? t('channels.onboarding.status.next')
+                          : t('channels.onboarding.status.waiting')}
+                    </span>
+                  </li>
+                ))}
               </ol>
             </div>
             <div className="inline-actions" style={{ justifyContent: 'flex-end', marginTop: '0.25rem' }}>
               {onboardingAction === 'add-channel' && (
                 <Link to={`/workspaces/${workspaceId}/channels/add`} className="btn">
-                  {t('channels.onboarding.addChannel')}
+                  {hasSourceChannel ? t('channels.onboarding.addTargetChannel') : t('channels.onboarding.addSourceChannel')}
                 </Link>
               )}
               {onboardingAction === 'create-bridge' && (
@@ -751,8 +872,8 @@ export default function Channels() {
           </div>
           <div className="sync-tree">
             {channels.map((ch) => {
-              const srcLink = channelUrl(ch.source_platform, ch.source_platform_channel_id)
-              const tgtLink = channelUrl(ch.target_platform, ch.target_platform_channel_id)
+              const srcLink = channelUrl(ch.source_platform, ch.source_platform_channel_id, ch.source_rss_feed_url)
+              const tgtLink = channelUrl(ch.target_platform, ch.target_platform_channel_id, ch.target_rss_feed_url)
               const channelJobs = getJobsForChannel(ch)
               const isExpanded = expandedChannels.has(ch.id)
               const srcLabel = platformBadgeLabel(ch.source_platform, t)
@@ -1067,6 +1188,135 @@ export default function Channels() {
                 max={1000}
               />
             </div>
+            {historyNeedsTelegramImportCredentials() && (
+              <div className="card" style={{ margin: '1rem 0 0', padding: '1rem' }}>
+                <h4 style={{ marginTop: 0 }}>{t('channels.history.telegramImport.title')}</h4>
+                <p className="section-copy muted">
+                  {historyTelegramConfigured
+                    ? t('channels.history.telegramImport.configured')
+                    : t('channels.history.telegramImport.text')}
+                </p>
+                {historyTelegramConfigured && (
+                  <button
+                    type="button"
+                    onClick={() => setHistoryTelegramManualOpen((value) => !value)}
+                    style={{
+                      fontSize: '0.85rem',
+                      padding: 0,
+                      border: 0,
+                      background: 'transparent',
+                      color: 'var(--accent)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {historyTelegramManualOpen
+                      ? t('channels.history.telegramImport.hide')
+                      : t('channels.history.telegramImport.replace')}
+                  </button>
+                )}
+                {historyTelegramManualOpen && (
+                  <div style={{ display: 'grid', gap: '0.75rem', marginTop: '0.75rem' }}>
+                    {historyTelegramFlow.status === 'idle' && (
+                      <>
+                        <p className="section-copy muted" style={{ margin: 0 }}>
+                          {t('channels.history.telegramImport.apiHelp')}{' '}
+                          <a href="https://my.telegram.org/apps" target="_blank" rel="noopener noreferrer">
+                            my.telegram.org/apps
+                          </a>
+                        </p>
+                        <details>
+                          <summary>{t('channels.history.telegramImport.apiHelpDetails')}</summary>
+                          <ol className="check-list" style={{ marginTop: '0.75rem' }}>
+                            <li>{t('channels.history.telegramImport.apiHelpStep1')}</li>
+                            <li>{t('channels.history.telegramImport.apiHelpStep2')}</li>
+                            <li>{t('channels.history.telegramImport.apiHelpStep3')}</li>
+                          </ol>
+                        </details>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label htmlFor="history-telegram-api-id">{t('settings.integrations.telegramImport.apiId')}</label>
+                            <input
+                              id="history-telegram-api-id"
+                              className="form-control"
+                              value={historyTelegramCreds.api_id}
+                              onChange={(e) => setHistoryTelegramCreds((current) => ({ ...current, api_id: e.target.value }))}
+                            />
+                          </div>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label htmlFor="history-telegram-api-hash">{t('settings.integrations.telegramImport.apiHash')}</label>
+                            <input
+                              id="history-telegram-api-hash"
+                              className="form-control"
+                              type="password"
+                              value={historyTelegramCreds.api_hash}
+                              onChange={(e) => setHistoryTelegramCreds((current) => ({ ...current, api_hash: e.target.value }))}
+                            />
+                          </div>
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label htmlFor="history-telegram-phone">{t('channels.history.telegramImport.phone')}</label>
+                          <input
+                            id="history-telegram-phone"
+                            className="form-control"
+                            value={historyTelegramCreds.phone}
+                            placeholder="+12025550123"
+                            onChange={(e) => setHistoryTelegramCreds((current) => ({ ...current, phone: e.target.value }))}
+                          />
+                        </div>
+                        <div className="inline-actions">
+                          <button type="button" className="btn" onClick={handleTelegramImportSendCode} disabled={historyLoading}>
+                            {historyLoading ? t('common.loading') : t('channels.history.telegramImport.sendCode')}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                    {historyTelegramFlow.status === 'code_sent' && (
+                      <>
+                        <p className="section-copy muted" style={{ margin: 0 }}>
+                          {t('channels.history.telegramImport.codeText')}
+                        </p>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label htmlFor="history-telegram-code">{t('channels.history.telegramImport.code')}</label>
+                          <input
+                            id="history-telegram-code"
+                            className="form-control"
+                            value={historyTelegramCreds.code}
+                            onChange={(e) => setHistoryTelegramCreds((current) => ({ ...current, code: e.target.value }))}
+                          />
+                        </div>
+                        <div className="inline-actions">
+                          <button type="button" className="btn" onClick={handleTelegramImportComplete} disabled={historyLoading}>
+                            {historyLoading ? t('common.loading') : t('channels.history.telegramImport.confirmCode')}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                    {historyTelegramFlow.status === 'password_required' && (
+                      <>
+                        <p className="section-copy muted" style={{ margin: 0 }}>
+                          {t('channels.history.telegramImport.passwordText')}
+                        </p>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label htmlFor="history-telegram-password">{t('channels.history.telegramImport.password')}</label>
+                          <input
+                            id="history-telegram-password"
+                            className="form-control"
+                            type="password"
+                            value={historyTelegramCreds.password}
+                            onChange={(e) => setHistoryTelegramCreds((current) => ({ ...current, password: e.target.value }))}
+                          />
+                        </div>
+                        <div className="inline-actions">
+                          <button type="button" className="btn" onClick={handleTelegramImportComplete} disabled={historyLoading}>
+                            {historyLoading ? t('common.loading') : t('channels.history.telegramImport.finish')}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             {historyError && <p className="error">{historyError}</p>}
             <div className="inline-actions" style={{ marginTop: '1rem' }}>
               <button type="button" className="btn btn-secondary" onClick={closeHistoryModal}>

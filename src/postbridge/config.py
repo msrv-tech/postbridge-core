@@ -148,11 +148,39 @@ def _first_optional_env(*names: str) -> str | None:
     return None
 
 
+def _media_storage_type_for_app_mode(app_mode: str) -> str:
+    requested = (os.getenv("MEDIA_STORAGE_TYPE") or "").strip().lower()
+    if requested == "s3":
+        has_complete_s3_config = all(
+            (
+                _first_optional_env("S3_BUCKET", "MEDIA_S3_BUCKET"),
+                _first_optional_env("S3_ACCESS_KEY", "MEDIA_S3_ACCESS_KEY"),
+                _first_optional_env("S3_SECRET_KEY", "MEDIA_S3_SECRET_KEY"),
+            )
+        )
+        if has_complete_s3_config:
+            return "s3"
+        if app_mode == "selfhost":
+            return "local"
+        return "none"
+    if requested in {"local", "none"}:
+        if app_mode == "selfhost" and requested == "none":
+            return "local"
+        return requested
+    return "local" if app_mode == "selfhost" else "none"
+
+
 def get_settings() -> Settings:
     """Возвращает настройки из переменных окружения."""
     app_mode = os.getenv("POSTBRIDGE_APP_MODE", "selfhost").strip().lower() or "selfhost"
     ai_gateway_timeout_default = "300" if app_mode == "selfhost" else "60"
     ai_image_timeout_default = "300" if app_mode == "selfhost" else "120"
+    core_base_url = os.getenv("CORE_BASE_URL", "http://127.0.0.1:8000").strip()
+    media_storage_path = _strip_optional_env(os.getenv("MEDIA_STORAGE_PATH"))
+    media_base_url = _strip_optional_env(os.getenv("MEDIA_BASE_URL"))
+    if app_mode == "selfhost":
+        media_storage_path = media_storage_path or "/var/postbridge/media"
+        media_base_url = media_base_url or f"{core_base_url.rstrip('/')}/media"
     return Settings(
         app_env=os.getenv("APP_ENV", "dev"),
         postbridge_app_mode=app_mode,
@@ -208,7 +236,7 @@ def get_settings() -> Settings:
         ),
         saas_base_url=_strip_optional_env(os.getenv("SAAS_BASE_URL")),
         saas_bot_secret=_strip_optional_env(os.getenv("BOT_SECRET")),
-        core_base_url=os.getenv("CORE_BASE_URL", "http://127.0.0.1:8000").strip(),
+        core_base_url=core_base_url,
         sync_publish_token=os.getenv("SYNC_PUBLISH_TOKEN"),
         bot_mode=os.getenv("BOT_MODE", "long_polling").strip().lower() or "long_polling",
         bot_backend=os.getenv("BOT_BACKEND", "saas").strip().lower() or "saas",
@@ -260,9 +288,9 @@ def get_settings() -> Settings:
         credentials_encryption_key=_strip_optional_env(os.getenv("CREDENTIALS_ENCRYPTION_KEY")),
         sentry_dsn=_strip_optional_env(os.getenv("SENTRY_DSN")),
         sentry_traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
-        media_storage_type=os.getenv("MEDIA_STORAGE_TYPE", "none").strip().lower() or "none",
-        media_storage_path=_strip_optional_env(os.getenv("MEDIA_STORAGE_PATH")),
-        media_base_url=_strip_optional_env(os.getenv("MEDIA_BASE_URL")),
+        media_storage_type=_media_storage_type_for_app_mode(app_mode),
+        media_storage_path=media_storage_path,
+        media_base_url=media_base_url,
         s3_endpoint_url=_first_optional_env("S3_ENDPOINT_URL", "MEDIA_S3_ENDPOINT_URL"),
         s3_region=(
             (os.getenv("S3_REGION") or os.getenv("MEDIA_S3_REGION") or "us-east-1").strip()

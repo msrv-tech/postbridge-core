@@ -1,12 +1,15 @@
 from postbridge.api.agent_internal import router as agent_internal_router
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+import json
 from pathlib import Path
+from xml.sax.saxutils import escape
 from uuid import uuid4
 
 import sentry_sdk
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from postbridge.api.app_public import public_router as app_public_public_router
 from postbridge.api.app_public import router as app_public_router
 from postbridge.api.live_sync import router as live_sync_router
@@ -14,9 +17,12 @@ from postbridge.api.publication_internal import router as publication_internal_r
 from postbridge.api.service_internal import router as service_internal_router
 from postbridge.botkit.platforms.telegram.runtime import setup_telegram_bot_webhook
 from postbridge.config import get_settings, validate_base_settings
-from postbridge.db import init_db
+from sqlalchemy import func, select
+
+from postbridge.db import RssFeedItemOrm, SESSION_LOCAL, init_db
 from postbridge.domain.errors import InternalError, PostbridgeError, ValidationError
 from postbridge.i18n import get_i18n
+from postbridge.models.domain import TenantOrm
 from postbridge.observability.metrics import export_prometheus
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 
@@ -64,6 +70,78 @@ def serve_media(path: str) -> FileResponse:
     if not full.is_file():
         raise HTTPException(status_code=404, detail="error.http.not_found")
     return FileResponse(full)
+
+
+def _rss_item_media_urls(item: RssFeedItemOrm) -> list[str]:
+    urls: list[str] = []
+    if item.media_url:
+        urls.append(item.media_url)
+    if item.media_urls_json:
+        try:
+            parsed = json.loads(item.media_urls_json)
+        except (json.JSONDecodeError, TypeError):
+            parsed = None
+        if isinstance(parsed, list):
+            urls.extend(str(url).strip() for url in parsed if str(url).strip())
+    return list(dict.fromkeys(urls))
+
+
+@app.get("/rss/{feed_id}.xml", include_in_schema=False)
+def serve_selfhost_rss_feed(feed_id: str, request: Request) -> Response:
+    """Serve the local self-host RSS target feed."""
+    if get_settings().postbridge_app_mode != "selfhost":
+        raise HTTPException(status_code=404, detail="error.http.not_found")
+    if not feed_id or "/" in feed_id or len(feed_id) > 128:
+        raise HTTPException(status_code=404, detail="error.http.not_found")
+    session = SESSION_LOCAL()
+    try:
+        tenant_count = int(session.scalar(select(func.count()).select_from(TenantOrm)) or 0)
+        if tenant_count > 1:
+            raise HTTPException(status_code=404, detail="error.http.not_found")
+        rows = list(
+            session.scalars(
+                select(RssFeedItemOrm)
+                .where(RssFeedItemOrm.feed_id == feed_id)
+                .order_by(RssFeedItemOrm.published_at.desc())
+                .limit(100)
+            ).all()
+        )
+    finally:
+        session.close()
+
+    feed_url = str(request.url)
+    items: list[str] = []
+    for item in rows:
+        text = (item.text or "").strip()
+        first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
+        title = first_line[:120] or "Postbridge post"
+        media_links = "".join(
+            f"<link>{escape(url)}</link>" for url in _rss_item_media_urls(item)
+        )
+        published_at = item.published_at or datetime.now(UTC)
+        pub_date = published_at.astimezone(UTC).strftime("%a, %d %b %Y %H:%M:%S GMT")
+        guid = f"{feed_id}:item:{item.id}"
+        items.append(
+            "<item>"
+            f"<title>{escape(title)}</title>"
+            f"<description>{escape(item.text or '')}</description>"
+            f"<guid isPermaLink=\"false\">{escape(guid)}</guid>"
+            f"<pubDate>{escape(pub_date)}</pubDate>"
+            f"{media_links}"
+            "</item>"
+        )
+    body = (
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<rss version=\"2.0\">"
+        "<channel>"
+        f"<title>{escape('Postbridge RSS')}</title>"
+        f"<link>{escape(feed_url)}</link>"
+        f"<description>{escape('Posts published by Postbridge self-host.')}</description>"
+        f"{''.join(items)}"
+        "</channel>"
+        "</rss>"
+    )
+    return Response(content=body, media_type="application/rss+xml; charset=utf-8")
 
 
 _ERROR_STATUS_BY_CODE = {

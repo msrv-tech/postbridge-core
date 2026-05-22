@@ -5,14 +5,20 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import asyncio
+import http.client
+import ipaddress
 import json
+import logging
 import os
 import re
 import secrets
+import socket
+import ssl
 import time
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urljoin, urlparse, urlunparse
 from uuid import uuid4
 
 import httpx
@@ -20,7 +26,7 @@ from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Requ
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from postbridge.api.agent_internal import (
     AgentEditorMessageCreateBody,
@@ -60,24 +66,32 @@ from postbridge.infrastructure.crypto.credentials import (
     encrypt_credential_secret,
     get_fernet_for_credentials,
 )
-from postbridge.integrations.registry import get_platform_capabilities
+from postbridge.integrations.registry import (
+    RULE_POST_TEXT_LIMITS,
+    adapt_post_dict_for_platform,
+    get_platform_capabilities,
+)
+from postbridge.integrations.telegram.publisher import TG_BOT_API, TelegramPublisher, _chat_id_from_channel
 from postbridge.models.domain import (
     BridgeOrm,
     ChannelCredentialOrm,
     ChannelOrm,
     ContentItemOrm,
     InstallationSecretOrm,
+    LlmProviderConfigOrm,
     MediaGenerationJobOrm,
     PublicationPlanOrm,
     PublicationTargetOrm,
     TenantOrm,
 )
+from postbridge.services.bridge_adaptation import adapt_post_for_bridge
 from postbridge.services.ai_content import (
     adapt_content_for_channel,
     generate_and_plan,
     public_dict_for_generate_result,
     translate_content_for_channel,
 )
+from postbridge.services.live_sync_queue import queue_live_sync_publish
 from postbridge.services.ai_editor_chat import (
     delete_ai_chat_messages,
     list_ai_chat_events,
@@ -123,6 +137,11 @@ INSTALLATION_SECRET_LABELS = {
     "vk": "VK",
     "linkedin": "LinkedIn",
 }
+RSS_FEED_ID_MAX_LENGTH = 128
+RSS_SOURCE_VALIDATION_MAX_REDIRECTS = 3
+RSS_SOURCE_VALIDATION_TIMEOUT_SECONDS = 2.0
+TELEGRAM_IMPORT_FLOW_TTL_SECONDS = 900
+TELEGRAM_IMPORT_FLOW_CATEGORY = "telegram_import_flow"
 
 AUTH_EXEMPT_PREFIXES = (
     "/api/app/auth/",
@@ -280,8 +299,16 @@ def require_selfhost_app_auth(
         raise HTTPException(status_code=401, detail="authentication required")
 
 
+logger = logging.getLogger(__name__)
+
 public_router = APIRouter(prefix="/api/app")
 router = APIRouter(prefix="/api/app", dependencies=[Depends(require_selfhost_app_auth)])
+
+
+class LiveSyncQueueError(RuntimeError):
+    def __init__(self, queued_count: int):
+        super().__init__("live sync job queueing failed")
+        self.queued_count = queued_count
 
 
 class BootstrapRequest(BaseModel):
@@ -333,6 +360,18 @@ class InstallationSecretUpsertRequest(BaseModel):
     secret: dict[str, Any] | None = None
     config: dict[str, Any] | None = None
     status: str = Field(default="configured", min_length=1, max_length=32)
+
+
+class TelegramImportStartRequest(BaseModel):
+    api_id: str = Field(min_length=1, max_length=32)
+    api_hash: str = Field(min_length=1, max_length=128)
+    phone: str = Field(min_length=5, max_length=32)
+
+
+class TelegramImportCompleteRequest(BaseModel):
+    flow_id: str = Field(min_length=1, max_length=128)
+    code: str | None = Field(default=None, max_length=32)
+    password: str | None = Field(default=None, max_length=256)
 
 
 class ChannelValidateRequest(BaseModel):
@@ -477,18 +516,31 @@ class WorkspaceSettingsPatchRequest(BaseModel):
     image_style_prompt: str | None = Field(default=None, max_length=4_000)
 
 
+class PlatformPreviewRequest(BaseModel):
+    content_md: str | None = Field(default=None, max_length=500_000)
+    content: str | None = Field(default=None, max_length=500_000)
+    title: str | None = Field(default=None, max_length=512)
+    summary: str | None = Field(default=None, max_length=2048)
+    link_url: str | None = Field(default=None, max_length=2048)
+    cta: str | None = Field(default=None, max_length=512)
+    content_item_id: str | None = Field(default=None, max_length=36)
+    include_ai_adaptation: bool = False
+
+
 def _json_dumps_or_none(value: dict[str, Any] | None) -> str | None:
     if value is None:
         return None
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
-def _json_loads_or_empty(raw: str | None) -> dict[str, Any]:
+def _json_loads_or_empty(raw: str | dict[str, Any] | None) -> dict[str, Any]:
     if not raw:
         return {}
+    if isinstance(raw, dict):
+        return raw
     try:
         value = json.loads(raw)
-    except json.JSONDecodeError:
+    except (TypeError, json.JSONDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
 
@@ -497,6 +549,22 @@ def _json_compatible_dict(value: dict[str, Any] | None) -> dict[str, Any]:
     if value is None:
         return {}
     return json.loads(json.dumps(value, ensure_ascii=False))
+
+
+def _bool_capability(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return default
 
 
 def _normalize_telegram_channel_id(raw: str) -> str:
@@ -572,12 +640,130 @@ def _normalize_registry_channel_id(platform: str, raw: str) -> str:
     if normalized_platform == "linkedin":
         return _normalize_linkedin_author_urn(value)
     if normalized_platform == "rss":
+        if not value:
+            raise HTTPException(status_code=400, detail="connections.validation.rss.url_required")
         if value.startswith("http://") or value.startswith("https://"):
             return value
-        raise HTTPException(status_code=400, detail="RSS feed URL must start with http:// or https://")
+        raise HTTPException(status_code=400, detail="connections.validation.rss.url_invalid")
     if normalized_platform == "postbridge":
         return value
     raise HTTPException(status_code=422, detail="invalid platform")
+
+
+def _normalize_rss_target_feed_id(raw: str | None) -> str:
+    value = (raw or "rss").strip()
+    value = re.sub(r"[^a-zA-Z0-9_-]+", "-", value).strip("-")
+    if not value:
+        value = "rss"
+    if len(value) > RSS_FEED_ID_MAX_LENGTH:
+        raise HTTPException(status_code=422, detail="connections.validation.rss.feed_id_too_long")
+    return value
+
+
+def _rss_target_feed_id_for_url(raw: str | None) -> str | None:
+    value = (raw or "").strip()
+    if not value or len(value) > RSS_FEED_ID_MAX_LENGTH:
+        return None
+    if re.search(r"[^a-zA-Z0-9_-]", value):
+        return None
+    return value
+
+
+def _public_rss_host_addresses(hostname: str | None) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    host = (hostname or "").strip()
+    if not host:
+        return []
+    try:
+        addresses = [ipaddress.ip_address(host)]
+    except ValueError:
+        try:
+            resolved = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+        except socket.gaierror:
+            return []
+        addresses = []
+        for item in resolved:
+            sockaddr = item[4]
+            if sockaddr:
+                addresses.append(ipaddress.ip_address(sockaddr[0]))
+    unique_addresses = list(dict.fromkeys(addresses))
+    if not unique_addresses or not all(address.is_global for address in unique_addresses):
+        return []
+    return unique_addresses
+
+
+def _is_public_rss_host(hostname: str | None) -> bool:
+    return bool(_public_rss_host_addresses(hostname))
+
+
+def _validate_public_rss_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc) and _is_public_rss_host(parsed.hostname)
+
+
+def _fetch_public_rss_url_once(value: str) -> httpx.Response | None:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    addresses = _public_rss_host_addresses(parsed.hostname)
+    if not addresses:
+        return None
+    host = parsed.hostname or ""
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    path = urlunparse(("", "", parsed.path or "/", parsed.params, parsed.query, ""))
+    host_header = parsed.netloc
+    sock = socket.create_connection(
+        (addresses[0].compressed, port),
+        timeout=RSS_SOURCE_VALIDATION_TIMEOUT_SECONDS,
+    )
+    try:
+        if parsed.scheme == "https":
+            context = ssl.create_default_context()
+            sock = context.wrap_socket(sock, server_hostname=host)
+        request = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: {host_header}\r\n"
+            "User-Agent: Postbridge RSS Validator\r\n"
+            "Accept: application/rss+xml, application/xml, text/xml, */*;q=0.1\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        )
+        sock.sendall(request.encode("ascii"))
+        response = http.client.HTTPResponse(sock)
+        response.begin()
+        return httpx.Response(
+            response.status,
+            headers=response.getheaders(),
+            request=httpx.Request("GET", value),
+        )
+    finally:
+        sock.close()
+
+
+def _validate_rss_source_url(url: str) -> list[str]:
+    value = (url or "").strip()
+    if not value:
+        return ["connections.validation.rss.url_required"]
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ["connections.validation.rss.url_invalid"]
+    current_url = value
+    try:
+        for _ in range(RSS_SOURCE_VALIDATION_MAX_REDIRECTS + 1):
+            response = _fetch_public_rss_url_once(current_url)
+            if response is None:
+                return ["connections.validation.rss.url_invalid"]
+            if response.status_code not in {301, 302, 303, 307, 308}:
+                break
+            location = response.headers.get("location")
+            if not location:
+                return ["connections.validation.rss.unreachable"]
+            current_url = urljoin(str(response.url), location)
+        else:
+            return ["connections.validation.rss.unreachable"]
+        response.raise_for_status()
+    except (httpx.HTTPError, OSError, ssl.SSLError, http.client.HTTPException, UnicodeError):
+        return ["connections.validation.rss.unreachable"]
+    return []
 
 
 def _tenant_public_dict(row: TenantOrm) -> dict[str, Any]:
@@ -623,7 +809,9 @@ def _channel_public_dict(row: ChannelOrm) -> dict[str, Any]:
     config = _json_loads_or_empty(row.config_json)
     capabilities = _json_loads_or_empty(row.capabilities_json)
     platform_capabilities = get_platform_capabilities(row.platform)
-    return {
+    can_read = _bool_capability(capabilities.get("can_read"), row.kind in {"source", "both"})
+    can_write = _bool_capability(capabilities.get("can_write"), row.kind in {"destination", "target", "both"})
+    payload = {
         "id": row.id,
         "tenant_id": row.tenant_id,
         "platform": row.platform,
@@ -632,8 +820,8 @@ def _channel_public_dict(row: ChannelOrm) -> dict[str, Any]:
         "external_id": row.external_id,
         "platform_channel_id": row.external_id,
         "display": row.title,
-        "can_read": capabilities.get("can_read", row.kind in {"source", "both"}),
-        "can_write": capabilities.get("can_write", row.kind in {"destination", "target", "both"}),
+        "can_read": can_read,
+        "can_write": can_write,
         "live_sync_source_supported": bool(
             capabilities.get(
                 "live_sync_source_supported",
@@ -647,6 +835,11 @@ def _channel_public_dict(row: ChannelOrm) -> dict[str, Any]:
         "created_at": row.created_at.isoformat(),
         "updated_at": row.updated_at.isoformat(),
     }
+    if row.platform == "rss" and can_write and get_settings().postbridge_app_mode == "selfhost":
+        feed_id = _rss_target_feed_id_for_url(row.external_id or row.id)
+        if feed_id:
+            payload["rss_feed_url"] = f"/rss/{quote(feed_id, safe='')}.xml"
+    return payload
 
 
 def _credential_public_dict(row: ChannelCredentialOrm) -> dict[str, Any]:
@@ -918,6 +1111,179 @@ def _upsert_installation_secret_row(
     return row
 
 
+def _telegram_import_flow_row(session: Session, *, tenant_id: str) -> InstallationSecretOrm | None:
+    return session.scalar(
+        select(InstallationSecretOrm).where(
+            InstallationSecretOrm.tenant_id == tenant_id,
+            InstallationSecretOrm.category == TELEGRAM_IMPORT_FLOW_CATEGORY,
+        )
+    )
+
+
+def _cleanup_telegram_import_flow(session: Session, *, tenant_id: str) -> None:
+    row = _telegram_import_flow_row(session, tenant_id=tenant_id)
+    if row is None:
+        return
+    _config, secret = _installation_secret_payload(
+        session,
+        tenant_id=tenant_id,
+        category=TELEGRAM_IMPORT_FLOW_CATEGORY,
+    )
+    if float(secret.get("expires_at") or 0) <= time.time():
+        session.delete(row)
+        session.commit()
+
+
+def _load_telegram_import_flow(
+    session: Session,
+    *,
+    tenant_id: str,
+    flow_id: str,
+) -> tuple[InstallationSecretOrm, dict[str, Any]]:
+    row = _telegram_import_flow_row(session, tenant_id=tenant_id)
+    if row is None or row.status != "pending":
+        raise HTTPException(status_code=404, detail="Telegram login flow expired")
+    _config, secret = _installation_secret_payload(
+        session,
+        tenant_id=tenant_id,
+        category=TELEGRAM_IMPORT_FLOW_CATEGORY,
+    )
+    if secret.get("flow_id") != flow_id or float(secret.get("expires_at") or 0) <= time.time():
+        session.delete(row)
+        session.commit()
+        raise HTTPException(status_code=404, detail="Telegram login flow expired")
+    return row, secret
+
+
+def _new_telegram_string_session(session_string: str | None = None):
+    from telethon.sessions import StringSession
+
+    return StringSession(session_string)
+
+
+def _new_telegram_client(session_obj, api_id: int, api_hash: str):
+    from telethon import TelegramClient
+
+    return TelegramClient(session_obj, api_id=api_id, api_hash=api_hash)
+
+
+def _telegram_password_required_error_type():
+    from telethon.errors import SessionPasswordNeededError
+
+    return SessionPasswordNeededError
+
+
+def _save_telegram_session(session_obj) -> str:
+    save = getattr(session_obj, "save", None)
+    if callable(save):
+        return str(save())
+    from telethon.sessions import StringSession
+
+    return str(StringSession.save(session_obj))
+
+
+async def _telegram_import_send_code(*, api_id: int, api_hash: str, phone: str) -> tuple[str, str]:
+    session_obj = _new_telegram_string_session()
+    client = _new_telegram_client(session_obj, api_id, api_hash)
+    await client.connect()
+    try:
+        sent = await client.send_code_request(phone)
+        return _save_telegram_session(session_obj), str(sent.phone_code_hash)
+    finally:
+        await client.disconnect()
+
+
+async def _telegram_import_sign_in(
+    *,
+    session_string: str,
+    api_id: int,
+    api_hash: str,
+    phone: str,
+    phone_code_hash: str,
+    code: str | None,
+    password: str | None,
+) -> tuple[str, dict[str, Any], bool]:
+    session_obj = _new_telegram_string_session(session_string)
+    client = _new_telegram_client(session_obj, api_id, api_hash)
+    await client.connect()
+    try:
+        try:
+            if password:
+                await client.sign_in(password=password)
+            else:
+                await client.sign_in(phone=phone, code=code, phone_code_hash=phone_code_hash)
+        except _telegram_password_required_error_type():
+            return _save_telegram_session(session_obj), {}, True
+        me = await client.get_me()
+        account = {
+            "id": str(getattr(me, "id", "") or ""),
+            "username": getattr(me, "username", None),
+            "phone": getattr(me, "phone", None),
+            "first_name": getattr(me, "first_name", None),
+            "last_name": getattr(me, "last_name", None),
+        }
+        return _save_telegram_session(session_obj), account, False
+    finally:
+        await client.disconnect()
+
+
+def _sync_ai_gateway_provider_from_installation_secret(session: Session, *, tenant_id: str) -> None:
+    config, secret = _installation_secret_payload(
+        session,
+        tenant_id=tenant_id,
+        category="ai_gateway",
+    )
+    base_url = str(config.get("base_url") or secret.get("base_url") or "").strip()
+    model_name = str(config.get("default_model") or secret.get("default_model") or "").strip()
+    if not base_url or not model_name:
+        return
+    api_key = str(secret.get("api_key") or "").strip() or None
+    capabilities = {
+        key: value
+        for key, value in {
+            "image_model": config.get("image_model") or secret.get("image_model"),
+            "image_size": config.get("image_size") or secret.get("image_size"),
+            "embedding_model": config.get("embedding_model") or secret.get("embedding_model"),
+        }.items()
+        if value is not None and str(value).strip()
+    }
+    row = session.scalar(
+        select(LlmProviderConfigOrm)
+        .where(
+            LlmProviderConfigOrm.tenant_id == tenant_id,
+            LlmProviderConfigOrm.is_default.is_(True),
+        )
+        .limit(1)
+    )
+    now = datetime.now(UTC)
+    if row is None:
+        row = LlmProviderConfigOrm(
+            id=str(uuid4()),
+            tenant_id=tenant_id,
+            provider_type="openai_compatible",
+            label="AI Gateway",
+            base_url=base_url,
+            api_key=api_key,
+            model_name=model_name,
+            capabilities_json=_json_dumps_or_none(capabilities),
+            auth_config_json=None,
+            is_default=True,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(row)
+        session.flush()
+        return
+    row.provider_type = "openai_compatible"
+    row.label = row.label or "AI Gateway"
+    row.base_url = base_url
+    row.api_key = api_key
+    row.model_name = model_name
+    row.capabilities_json = _json_dumps_or_none(capabilities)
+    row.updated_at = now
+    session.flush()
+
+
 def _require_selfhost_channel(session: Session, channel_id: str) -> tuple[TenantOrm, ChannelOrm]:
     tenant = _require_selfhost_tenant(session)
     row = session.get(ChannelOrm, channel_id)
@@ -941,6 +1307,102 @@ def _credential_for_channel(
         .order_by(ChannelCredentialOrm.created_at.asc())
         .limit(1)
     )
+
+
+def _capability_flag_enabled(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _attach_telegram_bot_credential_if_available(
+    session: Session,
+    *,
+    tenant_id: str,
+    channel: ChannelOrm,
+) -> None:
+    if channel.platform != "telegram":
+        return
+    capabilities = _json_loads_or_empty(channel.capabilities_json)
+    can_write = capabilities.get("can_write")
+    if can_write is None:
+        can_write = channel.kind in {"both", "destination", "target"}
+    if not _capability_flag_enabled(can_write):
+        return
+    if _credential_for_channel(session, tenant_id=tenant_id, channel_id=channel.id) is not None:
+        return
+    _config, secret = _installation_secret_payload(
+        session,
+        tenant_id=tenant_id,
+        category="telegram_bot",
+    )
+    bot_token = str(secret.get("bot_token") or "").strip()
+    if not bot_token:
+        return
+    now = datetime.now(UTC)
+    session.add(
+        ChannelCredentialOrm(
+            id=str(uuid4()),
+            tenant_id=tenant_id,
+            channel_id=channel.id,
+            auth_type="telegram_bot",
+            encrypted_secret=encrypt_credential_secret(
+                _json_dumps_or_none({"bot_token": bot_token})
+            ),
+            status="active",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+
+def _validate_telegram_bot_target_access(
+    session: Session,
+    *,
+    tenant_id: str,
+    channel_id: str,
+) -> list[str]:
+    _config, secret = _installation_secret_payload(
+        session,
+        tenant_id=tenant_id,
+        category="telegram_bot",
+    )
+    bot_token = str(secret.get("bot_token") or "").strip()
+    if not bot_token:
+        return ["connections.validation.telegram.bot_not_configured"]
+
+    publisher = TelegramPublisher()
+    try:
+        me_response = publisher._request_bot_api("GET", f"{TG_BOT_API}{bot_token}/getMe")
+        me_response.raise_for_status()
+        me = me_response.json()
+        bot_id = ((me.get("result") or {}) if isinstance(me, dict) else {}).get("id")
+        if bot_id is None:
+            return ["connections.validation.telegram.admin_check_failed"]
+
+        member_response = publisher._request_bot_api(
+            "GET",
+            f"{TG_BOT_API}{bot_token}/getChatMember",
+            params={"chat_id": _chat_id_from_channel(channel_id), "user_id": bot_id},
+        )
+        member_response.raise_for_status()
+        member = member_response.json()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 401:
+            return ["connections.validation.telegram.bot_not_configured"]
+        return ["connections.validation.telegram.target_bot_admin_required"]
+    except (httpx.RequestError, ValueError):
+        return ["connections.validation.telegram.admin_check_failed"]
+
+    result = (member.get("result") or {}) if isinstance(member, dict) else {}
+    status = str(result.get("status") or "").lower()
+    if status not in {"administrator", "creator"}:
+        return ["connections.validation.telegram.target_bot_admin_required"]
+    if status == "administrator" and result.get("can_post_messages") is not True:
+        return ["connections.validation.telegram.target_bot_admin_required"]
+    return []
 
 
 def _create_or_update_managed_credential_channel(
@@ -1047,6 +1509,10 @@ def _require_selfhost_channels(
         raise HTTPException(status_code=404, detail="target channel not found")
     if target.platform == "postbridge":
         raise HTTPException(status_code=400, detail="postbridge channel cannot be a bridge target")
+    if not _channel_can_read(source):
+        raise HTTPException(status_code=400, detail="source channel cannot be read")
+    if not _channel_can_write(target):
+        raise HTTPException(status_code=400, detail="target channel cannot publish")
     return source, target
 
 
@@ -1073,41 +1539,6 @@ def _find_selfhost_channel(
     )
 
 
-def _get_or_create_selfhost_rss_target(
-    session: Session,
-    *,
-    tenant_id: str,
-    title: str | None,
-) -> ChannelOrm:
-    row = session.scalar(
-        select(ChannelOrm)
-        .where(
-            ChannelOrm.tenant_id == tenant_id,
-            ChannelOrm.platform == "rss",
-            ChannelOrm.external_id == "rss",
-        )
-        .limit(1)
-    )
-    if row is not None:
-        return row
-    now = datetime.now(UTC)
-    row = ChannelOrm(
-        id=str(uuid4()),
-        tenant_id=tenant_id,
-        platform="rss",
-        kind="destination",
-        title=(title or "RSS").strip() or "RSS",
-        external_id="rss",
-        status="connected",
-        capabilities_json=_json_dumps_or_none({"can_read": False, "can_write": True}),
-        created_at=now,
-        updated_at=now,
-    )
-    session.add(row)
-    session.flush()
-    return row
-
-
 def _bridge_public_dict(row: BridgeOrm) -> dict[str, Any]:
     settings = row.settings_json or {}
     return {
@@ -1126,6 +1557,316 @@ def _bridge_public_dict(row: BridgeOrm) -> dict[str, Any]:
         "created_at": row.created_at.isoformat(),
         "updated_at": row.updated_at.isoformat(),
     }
+
+
+def _platform_preview_post_dict(body: PlatformPreviewRequest) -> dict[str, Any]:
+    content = (body.content_md if body.content_md is not None else body.content) or ""
+    text_parts = [
+        (body.title or "").strip(),
+        content.strip(),
+        (body.summary or "").strip(),
+        (body.link_url or "").strip(),
+        (body.cta or "").strip(),
+    ]
+    text = "\n\n".join(part for part in text_parts if part)
+    return {
+        "id": body.content_item_id,
+        "title": (body.title or "").strip(),
+        "text": text,
+        "summary": (body.summary or "").strip(),
+        "link_url": (body.link_url or "").strip(),
+        "cta": (body.cta or "").strip(),
+    }
+
+
+def _channel_can_write(row: ChannelOrm) -> bool:
+    capabilities = _json_loads_or_empty(row.capabilities_json)
+    return _bool_capability(capabilities.get("can_write"), row.kind in {"destination", "target", "both"})
+
+
+def _channel_can_read(row: ChannelOrm) -> bool:
+    capabilities = _json_loads_or_empty(row.capabilities_json)
+    return _bool_capability(capabilities.get("can_read"), row.kind in {"source", "both"})
+
+
+def _selfhost_platform_preview_items(
+    session: Session,
+    *,
+    tenant_id: str,
+    body: PlatformPreviewRequest,
+) -> list[dict[str, Any]]:
+    source_channel = aliased(ChannelOrm)
+    target_channel = aliased(ChannelOrm)
+    rows = session.execute(
+        select(BridgeOrm, source_channel, target_channel)
+        .join(source_channel, BridgeOrm.source_channel_id == source_channel.id)
+        .join(target_channel, BridgeOrm.target_channel_id == target_channel.id)
+        .where(
+            BridgeOrm.tenant_id == tenant_id,
+            BridgeOrm.saas_user_id == LOCAL_ADMIN_USER_ID,
+            BridgeOrm.status == "active",
+            BridgeOrm.mode == "live_sync",
+            source_channel.tenant_id == tenant_id,
+            source_channel.platform == "postbridge",
+            target_channel.tenant_id == tenant_id,
+        )
+        .order_by(target_channel.platform.asc(), target_channel.title.asc())
+    ).all()
+    post = _platform_preview_post_dict(body)
+    items_by_group: dict[str, dict[str, Any]] = {}
+    for bridge, _source, target in rows:
+        if not _channel_can_write(target):
+            continue
+        platform = target.platform
+        settings = _json_loads_or_empty(bridge.settings_json)
+        settings_fingerprint = hashlib.sha256(
+            json.dumps(settings, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()[:12]
+        group_key = f"{platform}:{settings_fingerprint}"
+        item = items_by_group.get(group_key)
+        if item is None:
+            adapted_text = adapt_post_dict_for_platform(post, platform)
+            limit = RULE_POST_TEXT_LIMITS.get(platform)
+            item = {
+                "id": group_key,
+                "platform": platform,
+                "targets": [],
+                "text": adapted_text,
+                "limit": limit,
+                "adapted_length": len(adapted_text),
+                "adaptation_mode": settings.get("adaptation_mode", "rule_only"),
+                "adaptation_status": "ready",
+                "fallback_used": False,
+                "truncated": bool(limit is not None and len(adapted_text) > limit),
+            }
+            items_by_group[group_key] = item
+        item["targets"].append(
+            {
+                "id": target.id,
+                "title": target.title,
+                "platform_channel_id": target.external_id,
+                "bridge_id": bridge.id,
+            }
+        )
+    return list(items_by_group.values())
+
+
+def _append_link_url(text: str, link_url: str | None) -> str:
+    cleaned = (text or "").strip()
+    link = (link_url or "").strip()
+    if not link or link in cleaned:
+        return cleaned
+    return f"{cleaned}\n\n{link}".strip()
+
+
+def _compose_selfhost_source_text(data: dict[str, Any]) -> str:
+    title = str(data.get("title") or "").strip()
+    content = str(data.get("content_plain") or data.get("content_md") or "").strip()
+    if title and content and title not in content.splitlines()[:1]:
+        return f"{title}\n\n{content}"
+    return content or title
+
+
+def _infer_postbridge_live_sync_source_channel_id(session: Session, *, tenant_id: str) -> str | None:
+    source = aliased(ChannelOrm)
+    default_source_id = session.scalar(
+        select(source.id)
+        .join(BridgeOrm, BridgeOrm.source_channel_id == source.id)
+        .where(
+            source.tenant_id == tenant_id,
+            source.platform == "postbridge",
+            source.external_id == "postbridge-local",
+            BridgeOrm.tenant_id == tenant_id,
+            BridgeOrm.status == "active",
+            BridgeOrm.mode == "live_sync",
+        )
+        .limit(1)
+    )
+    if default_source_id:
+        return default_source_id
+    return session.scalar(
+        select(source.id)
+        .join(BridgeOrm, BridgeOrm.source_channel_id == source.id)
+        .where(
+            source.tenant_id == tenant_id,
+            source.platform == "postbridge",
+            BridgeOrm.tenant_id == tenant_id,
+            BridgeOrm.status == "active",
+            BridgeOrm.mode == "live_sync",
+        )
+        .order_by(source.created_at.asc())
+        .limit(1)
+    )
+
+
+def _selfhost_immediate_live_sync_jobs(
+    session: Session,
+    *,
+    row: ContentItemOrm,
+    source_channel_id: str | None,
+) -> list[dict[str, Any]]:
+    src_uuid = source_channel_id or _infer_postbridge_live_sync_source_channel_id(
+        session,
+        tenant_id=row.tenant_id,
+    )
+    if not src_uuid:
+        return []
+    source_ch = session.get(ChannelOrm, src_uuid)
+    if source_ch is None or source_ch.tenant_id != row.tenant_id or source_ch.platform != "postbridge":
+        return []
+    data = content_item_to_api_dict(row)
+    text_base = _compose_selfhost_source_text(data)
+    out_media_url = row.media_url or data.get("cover_image_url")
+    out_media_urls = list(row.media_urls) if row.media_urls else None
+    if out_media_url and (not out_media_urls or out_media_url not in out_media_urls):
+        out_media_urls = [out_media_url] + [url for url in (out_media_urls or []) if url != out_media_url]
+    source_post = {
+        "text": text_base,
+        "title": data.get("title"),
+        "summary": data.get("summary"),
+        "cta": data.get("cta"),
+        "link_url": data.get("link_url"),
+    }
+    base_post = {
+        "source_post_id": row.id,
+        "media_url": out_media_url,
+        "media_urls": out_media_urls,
+    }
+    jobs: list[dict[str, Any]] = []
+    bridges = session.scalars(
+        select(BridgeOrm).where(
+            BridgeOrm.tenant_id == row.tenant_id,
+            BridgeOrm.source_channel_id == source_ch.id,
+            BridgeOrm.status == "active",
+            BridgeOrm.mode == "live_sync",
+        )
+    ).all()
+    for bridge in bridges:
+        target = session.get(ChannelOrm, bridge.target_channel_id)
+        if target is None or target.tenant_id != row.tenant_id or not _channel_can_write(target):
+            continue
+        adaptation = adapt_post_for_bridge(
+            session,
+            tenant_id=row.tenant_id,
+            post=source_post,
+            platform=target.platform,
+            bridge_settings=bridge.settings_json,
+            target_channel_id=target.id,
+            content_item_id=row.id,
+        )
+        if adaptation.status == "needs_review":
+            continue
+        link_url = data.get("link_url")
+        post_text = _append_link_url(adaptation.text, link_url) if target.platform == "rss" else adaptation.text
+        post = {**base_post, "text": post_text}
+        if link_url:
+            post["link_url"] = link_url
+        jobs.append(
+            {
+                "source_channel": source_ch.external_id or source_ch.id,
+                "target_channel": target.external_id or target.id,
+                "post": post,
+                "workspace_id": data.get("saas_workspace_id") or "",
+                "target_platform": target.platform,
+                "core_tenant_id": row.tenant_id,
+                "target_core_channel_id": target.id,
+            }
+        )
+    return jobs
+
+
+def _enqueue_selfhost_live_sync_jobs(jobs: list[dict[str, Any]]) -> None:
+    queued_count = 0
+    for job in jobs:
+        try:
+            queue_live_sync_publish(
+                source_channel=job["source_channel"],
+                target_channel=job["target_channel"],
+                post=job["post"],
+                workspace_id=job["workspace_id"],
+                target_platform=job["target_platform"],
+                core_tenant_id=job["core_tenant_id"],
+                target_core_channel_id=job["target_core_channel_id"],
+                producer="postbridge_editor",
+            )
+            queued_count += 1
+        except Exception as exc:
+            raise LiveSyncQueueError(queued_count) from exc
+
+
+def _content_item_snapshot(row: ContentItemOrm) -> dict[str, Any]:
+    return {
+        "author_user_id": row.author_user_id,
+        "source_type": row.source_type,
+        "title": row.title,
+        "body_markdown": row.body_markdown,
+        "body_structured_json": row.body_structured_json,
+        "language": row.language,
+        "status": row.status,
+        "media_url": row.media_url,
+        "media_urls": list(row.media_urls) if row.media_urls else None,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    }
+
+
+def _restore_content_item_snapshot(row: ContentItemOrm, snapshot: dict[str, Any]) -> None:
+    row.author_user_id = snapshot["author_user_id"]
+    row.source_type = snapshot["source_type"]
+    row.title = snapshot["title"]
+    row.body_markdown = snapshot["body_markdown"]
+    row.body_structured_json = snapshot["body_structured_json"]
+    row.language = snapshot["language"]
+    row.status = snapshot["status"]
+    row.media_url = snapshot["media_url"]
+    row.media_urls = snapshot["media_urls"]
+    row.created_at = snapshot["created_at"]
+    row.updated_at = snapshot["updated_at"]
+
+
+def _revert_new_content_item_publish(row: ContentItemOrm) -> None:
+    data = _json_loads_or_empty(row.body_structured_json)
+    extra = data.get("postbridge_extra") if isinstance(data.get("postbridge_extra"), dict) else {}
+    extra.pop("published_at", None)
+    if not extra.get("scheduled_publish_at"):
+        extra.pop("live_sync_source_core_channel_id", None)
+    if extra:
+        data["postbridge_extra"] = extra
+    else:
+        data.pop("postbridge_extra", None)
+    row.body_structured_json = _json_dumps_or_none(data) if data else None
+    row.status = "draft"
+    row.updated_at = datetime.now(UTC)
+
+
+def _enqueue_selfhost_live_sync_jobs_or_revert(
+    session: Session,
+    *,
+    row: ContentItemOrm,
+    jobs: list[dict[str, Any]],
+    snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    try:
+        _enqueue_selfhost_live_sync_jobs(jobs)
+    except LiveSyncQueueError as exc:
+        if exc.queued_count == 0:
+            if snapshot is None:
+                _revert_new_content_item_publish(row)
+            else:
+                _restore_content_item_snapshot(row, snapshot)
+            session.commit()
+            raise HTTPException(status_code=503, detail="live sync job queueing failed") from exc
+        logger.warning(
+            "live sync job queueing partially failed after %s queued jobs; keeping content published to avoid duplicate retries",
+            exc.queued_count,
+        )
+        return {
+            "code": "live_sync_partial_queue_failure",
+            "message": "Some live sync targets were not queued. Check channels and retry missing targets manually.",
+            "queued_count": exc.queued_count,
+            "failed_count": max(0, len(jobs) - exc.queued_count),
+        }
+    return None
 
 
 def _batch_import_run_public_dict(row: BatchImportRunOrm, *, fetched_posts_count: int | None = None) -> dict[str, Any]:
@@ -1466,17 +2207,18 @@ def create_connection_from_wizard(
     )
     if source is None:
         raise HTTPException(status_code=404, detail="source channel not found")
-    if target_platform == "rss":
-        target = _get_or_create_selfhost_rss_target(session, tenant_id=tenant.id, title=body.target_display)
-    else:
-        target = _find_selfhost_channel(
-            session,
-            tenant_id=tenant.id,
-            platform=target_platform,
-            channel_ref=body.target_channel_id,
-        )
+    target = _find_selfhost_channel(
+        session,
+        tenant_id=tenant.id,
+        platform=target_platform,
+        channel_ref=body.target_channel_id,
+    )
     if target is None:
         raise HTTPException(status_code=404, detail="target channel not found")
+    if not _channel_can_read(source):
+        raise HTTPException(status_code=400, detail="source channel cannot be read")
+    if not _channel_can_write(target):
+        raise HTTPException(status_code=400, detail="target channel cannot publish")
 
     now = datetime.now(UTC)
     settings = {
@@ -1742,6 +2484,119 @@ def delete_installation_secret(category: str, session: Session = Depends(get_db_
     return Response(status_code=204)
 
 
+@router.post("/telegram-import/start", include_in_schema=False)
+def start_telegram_import_connection(
+    body: TelegramImportStartRequest,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Start a short Telethon login flow for self-host Telegram historical imports."""
+    tenant = _require_selfhost_tenant(session)
+    _cleanup_telegram_import_flow(session, tenant_id=tenant.id)
+    try:
+        api_id = int(body.api_id.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Telegram API ID must be numeric") from exc
+    api_hash = body.api_hash.strip()
+    phone = body.phone.strip()
+    if not api_hash or not phone:
+        raise HTTPException(status_code=422, detail="Telegram API hash and phone are required")
+    try:
+        session_seed, phone_code_hash = asyncio.run(
+            _telegram_import_send_code(api_id=api_id, api_hash=api_hash, phone=phone)
+        )
+    except Exception as exc:
+        logger.warning("telegram import code request failed", exc_info=exc)
+        raise HTTPException(status_code=502, detail="Telegram login code request failed") from exc
+    flow_id = secrets.token_urlsafe(24)
+    _upsert_installation_secret_row(
+        session,
+        tenant_id=tenant.id,
+        category=TELEGRAM_IMPORT_FLOW_CATEGORY,
+        secret={
+            "flow_id": flow_id,
+            "api_id": str(api_id),
+            "api_hash": api_hash,
+            "phone": phone,
+            "phone_code_hash": phone_code_hash,
+            "session_string": session_seed,
+            "expires_at": time.time() + TELEGRAM_IMPORT_FLOW_TTL_SECONDS,
+        },
+        config={},
+        status="pending",
+    )
+    session.commit()
+    return {
+        "flow_id": flow_id,
+        "status": "code_sent",
+        "expires_in": TELEGRAM_IMPORT_FLOW_TTL_SECONDS,
+    }
+
+
+@router.post("/telegram-import/complete", include_in_schema=False)
+def complete_telegram_import_connection(
+    body: TelegramImportCompleteRequest,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Complete Telethon login and store the resulting StringSession encrypted."""
+    tenant = _require_selfhost_tenant(session)
+    _cleanup_telegram_import_flow(session, tenant_id=tenant.id)
+    flow_row, flow = _load_telegram_import_flow(session, tenant_id=tenant.id, flow_id=body.flow_id)
+    code = (body.code or "").strip() or None
+    password = (body.password or "").strip() or None
+    if not code and not password:
+        raise HTTPException(status_code=422, detail="Telegram code or password is required")
+    try:
+        session_string, account, password_required = asyncio.run(
+            _telegram_import_sign_in(
+                session_string=str(flow["session_string"]),
+                api_id=int(flow["api_id"]),
+                api_hash=str(flow["api_hash"]),
+                phone=str(flow["phone"]),
+                phone_code_hash=str(flow["phone_code_hash"]),
+                code=code,
+                password=password,
+            )
+        )
+    except Exception as exc:
+        logger.warning("telegram import login failed", exc_info=exc)
+        raise HTTPException(status_code=502, detail="Telegram login failed") from exc
+    if password_required:
+        flow.update(
+            {
+                "session_string": session_string,
+                "expires_at": time.time() + TELEGRAM_IMPORT_FLOW_TTL_SECONDS,
+            }
+        )
+        flow_row.encrypted_secret = encrypt_credential_secret(_json_dumps_or_none(flow))
+        flow_row.updated_at = datetime.now(UTC)
+        session.commit()
+        return {
+            "flow_id": body.flow_id,
+            "status": "password_required",
+            "expires_in": TELEGRAM_IMPORT_FLOW_TTL_SECONDS,
+        }
+    row = _upsert_installation_secret_row(
+        session,
+        tenant_id=tenant.id,
+        category="telegram_import",
+        secret={
+            "api_id": str(flow["api_id"]),
+            "api_hash": str(flow["api_hash"]),
+            "session_string": session_string,
+        },
+        config={"account": account},
+        status="configured",
+    )
+    session.delete(flow_row)
+    session.commit()
+    session.refresh(row)
+    return {
+        "status": "configured",
+        "account": account,
+        "secret": _installation_secret_public_dict(row),
+    }
+
+
 @router.post("/gitsell-device/start", include_in_schema=False)
 def start_gitsell_device_flow(body: GitsellDeviceStartRequest) -> dict[str, Any]:
     """Start GitSell OAuth device flow for self-host AI Gateway onboarding."""
@@ -1989,10 +2844,14 @@ def handle_disabled_billing(path: str, session: Session = Depends(get_db_session
 
 
 @router.post("/platform-previews", include_in_schema=False)
-def create_platform_previews(session: Session = Depends(get_db_session)) -> dict[str, Any]:
-    """Platform previews are optional; return an empty preview set in self-host."""
-    _require_selfhost_tenant(session)
-    return {"items": []}
+def create_platform_previews(
+    body: PlatformPreviewRequest | None = None,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Build publish previews from active self-host bridges."""
+    tenant = _require_selfhost_tenant(session)
+    body = body or PlatformPreviewRequest()
+    return {"items": _selfhost_platform_preview_items(session, tenant_id=tenant.id, body=body)}
 
 
 @router.get("/agent/workspace-policy", include_in_schema=False)
@@ -2169,6 +3028,7 @@ def bootstrap_app(
         config={},
         status="configured",
     )
+    should_sync_ai_gateway_provider = False
     for category, payload in (body.installation_secrets or {}).items():
         normalized = _require_installation_secret_category(category)
         if not payload.secret and not payload.config:
@@ -2181,8 +3041,13 @@ def bootstrap_app(
             config=payload.config,
             status=payload.status,
         )
+        if normalized == "ai_gateway":
+            should_sync_ai_gateway_provider = True
     session.commit()
     session.refresh(tenant)
+    if should_sync_ai_gateway_provider:
+        _sync_ai_gateway_provider_from_installation_secret(session, tenant_id=tenant.id)
+        session.commit()
     _ensure_selfhost_welcome_content(
         session,
         tenant_id=tenant.id,
@@ -2253,9 +3118,40 @@ def validate_channel_registry(
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Validate and normalize a channel id for the self-host add-channel flow."""
-    _require_selfhost_tenant(session)
+    tenant = _require_selfhost_tenant(session)
     platform = body.platform.strip().lower()
-    normalized = _normalize_registry_channel_id(platform, body.platform_channel_id)
+    role = body.role.strip().lower()
+    try:
+        normalized = (
+            _normalize_rss_target_feed_id(body.platform_channel_id)
+            if platform == "rss" and role in {"target", "destination", "publish"}
+            else _normalize_registry_channel_id(platform, body.platform_channel_id)
+        )
+    except HTTPException as exc:
+        return {
+            "ok": False,
+            "display": "",
+            "platform_channel_id": body.platform_channel_id.strip(),
+            "role": body.role,
+            "errors": [str(exc.detail)],
+        }
+    errors: list[str] = []
+    if platform == "telegram" and role in {"target", "destination", "publish"}:
+        errors = _validate_telegram_bot_target_access(
+            session,
+            tenant_id=tenant.id,
+            channel_id=normalized,
+        )
+    if platform == "rss" and role in {"source", "read"}:
+        errors = _validate_rss_source_url(normalized)
+    if errors:
+        return {
+            "ok": False,
+            "display": normalized,
+            "platform_channel_id": normalized,
+            "role": body.role,
+            "errors": errors,
+        }
     return {
         "ok": True,
         "display": normalized,
@@ -2370,14 +3266,57 @@ def create_channel(
         if body.kind
         else ("both" if body.can_read and body.can_write else "source" if body.can_read else "destination")
     )
+    can_read = bool(body.can_read) or kind in {"source", "both"}
+    can_write = bool(body.can_write) or kind in {"destination", "target", "both"}
     if platform == "postbridge" and (can_write or kind in {"destination", "target", "both"}):
         raise HTTPException(status_code=400, detail="postbridge channel cannot be a target")
     credentials_channel = session.get(ChannelOrm, body.credentials_ref) if body.credentials_ref else None
+    if body.credentials_ref and (credentials_channel is None or credentials_channel.tenant_id != tenant.id):
+        raise HTTPException(status_code=404, detail="credentials_ref channel not found")
+    external_id = body.external_id or body.platform_channel_id or (
+        credentials_channel.external_id if credentials_channel is not None else None
+    )
+    if platform == "rss":
+        requested_read = can_read or kind in {"source", "both"}
+        requested_write = can_write or kind in {"destination", "target", "both"}
+        if requested_read and requested_write:
+            raise HTTPException(status_code=400, detail="RSS channel cannot be both source and target")
+        if requested_write:
+            external_id = _normalize_rss_target_feed_id(external_id)
+            kind = "destination"
+            can_read = False
+            can_write = True
+        elif requested_read:
+            external_id = _normalize_registry_channel_id("rss", external_id or "")
+            errors = _validate_rss_source_url(external_id)
+            if errors:
+                raise HTTPException(status_code=422, detail=errors[0])
+            kind = "source"
+            can_read = True
+            can_write = False
+        else:
+            raise HTTPException(status_code=400, detail="RSS channel must be source or target")
+    if platform == "telegram" and (can_read or can_write or kind in {"source", "destination", "target", "both"}):
+        external_id = _normalize_registry_channel_id("telegram", external_id or "")
+    if platform == "telegram" and (can_write or kind in {"destination", "target", "both"}):
+        errors = _validate_telegram_bot_target_access(
+            session,
+            tenant_id=tenant.id,
+            channel_id=external_id,
+        )
+        if errors:
+            raise HTTPException(status_code=422, detail=errors[0])
+    if platform in {"vk", "linkedin"} and (can_read or can_write):
+        if credentials_channel is None:
+            platform_label = "LinkedIn" if platform == "linkedin" else "VK"
+            raise HTTPException(status_code=422, detail=f"Connect {platform_label} credentials first.")
+        if credentials_channel.platform != platform:
+            raise HTTPException(status_code=422, detail=f"Choose connected {platform} credentials for this channel.")
     if credentials_channel is not None and credentials_channel.tenant_id == tenant.id:
         credentials_channel.platform = platform
         credentials_channel.kind = kind
         credentials_channel.title = body.title
-        credentials_channel.external_id = body.external_id or body.platform_channel_id
+        credentials_channel.external_id = external_id
         credentials_channel.status = body.status.strip().lower()
         credentials_channel.config_json = _json_dumps_or_none(
             {
@@ -2390,11 +3329,16 @@ def create_channel(
             {
                 **_json_loads_or_empty(credentials_channel.capabilities_json),
                 **(body.capabilities or {}),
-                **({"can_read": body.can_read} if body.can_read is not None else {}),
-                **({"can_write": body.can_write} if body.can_write is not None else {}),
+                **({"can_read": can_read} if body.can_read is not None or platform == "rss" else {}),
+                **({"can_write": can_write} if body.can_write is not None or platform == "rss" else {}),
             }
         )
         credentials_channel.updated_at = datetime.now(UTC)
+        _attach_telegram_bot_credential_if_available(
+            session,
+            tenant_id=tenant.id,
+            channel=credentials_channel,
+        )
         session.commit()
         session.refresh(credentials_channel)
         return _channel_public_dict(credentials_channel)
@@ -2404,7 +3348,7 @@ def create_channel(
         platform=platform,
         kind=kind,
         title=body.title,
-        external_id=body.external_id or body.platform_channel_id,
+        external_id=external_id,
         status=body.status.strip().lower(),
         config_json=_json_dumps_or_none(
             {
@@ -2415,12 +3359,18 @@ def create_channel(
         capabilities_json=_json_dumps_or_none(
             {
                 **(body.capabilities or {}),
-                **({"can_read": body.can_read} if body.can_read is not None else {}),
-                **({"can_write": body.can_write} if body.can_write is not None else {}),
+                **({"can_read": can_read} if body.can_read is not None or platform == "rss" else {}),
+                **({"can_write": can_write} if body.can_write is not None or platform == "rss" else {}),
             }
         ),
     )
     session.add(row)
+    session.flush()
+    _attach_telegram_bot_credential_if_available(
+        session,
+        tenant_id=tenant.id,
+        channel=row,
+    )
     session.commit()
     session.refresh(row)
     return _channel_public_dict(row)
@@ -2442,7 +3392,32 @@ def delete_channel(
     session: Session = Depends(get_db_session),
 ) -> Response:
     """Delete one self-host channel."""
-    _, row = _require_selfhost_channel(session, channel_id)
+    tenant, row = _require_selfhost_channel(session, channel_id)
+    session.execute(
+        delete(BridgeOrm).where(
+            BridgeOrm.tenant_id == tenant.id,
+            (BridgeOrm.source_channel_id == row.id) | (BridgeOrm.target_channel_id == row.id),
+        )
+    )
+    for batch_run in session.scalars(
+        select(BatchImportRunOrm).where(
+            BatchImportRunOrm.tenant_id == tenant.id,
+            (BatchImportRunOrm.source_core_channel_id == row.id)
+            | (BatchImportRunOrm.target_core_channel_id == row.id),
+        )
+    ):
+        if batch_run.source_core_channel_id == row.id:
+            batch_run.source_core_channel_id = None
+            batch_run.source_channel = f"deleted:{row.id}"
+        if batch_run.target_core_channel_id == row.id:
+            batch_run.target_core_channel_id = None
+            batch_run.target_channel = f"deleted:{row.id}"
+    session.execute(
+        delete(PublicationTargetOrm).where(
+            PublicationTargetOrm.tenant_id == tenant.id,
+            PublicationTargetOrm.channel_id == row.id,
+        )
+    )
     session.delete(row)
     session.commit()
     return Response(status_code=204)
@@ -2737,7 +3712,20 @@ def create_content_item(
     )
     session.commit()
     session.refresh(row)
-    return _content_item_public_dict(row)
+    if body.status == "published":
+        live_sync_jobs = _selfhost_immediate_live_sync_jobs(
+            session,
+            row=row,
+            source_channel_id=body.live_sync_source_core_channel_id,
+        )
+        session.commit()
+    else:
+        live_sync_jobs = []
+    live_sync_warning = _enqueue_selfhost_live_sync_jobs_or_revert(session, row=row, jobs=live_sync_jobs)
+    payload = _content_item_public_dict(row)
+    if live_sync_warning:
+        payload["live_sync_warning"] = live_sync_warning
+    return payload
 
 
 @router.get("/content-items/{content_id}", include_in_schema=False)
@@ -2764,6 +3752,7 @@ def patch_content_item(
     row = get_postbridge_content_item(session, tenant_id=tenant.id, content_id=content_id)
     if row is None:
         raise HTTPException(status_code=404, detail="content item not found")
+    snapshot = _content_item_snapshot(row)
     scheduled_at = (
         body.scheduled_publish_at
         if "scheduled_publish_at" in body.model_fields_set
@@ -2794,7 +3783,24 @@ def patch_content_item(
     )
     session.commit()
     session.refresh(row)
-    return _content_item_public_dict(row)
+    if body.status == "published":
+        live_sync_jobs = _selfhost_immediate_live_sync_jobs(
+            session,
+            row=row,
+            source_channel_id=(
+                source_channel_id
+                if source_channel_id is not POSTBRIDGE_SCHEDULE_UNSET
+                else None
+            ),
+        )
+        session.commit()
+    else:
+        live_sync_jobs = []
+    live_sync_warning = _enqueue_selfhost_live_sync_jobs_or_revert(session, row=row, jobs=live_sync_jobs, snapshot=snapshot)
+    payload = _content_item_public_dict(row)
+    if live_sync_warning:
+        payload["live_sync_warning"] = live_sync_warning
+    return payload
 
 
 @router.get("/content-items/{content_id}/publication-targets", include_in_schema=False)
@@ -3084,6 +4090,7 @@ def create_agent_task_app(
 ) -> dict[str, Any]:
     """Create one self-host agent task."""
     tenant = _require_selfhost_tenant(session)
+    _sync_ai_gateway_provider_from_installation_secret(session, tenant_id=tenant.id)
     return create_service_agent_task(body, tenant_id=tenant.id, session=session)
 
 
@@ -3125,6 +4132,7 @@ def run_agent_task_app(
 ) -> dict[str, Any]:
     """Run one self-host agent task now."""
     tenant = _require_selfhost_tenant(session)
+    _sync_ai_gateway_provider_from_installation_secret(session, tenant_id=tenant.id)
     return run_service_agent_task(task_id, request, tenant_id=tenant.id, session=session)
 
 
@@ -3144,6 +4152,7 @@ def create_agent_run_app(
 ) -> dict[str, Any]:
     """Run the self-host agent once."""
     tenant = _require_selfhost_tenant(session)
+    _sync_ai_gateway_provider_from_installation_secret(session, tenant_id=tenant.id)
     return create_service_agent_run(body, tenant_id=tenant.id, session=session)
 
 
@@ -3205,6 +4214,7 @@ def create_agent_editor_message_app(
 ) -> dict[str, Any]:
     """Send one self-host agent editor message."""
     tenant = _require_selfhost_tenant(session)
+    _sync_ai_gateway_provider_from_installation_secret(session, tenant_id=tenant.id)
     return create_service_agent_editor_message(
         content_item_id,
         body,

@@ -1,11 +1,15 @@
 import asyncio
+import json
 from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
+from postbridge.api.schemas import TelegramCredentials
 from postbridge.domain.errors import InternalError, PostbridgeError, ValidationError
+from postbridge.infrastructure.crypto.credentials import decrypt_credential_secret
 from postbridge.integrations.base import SourceFetcher
 from postbridge.integrations.registry import get_fetcher, resolve_fetch_credentials_for_core_channel
+from postbridge.models.domain import InstallationSecretOrm
 from postbridge.observability.logging import (
     log_job_completed,
     log_job_failed,
@@ -117,11 +121,45 @@ class SyncService:
                 message="migration run requires source_core_channel_id (Core channels.id UUID)",
                 details={"job_id": job.id},
             )
-        return resolve_fetch_credentials_for_core_channel(
-            self.job_store.session,
-            tenant_id=job.tenant_id,
-            source_core_channel_id=cid,
-            source_platform=source_platform,
+        try:
+            return resolve_fetch_credentials_for_core_channel(
+                self.job_store.session,
+                tenant_id=job.tenant_id,
+                source_core_channel_id=cid,
+                source_platform=source_platform,
+            )
+        except ValidationError as exc:
+            if source_platform == "telegram" and exc.code == "VALIDATION_CHANNEL_CREDENTIALS_MISSING":
+                fallback = self._telegram_import_credentials_from_installation_secret(job.tenant_id)
+                if fallback is not None:
+                    return fallback
+            raise
+
+    def _telegram_import_credentials_from_installation_secret(self, tenant_id: str) -> TelegramCredentials | None:
+        row = self.job_store.session.query(InstallationSecretOrm).filter_by(
+            tenant_id=tenant_id,
+            category="telegram_import",
+        ).one_or_none()
+        if row is None or not (row.encrypted_secret or "").strip():
+            return None
+        raw = decrypt_credential_secret(row.encrypted_secret)
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        api_id = str(data.get("api_id") or "").strip()
+        api_hash = str(data.get("api_hash") or "").strip()
+        session_string = str(data.get("session_string") or "").strip() or None
+        if not api_id or not api_hash:
+            return None
+        return TelegramCredentials(
+            api_id=api_id,
+            api_hash=api_hash,
+            session_string=session_string,
         )
 
     def _run_unified_publication_targets(

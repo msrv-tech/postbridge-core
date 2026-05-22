@@ -1998,7 +1998,7 @@ export default function PostEditor() {
                   )}
                 </p>
               )}
-              {!platformPreviewsLoading && !platformPreviewsError && platformPreviews.length === 0 && (
+              {!platformPreviewsLoading && !platformPreviewsError && hasPlatformPreviewContent() && platformPreviews.length === 0 && (
                 <div className="post-editor-review-gate">
                   <strong>{t('postEditor.bridgePreview.noBridgesTitle')}</strong>
                   <p>{t('postEditor.bridgePreview.noBridges')}</p>
@@ -2007,11 +2007,11 @@ export default function PostEditor() {
                   </Link>
                 </div>
               )}
-              {platformPreviews.map((item) => {
+              {platformPreviews.map((item, index) => {
                 const statusText = bridgeAdaptationStatusText(item, t)
                 const isReview = item.adaptation_status === 'needs_review'
                 return (
-                  <div key={item.platform} className="post-editor-platform-preview">
+                  <div key={item.id || `${item.platform}-${index}`} className="post-editor-platform-preview">
                     <div className="post-editor-platform-preview-head">
                       <strong>{item.platform.toUpperCase()}</strong>
                       <div className="post-editor-platform-preview-badges">

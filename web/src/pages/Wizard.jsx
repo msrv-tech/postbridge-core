@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Link, useParams, useNavigate, useLocation } from 'react-router-dom'
-import { createConnection, listChannelRegistry } from '../adapters/channels'
+import { createChannelRegistryItem, createConnection, listChannelRegistry } from '../adapters/channels'
 import AppShell from '../components/AppShell'
 import { useI18n } from '../i18n'
 
@@ -18,8 +18,9 @@ export default function Wizard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [sourceChannelId, setSourceChannelId] = useState('')
-  const [targetValue, setTargetValue] = useState('') // '' | 'rss' | channelId
+  const [targetValue, setTargetValue] = useState('')
   const [creating, setCreating] = useState(false)
+  const [creatingRssTarget, setCreatingRssTarget] = useState(false)
 
   useEffect(() => {
     if (!workspaceId) return
@@ -34,8 +35,7 @@ export default function Wizard() {
   const targetChannels = useMemo(() => channels.filter((ch) => ch.can_write), [channels])
 
   const sourceChannel = sourceChannels.find((ch) => ch.id === sourceChannelId)
-  const targetRss = targetValue === 'rss'
-  const targetChannel = targetValue && targetValue !== 'rss' ? targetChannels.find((ch) => ch.id === targetValue) : null
+  const targetChannel = targetValue ? targetChannels.find((ch) => ch.id === targetValue) : null
 
   useEffect(() => {
     if (!channels.length) return
@@ -49,13 +49,13 @@ export default function Wizard() {
       setSourceChannelId(preferredSource.id)
     }
     if (!targetValue) {
-      setTargetValue(externalTarget?.id || 'rss')
+      setTargetValue(externalTarget?.id || targetChannels[0]?.id || '')
     }
   }, [channels, sourceChannelId, sourceChannels, targetChannels, targetValue])
 
   const handleCreate = async () => {
     if (!sourceChannel) return
-    if (!targetRss && !targetChannel) return
+    if (!targetChannel) return
     setError('')
     setCreating(true)
     try {
@@ -63,15 +63,15 @@ export default function Wizard() {
         source_platform: sourceChannel.platform,
         source_channel_id: sourceChannel.platform_channel_id,
         source_display: sourceChannel.title || sourceChannel.platform_channel_id,
-        target_platform: targetRss ? 'rss' : targetChannel.platform,
-        target_channel_id: targetRss ? '' : targetChannel.platform_channel_id,
-        target_display: targetRss ? 'RSS' : (targetChannel.title || targetChannel.platform_channel_id),
+        target_platform: targetChannel.platform,
+        target_channel_id: targetChannel.platform_channel_id,
+        target_display: targetChannel.title || targetChannel.platform_channel_id,
         requested_limit: 0,
       }
       if (sourceChannel.credentials_ref && sourceChannel.credentials_ref !== 'env') {
         body.source_credentials_id = sourceChannel.credentials_ref
       }
-      if (!targetRss && targetChannel.credentials_ref && targetChannel.credentials_ref !== 'env') {
+      if (targetChannel.credentials_ref && targetChannel.credentials_ref !== 'env') {
         body.target_credentials_id = targetChannel.credentials_ref
       }
       await createConnection(workspaceId, body)
@@ -83,7 +83,28 @@ export default function Wizard() {
     }
   }
 
-  const canCreate = sourceChannel && (targetRss || targetChannel)
+  const handleCreateRssTarget = async () => {
+    setError('')
+    setCreatingRssTarget(true)
+    try {
+      const created = await createChannelRegistryItem(workspaceId, {
+        platform: 'rss',
+        platform_channel_id: 'rss',
+        title: 'RSS',
+        can_read: false,
+        can_write: true,
+      })
+      const nextChannels = [...channels, created]
+      setChannels(nextChannels)
+      setTargetValue(created.id)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setCreatingRssTarget(false)
+    }
+  }
+
+  const canCreate = sourceChannel && targetChannel
 
   if (loading) {
     return (
@@ -201,7 +222,6 @@ export default function Wizard() {
               className="form-control"
             >
               <option value="">{t('common.select')}</option>
-              <option value="rss">{t('wizard.rssTarget')}</option>
               {targetChannels.map((ch) => (
                 <option key={ch.id} value={ch.id}>
                   {platformLabel(ch.platform, t)} {ch.title || ch.platform_channel_id}
@@ -212,6 +232,21 @@ export default function Wizard() {
               <p className="muted" style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>
                 {t('wizard.noTargetHint')}
               </p>
+            )}
+            {targetChannels.length === 0 && (
+              <div className="inline-actions" style={{ marginTop: '0.75rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleCreateRssTarget}
+                  disabled={creatingRssTarget}
+                >
+                  {creatingRssTarget ? t('wizard.creatingRssTarget') : t('wizard.createRssTarget')}
+                </button>
+                <Link to={`/workspaces/${workspaceId}/channels/add`} className="btn btn-secondary">
+                  {t('wizard.addRealTarget')}
+                </Link>
+              </div>
             )}
           </div>
 

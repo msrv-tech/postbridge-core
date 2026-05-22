@@ -166,7 +166,7 @@ class RssFeedItemOrm(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    feed_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    feed_id: Mapped[str] = mapped_column(String(128), nullable=False)
     source_channel: Mapped[str] = mapped_column(String(256), nullable=False)
     source_post_id: Mapped[str] = mapped_column(String(128), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
