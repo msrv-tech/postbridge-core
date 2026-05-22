@@ -86,16 +86,17 @@ async function mockSelfhostApi(page) {
     if (path === '/api/app/connections/create' && method === 'POST') {
       const payload = route.request().postDataJSON()
       const source = channels.find((channel) => channel.platform_channel_id === payload.source_channel_id)
+      const target = channels.find((channel) => channel.platform_channel_id === payload.target_channel_id)
       const bridge = {
         id: `bridge-${bridges.length + 1}`,
         source_channel_id: source?.id || 'channel-1',
-        target_channel_id: `rss-target-${bridges.length + 1}`,
+        target_channel_id: target?.id || `target-${bridges.length + 1}`,
         source_platform: payload.source_platform,
         target_platform: payload.target_platform,
         source_platform_channel_id: payload.source_channel_id,
-        target_platform_channel_id: payload.target_channel_id || 'rss',
+        target_platform_channel_id: payload.target_channel_id,
         source_display: payload.source_display,
-        target_display: payload.target_display || 'RSS',
+        target_display: payload.target_display,
         mode: payload.mode || 'live_sync',
         status: 'active',
         live_sync_source_supported: true,
@@ -181,14 +182,23 @@ test('creates a channel and bridge in the self-host workflow', async ({ page }) 
   await expect(page.getByText('Channel added. Add more channels and create a bridge between them.')).toBeVisible()
   await expect(page.locator('.channel-link-badge-name', { hasText: 'Postbridge' })).toBeVisible()
 
-  await page.getByRole('link', { name: 'New bridge' }).click()
-  await expect(page).toHaveURL(/\/web\/workspaces\/local\/migrate/)
+  await page.getByRole('link', { name: 'Add channel' }).first().click()
+  await expect(page).toHaveURL(/\/web\/workspaces\/local\/channels\/add/)
+  await page.locator('#platform').selectOption('rss')
+  await page.locator('#rss-mode').selectOption('target')
+  await page.locator('#channel-id').fill('rss')
+  await page.locator('#title').fill('RSS')
+  await page.getByRole('button', { name: 'Check' }).click()
+  await page.getByRole('button', { name: 'Add channel' }).click()
+
+  await expect(page).toHaveURL(/\/web\/workspaces\/local\/migrate\?success=channel_added/)
+
   await page.locator('#source-channel-id').selectOption('channel-1')
-  await page.locator('#target-channel-id').selectOption('rss')
+  await page.locator('#target-channel-id').selectOption('channel-2')
   await page.getByRole('button', { name: 'Create bridge' }).click()
 
   await expect(page).toHaveURL(/\/web\/workspaces\/local\/channels\?success=channel_connected/)
   await expect(page.getByText('Bridge connected. Live sync is active.')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Bridges' })).toBeVisible()
-  await expect(page.locator('.channel-link-badge-name', { hasText: 'RSS' })).toBeVisible()
+  await expect(page.locator('.channel-link-badge-name', { hasText: 'RSS' }).first()).toBeVisible()
 })
