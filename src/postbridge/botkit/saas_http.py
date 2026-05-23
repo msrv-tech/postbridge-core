@@ -15,7 +15,7 @@ def saas_base_url() -> str:
     url = get_settings().saas_base_url
     if not url or not url.strip():
         raise RuntimeError("SAAS_BASE_URL is required for Telegram bot backend=saas")
-    return url.rstrip("/")
+    return url.strip().rstrip("/")
 
 
 def web_app_base_url() -> str:

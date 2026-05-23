@@ -79,6 +79,15 @@ jobs:
           path: ci/out/openapi-core.json
           if-no-files-found: warn
 
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: coverage-core
+          path: |
+            ci/out/coverage-core.xml
+            ci/out/htmlcov-core
+          if-no-files-found: warn
+
   deploy:
     needs:
       - secret-scan

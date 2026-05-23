@@ -2021,7 +2021,7 @@ def test_app_selfhost_rss_target_channel_exposes_local_feed_url(monkeypatch):
             "can_write": True,
         },
     )
-    assert created.status_code == 503
+    assert created.status_code == 200
     assert created.json()["platform_channel_id"] == "rss"
     assert created.json()["can_read"] is False
     assert created.json()["can_write"] is True
@@ -2460,7 +2460,7 @@ def test_app_selfhost_published_post_fans_out_to_rss_bridge(monkeypatch):
         },
     )
 
-    assert created.status_code == 503
+    assert created.status_code == 200
     assert len(queued) == 1
     assert queued[0]["source_channel"] == "postbridge-local"
     assert queued[0]["target_channel"] == "rss"

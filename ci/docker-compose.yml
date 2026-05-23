@@ -45,4 +45,4 @@ services:
       DATABASE_URL: postgresql+psycopg2://postbridge:postbridge@postgres:5432/postbridge_test
       REDIS_URL: redis://redis:6379/0
     command: >
-      sh -c "pytest -q && python scripts/export_openapi.py /out/openapi-core.json"
+      sh -c "pytest -q --cov=src/postbridge --cov-report=term-missing:skip-covered --cov-report=xml:/out/coverage-core.xml --cov-report=html:/out/htmlcov-core --cov-fail-under=80 && python scripts/export_openapi.py /out/openapi-core.json"

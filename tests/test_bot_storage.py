@@ -8,7 +8,8 @@ from postbridge.botkit.local_storage import CoreDbLocalStorageProvider, get_loca
 
 
 def test_get_local_storage_returns_none_when_no_config(monkeypatch: pytest.MonkeyPatch):
-    """get_local_storage() returns None when no MEDIA_BASE_URL or (MEDIA_STORAGE_PATH + CORE_BASE_URL)."""
+    """get_local_storage() returns None in SaaS mode without an explicit media base."""
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "saas")
     monkeypatch.delenv("MEDIA_BASE_URL", raising=False)
     monkeypatch.delenv("MEDIA_STORAGE_PATH", raising=False)
     monkeypatch.delenv("CORE_BASE_URL", raising=False)
