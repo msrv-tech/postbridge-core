@@ -65,6 +65,9 @@ jobs:
           docker compose --progress=plain -f ci/docker-compose.yml build
           docker compose -f ci/docker-compose.yml run --rm test
 
+      - name: Enforce core line coverage >= 80%
+        run: python scripts/check_line_coverage.py --coverage ci/out/coverage-core.xml --min 80 --label core
+
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
