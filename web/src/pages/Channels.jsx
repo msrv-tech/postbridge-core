@@ -14,7 +14,7 @@ import {
 } from '../adapters/billing'
 import { deleteBridge, listBridges, updateBridge } from '../adapters/bridges'
 import { deleteChannelRegistryItem, listChannelRegistry } from '../adapters/channels'
-import { getDashboardSummary, listDashboardJobs } from '../adapters/dashboard'
+import { getDashboardSummary, getOnboardingState, listDashboardJobs } from '../adapters/dashboard'
 import { startHistoricalImportJob } from '../adapters/jobs'
 import {
   completeTelegramImportConnection,
@@ -23,6 +23,7 @@ import {
 } from '../adapters/installationSecrets'
 import { isSelfhostMode } from '../adapters/runtime'
 import { useI18n } from '../i18n'
+import { reachMetrikaGoal } from '../metrika'
 
 function channelUrl(platform, platformChannelId, rssFeedUrl) {
   if (!platformChannelId && !rssFeedUrl) return null
@@ -101,6 +102,22 @@ function responseItems(response) {
   return Array.isArray(response?.items) ? response.items : []
 }
 
+function onboardingCopy(stage, t) {
+  const key = `channels.lifecycle.${stage || 'workspace_ready'}`
+  return {
+    title: t(`${key}.title`),
+    text: t(`${key}.text`),
+  }
+}
+
+function onboardingMetrikaParams(stage, workspaceId, action) {
+  return {
+    stage,
+    workspace_id: workspaceId,
+    action,
+  }
+}
+
 function bridgeDisplayItems(bridgeResponse, channelRegistryResponse) {
   const registryItems = responseItems(channelRegistryResponse)
   const registryById = new Map(registryItems.map((item) => [item.id, item]))
@@ -135,6 +152,7 @@ export default function Channels() {
   const navigate = useNavigate();
   const location = useLocation();
   const [summary, setSummary] = useState(null);
+  const [onboardingState, setOnboardingState] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [channels, setChannels] = useState([]);
   const [channelRegistry, setChannelRegistry] = useState([]);
@@ -163,6 +181,7 @@ export default function Channels() {
   const [adaptationDrafts, setAdaptationDrafts] = useState({});
   const [linkBackDrafts, setLinkBackDrafts] = useState({});
   const openHistoryHandled = useRef(false);
+  const lifecycleGoalRef = useRef('');
   const pendingTbankAfterEmailRef = useRef(null);
   const [billingEmailModal, setBillingEmailModal] = useState(null);
   /** Intermediate consent step for recurring card payments, not credits payments. */
@@ -176,6 +195,31 @@ export default function Channels() {
   const hasSourceChannel = channelRegistry.some((ch) => ch.can_read);
   const hasTargetChannel = channelRegistry.some((ch) => ch.can_write && ch.platform !== 'postbridge');
   const onboardingAction = !hasSourceChannel || !hasTargetChannel ? 'add-channel' : !hasActiveBridge ? 'create-bridge' : 'create-post';
+  const lifecycleStage = onboardingState?.stage || ''
+  const lifecycleCopy = onboardingCopy(lifecycleStage, t)
+  const lifecycleAction =
+    lifecycleStage === 'needs_external_channel' ||
+    lifecycleStage === 'workspace_ready' ||
+    lifecycleStage === 'registered' ||
+    lifecycleStage === 'external_channel_pending' ||
+    lifecycleStage === 'needs_writable_channel'
+      ? 'add-channel'
+      : lifecycleStage === 'needs_bridge'
+        ? 'create-bridge'
+        : lifecycleStage === 'payment_failed' || lifecycleStage === 'payment_started'
+          ? 'billing'
+          : lifecycleStage === 'needs_first_import'
+            ? 'run-import'
+          : lifecycleStage === 'activated'
+            ? 'none'
+            : 'create-post'
+
+  const trackLifecycleAction = (action) => {
+    if (!lifecycleStage || !workspaceId || !action) return
+    const params = onboardingMetrikaParams(lifecycleStage, workspaceId, action)
+    reachMetrikaGoal('onboarding_cta_clicked', params)
+    reachMetrikaGoal(`onboarding_cta_${action.replaceAll('-', '_')}`, params)
+  }
   const onboardingSteps = [
     { id: 'workspace', done: true, current: false, label: t('channels.onboarding.step.workspace') },
     {
@@ -207,12 +251,14 @@ export default function Channels() {
     if (!workspaceId) return;
     Promise.all([
       getDashboardSummary(workspaceId),
+      getOnboardingState(workspaceId),
       listDashboardJobs(workspaceId),
       listChannelRegistry(workspaceId),
       listBridges(workspaceId),
     ])
-      .then(([s, j, reg, bridges]) => {
+      .then(([s, onboarding, j, reg, bridges]) => {
         setSummary(s);
+        setOnboardingState(onboarding);
         setJobs(responseItems(j));
         setChannelRegistry(responseItems(reg));
         setChannels(bridgeDisplayItems(bridges, reg));
@@ -307,6 +353,9 @@ export default function Channels() {
       (j) => j.source_channel_id === srcId && j.target_channel_id === tgtId
     );
   };
+  const lifecycleImportBridge = channels.find((ch) =>
+    !getJobsForChannel(ch).some((job) => job.status === 'completed')
+  ) || channels[0];
 
   useEffect(() => {
     if (!workspaceId) {
@@ -317,12 +366,14 @@ export default function Channels() {
     setError('');
     Promise.all([
       getDashboardSummary(workspaceId),
+      getOnboardingState(workspaceId),
       listDashboardJobs(workspaceId),
       listChannelRegistry(workspaceId),
       listBridges(workspaceId),
     ])
-      .then(([s, j, reg, bridges]) => {
+      .then(([s, onboarding, j, reg, bridges]) => {
         setSummary(s);
+        setOnboardingState(onboarding);
         const channelItems = bridgeDisplayItems(bridges, reg);
         const jobItems = responseItems(j);
         setJobs(jobItems);
@@ -350,10 +401,21 @@ export default function Channels() {
         setJobs([]);
         setChannels([]);
         setChannelRegistry([]);
+        setOnboardingState(null);
         setError(e.message);
       })
       .finally(() => setLoading(false));
   }, [workspaceId]);
+
+  useEffect(() => {
+    if (!workspaceId || !lifecycleStage) return;
+    const key = `${workspaceId}:${lifecycleStage}`;
+    if (lifecycleGoalRef.current === key) return;
+    lifecycleGoalRef.current = key;
+    const params = onboardingMetrikaParams(lifecycleStage, workspaceId, lifecycleAction);
+    reachMetrikaGoal('onboarding_stage_view', params);
+    reachMetrikaGoal(`onboarding_stage_${lifecycleStage}_view`, params);
+  }, [workspaceId, lifecycleStage, lifecycleAction]);
 
   // Open the historical import modal when the page loads with openHistory=channel_id.
   useEffect(() => {
@@ -726,7 +788,73 @@ export default function Channels() {
         </div>
       )}
 
-      {!loading && hasAnyChannel && !hasActiveBridge && (
+      {!loading && onboardingState && lifecycleStage !== 'activated' && (
+        <div className="card lifecycle-panel">
+          <div className="lifecycle-panel-body">
+            <div>
+              <span className="badge badge-running">{t('channels.lifecycle.badge')}</span>
+              <h3>{lifecycleCopy.title}</h3>
+              <p className="section-copy">{lifecycleCopy.text}</p>
+            </div>
+            <div className="inline-actions lifecycle-actions">
+              {lifecycleAction === 'add-channel' && (
+                <Link
+                  to={`/workspaces/${workspaceId}/channels/add`}
+                  className="btn"
+                  onClick={() => trackLifecycleAction('add-channel')}
+                >
+                  {t('channels.onboarding.addChannel')}
+                </Link>
+              )}
+              {lifecycleAction === 'create-bridge' && (
+                <Link
+                  to={`/workspaces/${workspaceId}/migrate`}
+                  className="btn"
+                  onClick={() => trackLifecycleAction('create-bridge')}
+                >
+                  {t('channels.onboarding.createBridge')}
+                </Link>
+              )}
+              {lifecycleAction === 'create-post' && (
+                <Link
+                  to={`/workspaces/${workspaceId}/content/new`}
+                  className="btn"
+                  onClick={() => trackLifecycleAction('create-post')}
+                >
+                  {t('channels.onboarding.createDraft')}
+                </Link>
+              )}
+              {lifecycleAction === 'run-import' && (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    trackLifecycleAction('run-import');
+                    if (lifecycleImportBridge) openHistoryModal(lifecycleImportBridge);
+                  }}
+                  disabled={!lifecycleImportBridge}
+                >
+                  {t('channels.lifecycle.runImport')}
+                </button>
+              )}
+              {lifecycleAction === 'billing' && (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    trackLifecycleAction('billing');
+                    setTariffModal(true);
+                  }}
+                >
+                  {t('common.pricing')}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!loading && !onboardingState && hasAnyChannel && !hasActiveBridge && (
         <div className="card" style={{ borderColor: 'var(--primary)', background: 'rgba(59, 130, 246, 0.08)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 18rem' }}>
