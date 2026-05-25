@@ -16,6 +16,13 @@
 
 - Do not render disabled configuration fields for features that are turned off by a user-facing toggle. Show the toggle and reveal the related inputs only after the toggle is enabled.
 
+## Push workflow
+
+- Treat a user request to push as a one-time authorization for that specific push only. Do not push again later unless the user explicitly asks for another push.
+- GitHub Actions are configured to run on push. After every push, check the relevant GitHub Actions logs.
+- A push is not complete until the required checks and deployment have succeeded.
+- If a check or deployment fails after a push, inspect the logs, fix the failure, commit the fix, and push again as part of the same push request. Repeat until the deployment is green or there is a clear blocker that needs the user's decision.
+
 ## Running tests
 
 - Do not assume host Python is the right way to run tests here.
