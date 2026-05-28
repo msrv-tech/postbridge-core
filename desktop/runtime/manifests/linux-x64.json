@@ -1,0 +1,22 @@
+{
+  "platform": "linux-x64",
+  "postgres": {
+    "required": true,
+    "extension": "pgvector",
+    "bin": "runtime/bin/linux-x64/postgres/bin/postgres",
+    "initdb": "runtime/bin/linux-x64/postgres/bin/initdb",
+    "createdb": "runtime/bin/linux-x64/postgres/bin/createdb"
+  },
+  "queue": {
+    "kind": "redis-compatible",
+    "bin": "runtime/bin/linux-x64/queue/queue"
+  },
+  "core": {
+    "api": "runtime/bin/linux-x64/core/postbridge-api",
+    "worker": "runtime/bin/linux-x64/core/postbridge-worker",
+    "migrate": "runtime/bin/linux-x64/core/postbridge-migrate"
+  },
+  "web": {
+    "dist": "runtime/bin/web"
+  }
+}

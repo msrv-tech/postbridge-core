@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from postbridge.api import main as api_main
 from postbridge.api.main import app
 from postbridge.db import Base, BatchImportRunOrm, ENGINE, RssFeedItemOrm, SESSION_LOCAL, init_db
 from postbridge.infrastructure.crypto.credentials import decrypt_credential_secret, encrypt_credential_secret
@@ -136,6 +137,15 @@ def test_web_serves_selfhost_app_shell(monkeypatch):
     asset_path = response.text.split('/web/assets/', 1)[1].split('"', 1)[0]
     asset = client.get(f"/web/assets/{asset_path}")
     assert asset.status_code == 200
+
+
+def test_web_dist_dir_can_be_overridden_for_desktop_runtime(monkeypatch, tmp_path):
+    web_dir = tmp_path / "desktop-web"
+    web_dir.mkdir()
+    (web_dir / "index.html").write_text("<div id=\"root\"></div>", encoding="utf-8")
+    monkeypatch.setenv("POSTBRIDGE_WEB_DIST_DIR", str(web_dir))
+
+    assert api_main._web_dist_dir() == web_dir
 
 
 def test_root_redirects_to_web_in_selfhost_mode(monkeypatch):

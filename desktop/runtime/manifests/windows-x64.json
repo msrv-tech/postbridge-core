@@ -1,0 +1,22 @@
+{
+  "platform": "windows-x64",
+  "postgres": {
+    "required": true,
+    "extension": "pgvector",
+    "bin": "runtime/bin/windows-x64/postgres/bin/postgres.exe",
+    "initdb": "runtime/bin/windows-x64/postgres/bin/initdb.exe",
+    "createdb": "runtime/bin/windows-x64/postgres/bin/createdb.exe"
+  },
+  "queue": {
+    "kind": "redis-compatible",
+    "bin": "runtime/bin/windows-x64/queue/redis-server.exe"
+  },
+  "core": {
+    "api": "runtime/bin/windows-x64/core/postbridge-api.exe",
+    "worker": "runtime/bin/windows-x64/core/postbridge-worker.exe",
+    "migrate": "runtime/bin/windows-x64/core/postbridge-migrate.exe"
+  },
+  "web": {
+    "dist": "runtime/bin/web"
+  }
+}

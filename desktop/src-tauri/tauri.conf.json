@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Postbridge Desktop",
+  "version": "0.1.0",
+  "identifier": "ru.postbridge.desktop",
+  "build": {
+    "beforeDevCommand": "npm run vite:dev",
+    "beforeBuildCommand": "npm run check",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Postbridge Desktop",
+        "width": 1120,
+        "height": 760,
+        "minWidth": 860,
+        "minHeight": 620
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png",
+      "../../web/public/android-chrome-512x512.png"
+    ],
+    "shortDescription": "Local self-host runtime for Postbridge",
+    "longDescription": "Postbridge Desktop runs the full Postbridge self-host stack locally."
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    }
+  }
+}

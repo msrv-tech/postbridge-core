@@ -20,6 +20,7 @@ class Settings:
     postbridge_release_repository: str
     postbridge_container_image: str
     postbridge_selfhost_tenant_id: str
+    postbridge_web_dist_dir: str | None
     database_url: str
     redis_url: str
     celery_task_always_eager: bool
@@ -197,6 +198,7 @@ def get_settings() -> Settings:
             os.getenv("POSTBRIDGE_SELFHOST_TENANT_ID", "00000000-0000-4000-8000-000000000001").strip()
             or "00000000-0000-4000-8000-000000000001"
         ),
+        postbridge_web_dist_dir=_strip_optional_env(os.getenv("POSTBRIDGE_WEB_DIST_DIR")),
         database_url=(os.getenv("DATABASE_URL") or "").strip(),
         redis_url=os.getenv("REDIS_URL", "redis://redis:6379/0"),
         celery_task_always_eager=_to_bool(os.getenv("CELERY_TASK_ALWAYS_EAGER"), False),

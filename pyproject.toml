@@ -31,6 +31,7 @@ dependencies = [
 
 [project.scripts]
 postbridge-telegram-bot = "postbridge.botkit.platforms.telegram.runtime:main"
+postbridge-desktop-runtime = "postbridge.desktop_runtime:main"
 
 [project.optional-dependencies]
 dev = [

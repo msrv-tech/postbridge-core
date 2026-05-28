@@ -240,6 +240,12 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 def _web_dist_dir() -> Path | None:
     """Return the built Core frontend directory when it is available."""
+    configured = (get_settings().postbridge_web_dist_dir or "").strip()
+    if configured:
+        candidate = Path(configured)
+        if (candidate / "index.html").is_file():
+            return candidate
+
     candidates = [
         Path.cwd() / "web" / "dist",
         Path(__file__).resolve().parents[3] / "web" / "dist",
