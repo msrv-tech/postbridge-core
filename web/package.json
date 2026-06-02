@@ -14,14 +14,14 @@
     "test:e2e:install": "playwright install chromium"
   },
   "dependencies": {
-    "@uiw/react-md-editor": "^4.1.0",
-    "react": "^19.2.6",
-    "react-dom": "^19.2.6",
-    "react-router-dom": "^7.15.1"
+    "@uiw/react-md-editor": "^4.1.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-router-dom": "^7.16.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
     "@vitejs/plugin-react": "^6.0.2",
-    "vite": "^8.0.13"
+    "vite": "^8.0.16"
   }
 }
