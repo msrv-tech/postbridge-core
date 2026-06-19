@@ -196,27 +196,42 @@ export default function Channels() {
   const hasTargetChannel = channelRegistry.some((ch) => ch.can_write && ch.platform !== 'postbridge');
   const onboardingAction = !hasSourceChannel || !hasTargetChannel ? 'add-channel' : !hasActiveBridge ? 'create-bridge' : 'create-post';
   const lifecycleStage = onboardingState?.stage || ''
-  const lifecycleCopy = onboardingCopy(lifecycleStage, t)
+  const hasPostbridgeSourceBridge = channels.some((ch) => ch.source_platform === 'postbridge')
+  const effectiveLifecycleStage = (() => {
+    if (!hasActiveBridge) return lifecycleStage
+    if (
+      lifecycleStage === 'registered' ||
+      lifecycleStage === 'workspace_ready' ||
+      lifecycleStage === 'needs_external_channel' ||
+      lifecycleStage === 'external_channel_pending' ||
+      lifecycleStage === 'needs_writable_channel' ||
+      lifecycleStage === 'needs_bridge'
+    ) {
+      return hasPostbridgeSourceBridge ? 'needs_first_publication' : 'needs_first_import'
+    }
+    return lifecycleStage
+  })()
+  const lifecycleCopy = onboardingCopy(effectiveLifecycleStage, t)
   const lifecycleAction =
-    lifecycleStage === 'needs_external_channel' ||
-    lifecycleStage === 'workspace_ready' ||
-    lifecycleStage === 'registered' ||
-    lifecycleStage === 'external_channel_pending' ||
-    lifecycleStage === 'needs_writable_channel'
+    effectiveLifecycleStage === 'needs_external_channel' ||
+    effectiveLifecycleStage === 'workspace_ready' ||
+    effectiveLifecycleStage === 'registered' ||
+    effectiveLifecycleStage === 'external_channel_pending' ||
+    effectiveLifecycleStage === 'needs_writable_channel'
       ? 'add-channel'
-      : lifecycleStage === 'needs_bridge'
+      : effectiveLifecycleStage === 'needs_bridge'
         ? 'create-bridge'
-        : lifecycleStage === 'payment_failed' || lifecycleStage === 'payment_started'
+        : effectiveLifecycleStage === 'payment_failed' || effectiveLifecycleStage === 'payment_started'
           ? 'billing'
-          : lifecycleStage === 'needs_first_import'
+          : effectiveLifecycleStage === 'needs_first_import'
             ? 'run-import'
-          : lifecycleStage === 'activated'
+          : effectiveLifecycleStage === 'activated'
             ? 'none'
             : 'create-post'
 
   const trackLifecycleAction = (action) => {
-    if (!lifecycleStage || !workspaceId || !action) return
-    const params = onboardingMetrikaParams(lifecycleStage, workspaceId, action)
+    if (!effectiveLifecycleStage || !workspaceId || !action) return
+    const params = onboardingMetrikaParams(effectiveLifecycleStage, workspaceId, action)
     reachMetrikaGoal('onboarding_cta_clicked', params)
     reachMetrikaGoal(`onboarding_cta_${action.replaceAll('-', '_')}`, params)
   }
@@ -408,14 +423,14 @@ export default function Channels() {
   }, [workspaceId]);
 
   useEffect(() => {
-    if (!workspaceId || !lifecycleStage) return;
-    const key = `${workspaceId}:${lifecycleStage}`;
+    if (!workspaceId || !effectiveLifecycleStage) return;
+    const key = `${workspaceId}:${effectiveLifecycleStage}`;
     if (lifecycleGoalRef.current === key) return;
     lifecycleGoalRef.current = key;
-    const params = onboardingMetrikaParams(lifecycleStage, workspaceId, lifecycleAction);
+    const params = onboardingMetrikaParams(effectiveLifecycleStage, workspaceId, lifecycleAction);
     reachMetrikaGoal('onboarding_stage_view', params);
-    reachMetrikaGoal(`onboarding_stage_${lifecycleStage}_view`, params);
-  }, [workspaceId, lifecycleStage, lifecycleAction]);
+    reachMetrikaGoal(`onboarding_stage_${effectiveLifecycleStage}_view`, params);
+  }, [workspaceId, effectiveLifecycleStage, lifecycleAction]);
 
   // Open the historical import modal when the page loads with openHistory=channel_id.
   useEffect(() => {
@@ -788,7 +803,7 @@ export default function Channels() {
         </div>
       )}
 
-      {!loading && onboardingState && lifecycleStage !== 'activated' && (
+      {!loading && onboardingState && effectiveLifecycleStage !== 'activated' && (
         <div className="card lifecycle-panel">
           <div className="lifecycle-panel-body">
             <div>
