@@ -146,7 +146,7 @@ function bridgeDisplayItems(bridgeResponse, channelRegistryResponse) {
 }
 
 export default function Channels() {
-  const { locale, t } = useI18n();
+  const { t } = useI18n();
   const { user, refreshUser } = useAuth();
   const { workspaceId: workspaceIdParam } = useParams();
   const navigate = useNavigate();

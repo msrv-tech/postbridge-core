@@ -5,6 +5,11 @@ import { getWorkspaceAgentPolicy, upsertWorkspaceAgentPolicy } from '../adapters
 import { getDashboardSummary } from '../adapters/dashboard'
 import { dispatchPublicationTarget, listPublicationTargetProjections } from '../adapters/publicationTargets'
 import { isSelfhostMode } from '../adapters/runtime'
+import {
+  isSupportAssistantHidden,
+  setSupportAssistantHidden,
+  supportAssistantVisibilityEvent,
+} from '../adapters/supportAssistantVisibility'
 import { getVersionCheck } from '../adapters/version'
 import { getWorkspaceSettings, updateWorkspaceSettings } from '../adapters/workspaceSettings'
 import { useAuth } from '../useAuth'
@@ -151,6 +156,7 @@ export default function WorkspaceSettings() {
   const [versionError, setVersionError] = useState('')
   const [showUpdateCommand, setShowUpdateCommand] = useState(false)
   const [updateCommandCopied, setUpdateCommandCopied] = useState(false)
+  const [assistantHidden, setAssistantHiddenState] = useState(() => isSupportAssistantHidden(workspaceId))
 
   const preferredDomainsText = useMemo(
     () => (workspaceAgentPolicy.preferred_domains || []).join('\n'),
@@ -162,6 +168,7 @@ export default function WorkspaceSettings() {
   )
   const billingEnabled = isBillingEnabled(user)
   const aiTokenRemainder = buildAiTokenRemainder(billingSummary?.billing, t)
+  const showAssistantSettings = Boolean(workspaceId) && !isSelfhostMode()
 
   const tzSelectOptions = useMemo(() => {
     const base = getTimezoneSelectOptions(t)
@@ -182,6 +189,16 @@ export default function WorkspaceSettings() {
     if (user?.profile_timezone) setTimezone(user.profile_timezone)
     else setTimezone('')
   }, [user])
+
+  useEffect(() => {
+    setAssistantHiddenState(isSupportAssistantHidden(workspaceId))
+    const handleVisibility = (event) => {
+      if (event.detail?.workspaceId && event.detail.workspaceId !== workspaceId) return
+      setAssistantHiddenState(isSupportAssistantHidden(workspaceId))
+    }
+    window.addEventListener(supportAssistantVisibilityEvent, handleVisibility)
+    return () => window.removeEventListener(supportAssistantVisibilityEvent, handleVisibility)
+  }, [workspaceId])
 
   const loadDelivery = useCallback(() => {
     if (!workspaceId) return
@@ -362,6 +379,11 @@ export default function WorkspaceSettings() {
     if (!versionCheck?.update_command || typeof navigator === 'undefined' || !navigator.clipboard) return
     await navigator.clipboard.writeText(versionCheck.update_command)
     setUpdateCommandCopied(true)
+  }
+
+  const setAssistantVisible = (visible) => {
+    setSupportAssistantHidden(workspaceId, !visible)
+    setAssistantHiddenState(!visible)
   }
 
   const parseLineList = (raw) =>
@@ -680,6 +702,33 @@ export default function WorkspaceSettings() {
           </div>
         </div>
       </div>
+
+      {showAssistantSettings && (
+        <div className="card" style={{ marginBottom: '1.5rem' }}>
+          <h3 className="h-small" style={{ marginTop: 0 }}>
+            {t('settings.assistant.title')}
+          </h3>
+          <p className="muted post-editor-hint">
+            {t('settings.assistant.text')}
+          </p>
+          <label className="toggle-row">
+            <span className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={!assistantHidden}
+                onChange={(event) => setAssistantVisible(event.target.checked)}
+              />
+              <span className="toggle-track">
+                <span className="toggle-thumb" />
+              </span>
+            </span>
+            <span>
+              <span className="toggle-label">{t('settings.assistant.toggle')}</span>
+              <span className="toggle-hint">{t('settings.assistant.toggleHint')}</span>
+            </span>
+          </label>
+        </div>
+      )}
 
       {isSelfhostMode() && (
         <div className="card" style={{ marginBottom: '1.5rem' }}>

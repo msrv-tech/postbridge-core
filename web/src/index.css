@@ -1669,6 +1669,11 @@ select {
   line-height: 1.45;
 }
 
+.toggle-row .toggle-hint {
+  display: block;
+  padding-left: 0;
+}
+
 /* Post Editor layout */
 .post-editor-card {
   max-width: 1200px;
@@ -1779,7 +1784,7 @@ select {
 
 .image-job-notifications {
   position: fixed;
-  right: 1rem;
+  left: 1rem;
   bottom: 1rem;
   z-index: 60;
   display: grid;
@@ -3523,6 +3528,125 @@ textarea:focus {
   margin-top: 0.2rem;
 }
 
+.support-assistant-widget {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 70;
+  width: min(360px, calc(100vw - 2rem));
+}
+
+.support-assistant-widget.is-collapsed {
+  width: auto;
+}
+
+.support-assistant-window,
+.support-assistant-launcher {
+  border: 1px solid rgba(59, 130, 246, 0.32);
+  background: color-mix(in srgb, var(--surface) 94%, var(--primary));
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+}
+
+.support-assistant-window {
+  display: grid;
+  gap: 0.85rem;
+  max-height: min(620px, calc(100vh - 2rem));
+  overflow: hidden;
+  padding: 1rem;
+  border-radius: 8px;
+}
+
+.support-assistant-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+
+.support-assistant-header h3 {
+  margin: 0.45rem 0 0;
+  font-size: 1.05rem;
+}
+
+.support-assistant-controls {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.support-assistant-icon-button {
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+
+.support-assistant-icon-button:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.support-assistant-body {
+  min-height: 3.5rem;
+  max-height: 12rem;
+  overflow: auto;
+}
+
+.support-assistant-answer {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.55;
+}
+
+.support-assistant-form {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.support-assistant-form input {
+  width: 100%;
+}
+
+.support-assistant-actions {
+  justify-content: flex-end;
+  margin: 0;
+}
+
+.support-assistant-launcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.support-assistant-launcher:hover {
+  border-color: var(--primary);
+}
+
+.support-assistant-launcher-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 8px;
+  background: var(--primary);
+  color: white;
+  font-size: 0.78rem;
+}
+
 .list-meta {
   font-size: 0.92rem;
 }
@@ -3729,6 +3853,18 @@ textarea:focus {
   .bridge-adaptation-settings,
   .bridge-link-back-controls {
     grid-template-columns: 1fr;
+  }
+
+  .support-assistant-widget {
+    right: 0.75rem;
+    bottom: 0.75rem;
+    width: calc(100vw - 1.5rem);
+  }
+
+  .image-job-notifications {
+    left: 0.75rem;
+    bottom: 0.75rem;
+    width: calc(100vw - 1.5rem);
   }
 
   .bridge-link-back-head {
