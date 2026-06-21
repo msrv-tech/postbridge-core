@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import { listMediaGenerationJobs } from '../adapters/media'
 import { LanguageSelect, useI18n } from '../i18n'
+import SupportAssistantWidget from './SupportAssistantWidget'
 
 const dismissedImageJobsKey = (workspaceId) => `postbridge_dismissed_image_jobs_${workspaceId}`
 const brandMarkSrc = `${import.meta.env.BASE_URL}postbridge-mark.svg`
@@ -172,6 +173,7 @@ export default function AppShell({
           ))}
         </div>
       )}
+      <SupportAssistantWidget workspaceId={workspaceId} />
     </div>
   )
 }
