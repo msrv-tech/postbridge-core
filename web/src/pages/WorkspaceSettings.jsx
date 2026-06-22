@@ -12,6 +12,7 @@ import {
 } from '../adapters/supportAssistantVisibility'
 import { getVersionCheck } from '../adapters/version'
 import { getWorkspaceSettings, updateWorkspaceSettings } from '../adapters/workspaceSettings'
+import { getStoredTheme, setStoredTheme, THEMES } from '../adapters/theme'
 import { useAuth } from '../useAuth'
 import AppShell from '../components/AppShell'
 import { BILLING_SUPPORT_EMAIL, formatSubscriptionPeriod } from '../billingSupport'
@@ -157,6 +158,7 @@ export default function WorkspaceSettings() {
   const [showUpdateCommand, setShowUpdateCommand] = useState(false)
   const [updateCommandCopied, setUpdateCommandCopied] = useState(false)
   const [assistantHidden, setAssistantHiddenState] = useState(() => isSupportAssistantHidden(workspaceId))
+  const [theme, setTheme] = useState(() => getStoredTheme())
 
   const preferredDomainsText = useMemo(
     () => (workspaceAgentPolicy.preferred_domains || []).join('\n'),
@@ -169,6 +171,10 @@ export default function WorkspaceSettings() {
   const billingEnabled = isBillingEnabled(user)
   const aiTokenRemainder = buildAiTokenRemainder(billingSummary?.billing, t)
   const showAssistantSettings = Boolean(workspaceId) && !isSelfhostMode()
+
+  const setLightThemeEnabled = useCallback((enabled) => {
+    setTheme(setStoredTheme(enabled ? THEMES.light : THEMES.dark))
+  }, [])
 
   const tzSelectOptions = useMemo(() => {
     const base = getTimezoneSelectOptions(t)
@@ -667,6 +673,25 @@ export default function WorkspaceSettings() {
               </div>
             </div>
           )}
+          <div className="status-row">
+            <span className="status-label">{t('settings.appearance.title')}</span>
+            <label className="toggle-row settings-theme-toggle">
+              <span className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={theme === THEMES.light}
+                  onChange={(event) => setLightThemeEnabled(event.target.checked)}
+                />
+                <span className="toggle-track">
+                  <span className="toggle-thumb" />
+                </span>
+              </span>
+              <span>
+                <span className="toggle-label">{t('settings.appearance.lightTheme')}</span>
+                <span className="toggle-hint">{t('settings.appearance.lightThemeHint')}</span>
+              </span>
+            </label>
+          </div>
           <div>
             <p className="muted post-editor-hint" style={{ marginTop: 0 }}>
               {t('settings.timezone.hint', { timezone: user.timezone })}
