@@ -5,27 +5,27 @@ description = "Postbridge core sync engine"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "aiogram>=3.28.2",
+  "aiogram>=3.29.1",
   "aiohttp-socks>=0.11.0",
-  "alembic>=1.18.4",
-  "fastapi>=0.136.1",
-  "python-multipart>=0.0.29",
-  "uvicorn>=0.47.0",
+  "alembic>=1.18.5",
+  "fastapi>=0.139.0",
+  "python-multipart>=0.0.32",
+  "uvicorn>=0.50.1",
   "celery>=5.6.3",
-  "redis>=7.4.0",
-  "sqlalchemy>=2.0.49",
+  "redis>=8.0.1",
+  "sqlalchemy>=2.0.51",
   "psycopg2-binary>=2.9.12",
-  "telethon>=1.43.2",
+  "telethon>=1.44.0",
   "requests>=2.34.2",
   "httpx[socks]>=0.28.1",
-  "langgraph>=1.2.0",
+  "langgraph>=1.2.7",
   "PySocks>=1.7.1",
   "feedparser>=6.0.12",
   "pydantic>=2.13.4",
-  "cryptography>=48.0.0",
-  "croniter>=6.2.2",
-  "sentry-sdk[celery,fastapi]>=2.60.0",
-  "boto3>=1.43.9",
+  "cryptography>=49.0.0",
+  "croniter>=6.2.3",
+  "sentry-sdk[celery,fastapi]>=2.64.0",
+  "boto3>=1.43.40",
   "pgvector>=0.4.2",
 ]
 
@@ -34,12 +34,12 @@ postbridge-telegram-bot = "postbridge.botkit.platforms.telegram.runtime:main"
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=9.0.3",
-  "pytest-cov>=7.0.0",
+  "pytest>=9.1.1",
+  "pytest-cov>=7.1.0",
 ]
 
 [build-system]
-requires = ["setuptools>=82.0.1", "wheel"]
+requires = ["setuptools>=83.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
