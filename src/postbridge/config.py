@@ -36,6 +36,24 @@ class Settings:
     linkedin_access_token: str | None
     linkedin_author_urn: str | None
     linkedin_api_version: str
+    meta_graph_api_version: str
+    facebook_page_access_token: str | None
+    facebook_page_id: str | None
+    instagram_access_token: str | None
+    instagram_user_id: str | None
+    x_access_token: str | None
+    bluesky_identifier: str | None
+    bluesky_app_password: str | None
+    bluesky_service_url: str
+    mastodon_access_token: str | None
+    mastodon_instance_url: str | None
+    mastodon_visibility: str
+    meta_oauth_client_id: str | None
+    meta_oauth_client_secret: str | None
+    meta_oauth_redirect_uri: str | None
+    x_oauth_client_id: str | None
+    x_oauth_client_secret: str | None
+    x_oauth_redirect_uri: str | None
     batch_import_run_max_retries: int
     batch_import_run_retry_delay_seconds: int
     batch_import_run_retry_backoff_multiplier: float
@@ -214,6 +232,32 @@ def get_settings() -> Settings:
         linkedin_author_urn=_strip_optional_env(os.getenv("LINKEDIN_AUTHOR_URN")),
         linkedin_api_version=os.getenv("LINKEDIN_API_VERSION", "202601").strip()
         or "202601",
+        meta_graph_api_version=os.getenv("META_GRAPH_API_VERSION", "v25.0").strip()
+        or "v25.0",
+        facebook_page_access_token=_strip_optional_env(
+            os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
+        ),
+        facebook_page_id=_strip_optional_env(os.getenv("FACEBOOK_PAGE_ID")),
+        instagram_access_token=_strip_optional_env(os.getenv("INSTAGRAM_ACCESS_TOKEN")),
+        instagram_user_id=_strip_optional_env(os.getenv("INSTAGRAM_USER_ID")),
+        x_access_token=_strip_optional_env(os.getenv("X_ACCESS_TOKEN")),
+        bluesky_identifier=_strip_optional_env(os.getenv("BLUESKY_IDENTIFIER")),
+        bluesky_app_password=_strip_optional_env(os.getenv("BLUESKY_APP_PASSWORD")),
+        bluesky_service_url=(
+            os.getenv("BLUESKY_SERVICE_URL", "https://bsky.social").strip()
+            or "https://bsky.social"
+        ),
+        mastodon_access_token=_strip_optional_env(os.getenv("MASTODON_ACCESS_TOKEN")),
+        mastodon_instance_url=_strip_optional_env(os.getenv("MASTODON_INSTANCE_URL")),
+        mastodon_visibility=(
+            os.getenv("MASTODON_VISIBILITY", "public").strip().lower() or "public"
+        ),
+        meta_oauth_client_id=_strip_optional_env(os.getenv("META_OAUTH_CLIENT_ID")),
+        meta_oauth_client_secret=_strip_optional_env(os.getenv("META_OAUTH_CLIENT_SECRET")),
+        meta_oauth_redirect_uri=_strip_optional_env(os.getenv("META_OAUTH_REDIRECT_URI")),
+        x_oauth_client_id=_strip_optional_env(os.getenv("X_OAUTH_CLIENT_ID")),
+        x_oauth_client_secret=_strip_optional_env(os.getenv("X_OAUTH_CLIENT_SECRET")),
+        x_oauth_redirect_uri=_strip_optional_env(os.getenv("X_OAUTH_REDIRECT_URI")),
         batch_import_run_max_retries=int(os.getenv("BATCH_IMPORT_RUN_MAX_RETRIES", "2")),
         batch_import_run_retry_delay_seconds=int(
             os.getenv("BATCH_IMPORT_RUN_RETRY_DELAY_SECONDS", "10")
@@ -424,6 +468,10 @@ def validate_base_settings(settings: Settings) -> None:
         )
     if settings.sentry_traces_sample_rate < 0 or settings.sentry_traces_sample_rate > 1:
         raise ConfigurationError("SENTRY_TRACES_SAMPLE_RATE must be between 0 and 1.")
+    if settings.mastodon_visibility not in {"public", "unlisted", "private", "direct"}:
+        raise ConfigurationError(
+            "MASTODON_VISIBILITY must be one of: public, unlisted, private, direct."
+        )
     try:
         from zoneinfo import ZoneInfo, available_timezones
 

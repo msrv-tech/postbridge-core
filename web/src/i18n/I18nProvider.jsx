@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchRuntimeConfig } from '../adapters/runtime'
 import { catalogs, DEFAULT_LOCALE, supportedLocales } from './catalogs'
 
@@ -40,6 +40,9 @@ function interpolate(template, params) {
 }
 
 export function I18nProvider({ children }) {
+  const hadStoredLocale = useRef(
+    typeof window !== 'undefined' && Boolean(normalizeLocale(window.localStorage.getItem(STORAGE_KEY))),
+  )
   const [lockedLocale, setLockedLocale] = useState(null)
   const [isRuntimeConfigLoaded, setRuntimeConfigLoaded] = useState(false)
   const [locale, setLocaleState] = useState(initialLocale)
@@ -53,6 +56,8 @@ export function I18nProvider({ children }) {
         const runtimeLocale = normalizeLocale(config?.i18n?.default_locale || config?.default_locale)
         if ((config?.i18n?.locale_locked || config?.locale_locked) && runtimeLocale) {
           setLockedLocale(runtimeLocale)
+          setLocaleState(runtimeLocale)
+        } else if (runtimeLocale && !hadStoredLocale.current) {
           setLocaleState(runtimeLocale)
         }
       })

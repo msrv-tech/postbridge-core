@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import parse_qs, urlparse
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from types import SimpleNamespace
@@ -1747,6 +1748,317 @@ def test_app_vk_and_linkedin_channels_require_managed_credentials(monkeypatch):
     assert vk.json()["message"] == "Connect VK credentials first."
     assert linkedin.status_code == 422
     assert linkedin.json()["message"] == "Connect LinkedIn credentials first."
+
+
+def test_app_manual_global_credentials_create_and_channel_upsert(monkeypatch):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000046")
+    client = TestClient(app)
+    assert client.post("/api/app/bootstrap", json={"tenant_name": "Local"}).status_code == 200
+
+    facebook = client.post(
+        "/api/app/credentials/platform/manual",
+        json={
+            "platform": "facebook",
+            "platform_channel_id": "facebook/page/42",
+            "page_access_token": "fb-secret",
+            "display": "FB Page",
+        },
+    )
+    bluesky = client.post(
+        "/api/app/credentials/platform/manual",
+        json={
+            "platform": "bluesky",
+            "platform_channel_id": "@alice.test",
+            "app_password": "bsky-secret",
+            "display": "Alice",
+        },
+    )
+
+    assert facebook.status_code == 200, facebook.text
+    assert bluesky.status_code == 200, bluesky.text
+    assert facebook.json()["platform_channel_id"] == "42"
+    assert bluesky.json()["platform_channel_id"] == "alice.test"
+
+    channel = client.post(
+        "/api/app/channels",
+        json={
+            "platform": "facebook",
+            "platform_channel_id": facebook.json()["platform_channel_id"],
+            "title": "FB Page",
+            "can_read": False,
+            "can_write": True,
+            "credentials_ref": facebook.json()["id"],
+        },
+    )
+
+    assert channel.status_code == 200, channel.text
+    assert channel.json()["id"] == facebook.json()["id"]
+    assert channel.json()["credentials_ref"] == facebook.json()["id"]
+    assert channel.json()["can_read"] is False
+    assert channel.json()["can_write"] is True
+
+    session = SESSION_LOCAL()
+    try:
+        fb_credential = session.query(ChannelCredentialOrm).filter_by(channel_id=facebook.json()["id"]).one()
+        bsky_credential = session.query(ChannelCredentialOrm).filter_by(channel_id=bluesky.json()["id"]).one()
+        assert fb_credential.auth_type == "facebook_page_access_token"
+        assert bsky_credential.auth_type == "bluesky_app_password"
+        assert "fb-secret" not in fb_credential.encrypted_secret
+        assert "bsky-secret" not in bsky_credential.encrypted_secret
+        assert json.loads(decrypt_credential_secret(fb_credential.encrypted_secret))["page_access_token"] == "fb-secret"
+        assert json.loads(decrypt_credential_secret(bsky_credential.encrypted_secret))["identifier"] == "alice.test"
+    finally:
+        session.close()
+
+
+def test_app_global_channels_require_managed_credentials(monkeypatch):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000047")
+    client = TestClient(app)
+    assert client.post("/api/app/bootstrap", json={"tenant_name": "Local"}).status_code == 200
+
+    response = client.post(
+        "/api/app/channels",
+        json={
+            "platform": "x",
+            "platform_channel_id": "@postbridge",
+            "title": "X",
+            "can_read": False,
+            "can_write": True,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["message"] == "Connect X credentials first."
+
+
+def test_app_oauth_authorize_url_helpers(monkeypatch):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000048")
+    monkeypatch.setenv("META_OAUTH_CLIENT_ID", "meta-client")
+    monkeypatch.setenv("META_OAUTH_REDIRECT_URI", "https://core.test/oauth/meta")
+    monkeypatch.setenv("X_OAUTH_CLIENT_ID", "x-client")
+    monkeypatch.setenv("X_OAUTH_REDIRECT_URI", "https://core.test/oauth/x")
+    client = TestClient(app)
+    assert client.post("/api/app/bootstrap", json={"tenant_name": "Local"}).status_code == 200
+
+    meta = client.post(
+        "/api/app/credentials/oauth/authorize-url",
+        json={"platform": "facebook", "state": "state-1"},
+    )
+    x = client.post(
+        "/api/app/credentials/oauth/authorize-url",
+        json={"platform": "x", "state": "state-2"},
+    )
+
+    assert meta.status_code == 200, meta.text
+    assert x.status_code == 200, x.text
+    meta_url = urlparse(meta.json()["authorize_url"])
+    meta_qs = parse_qs(meta_url.query)
+    assert meta_url.netloc == "www.facebook.com"
+    assert meta_qs["client_id"] == ["meta-client"]
+    assert meta_qs["redirect_uri"] == ["https://core.test/oauth/meta"]
+    assert "pages_manage_posts" in meta_qs["scope"][0]
+    assert "instagram_content_publish" in meta_qs["scope"][0]
+
+    x_url = urlparse(x.json()["authorize_url"])
+    x_qs = parse_qs(x_url.query)
+    assert x_url.netloc == "x.com"
+    assert x_qs["client_id"] == ["x-client"]
+    assert x_qs["redirect_uri"] == ["https://core.test/oauth/x"]
+    assert x_qs["code_challenge_method"] == ["S256"]
+    assert x.json()["code_verifier"]
+    assert "media.write" in x_qs["scope"][0]
+
+
+def test_app_global_credential_validation_helpers(monkeypatch):
+    from postbridge.api import app_public
+
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000049")
+    client = TestClient(app)
+    assert client.post("/api/app/bootstrap", json={"tenant_name": "Local"}).status_code == 200
+
+    class FakeProviderClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, url, **kwargs):
+            request = httpx.Request("GET", url)
+            if url.endswith("/v25.0/42"):
+                return httpx.Response(200, json={"id": "42", "name": "Page Name"}, request=request)
+            if url.endswith("/v25.0/17841400000000000"):
+                return httpx.Response(
+                    200,
+                    json={"id": "17841400000000000", "username": "ig_name"},
+                    request=request,
+                )
+            if url == "https://api.x.com/2/users/me":
+                return httpx.Response(
+                    200,
+                    json={"data": {"id": "7", "username": "postbridge", "name": "Postbridge"}},
+                    request=request,
+                )
+            if url == "https://mastodon.social/api/v1/accounts/verify_credentials":
+                return httpx.Response(
+                    200,
+                    json={"id": "9", "acct": "postbridge", "display_name": "Postbridge Masto"},
+                    request=request,
+                )
+            raise AssertionError(f"unexpected GET {url}")
+
+        def post(self, url, **kwargs):
+            request = httpx.Request("POST", url)
+            if url == "https://bsky.social/xrpc/com.atproto.server.createSession":
+                return httpx.Response(
+                    200,
+                    json={"did": "did:plc:abc", "handle": "alice.test", "accessJwt": "jwt"},
+                    request=request,
+                )
+            raise AssertionError(f"unexpected POST {url}")
+
+    monkeypatch.setattr(app_public.httpx, "Client", FakeProviderClient)
+
+    facebook = client.post(
+        "/api/app/credentials/platform/validate",
+        json={"platform": "facebook", "platform_channel_id": "42", "page_access_token": "secret"},
+    )
+    instagram = client.post(
+        "/api/app/credentials/platform/validate",
+        json={
+            "platform": "instagram",
+            "platform_channel_id": "17841400000000000",
+            "access_token": "secret",
+        },
+    )
+    x = client.post(
+        "/api/app/credentials/platform/validate",
+        json={"platform": "x", "platform_channel_id": "@postbridge", "access_token": "secret"},
+    )
+    bluesky = client.post(
+        "/api/app/credentials/platform/validate",
+        json={"platform": "bluesky", "platform_channel_id": "@alice.test", "app_password": "secret"},
+    )
+    mastodon = client.post(
+        "/api/app/credentials/platform/validate",
+        json={
+            "platform": "mastodon",
+            "platform_channel_id": "@postbridge@mastodon.social",
+            "access_token": "secret",
+            "instance_url": "https://mastodon.social",
+        },
+    )
+
+    assert facebook.status_code == 200, facebook.text
+    assert instagram.status_code == 200, instagram.text
+    assert x.status_code == 200, x.text
+    assert bluesky.status_code == 200, bluesky.text
+    assert mastodon.status_code == 200, mastodon.text
+    assert facebook.json()["display"] == "Page Name"
+    assert instagram.json()["display"] == "ig_name"
+    assert x.json()["platform_channel_id"] == "postbridge"
+    assert bluesky.json()["did"] == "did:plc:abc"
+    assert mastodon.json()["platform_channel_id"] == "@postbridge@mastodon.social"
+    assert all(item.json()["can_write"] is True for item in [facebook, instagram, x, bluesky, mastodon])
+
+
+def test_app_oauth_token_and_meta_pages_helpers(monkeypatch):
+    from postbridge.api import app_public
+
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "selfhost")
+    monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000050")
+    monkeypatch.setenv("META_OAUTH_CLIENT_ID", "meta-client")
+    monkeypatch.setenv("META_OAUTH_CLIENT_SECRET", "meta-secret")
+    monkeypatch.setenv("META_OAUTH_REDIRECT_URI", "https://core.test/oauth/meta")
+    monkeypatch.setenv("X_OAUTH_CLIENT_ID", "x-client")
+    monkeypatch.setenv("X_OAUTH_CLIENT_SECRET", "x-secret")
+    monkeypatch.setenv("X_OAUTH_REDIRECT_URI", "https://core.test/oauth/x")
+    client = TestClient(app)
+    assert client.post("/api/app/bootstrap", json={"tenant_name": "Local"}).status_code == 200
+
+    class FakeProviderClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, url, **kwargs):
+            request = httpx.Request("GET", url)
+            if url.endswith("/oauth/access_token"):
+                return httpx.Response(
+                    200,
+                    json={"access_token": "meta-user-token", "expires_in": 3600},
+                    request=request,
+                )
+            if url.endswith("/me/accounts"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "data": [
+                            {
+                                "id": "42",
+                                "name": "Page Name",
+                                "access_token": "page-token",
+                                "instagram_business_account": {
+                                    "id": "17841400000000000",
+                                    "username": "ig_name",
+                                },
+                            }
+                        ]
+                    },
+                    request=request,
+                )
+            raise AssertionError(f"unexpected GET {url}")
+
+        def post(self, url, **kwargs):
+            request = httpx.Request("POST", url)
+            if url == "https://api.x.com/2/oauth2/token":
+                return httpx.Response(
+                    200,
+                    json={"access_token": "x-token", "refresh_token": "x-refresh", "expires_in": 7200},
+                    request=request,
+                )
+            raise AssertionError(f"unexpected POST {url}")
+
+    monkeypatch.setattr(app_public.httpx, "Client", FakeProviderClient)
+
+    meta_token = client.post("/api/app/credentials/oauth/token", json={"platform": "meta", "code": "abc"})
+    x_token = client.post(
+        "/api/app/credentials/oauth/token",
+        json={"platform": "x", "code": "abc", "code_verifier": "verifier"},
+    )
+    pages = client.post(
+        "/api/app/credentials/meta/pages",
+        json={"access_token": "meta-user-token"},
+    )
+
+    assert meta_token.status_code == 200, meta_token.text
+    assert x_token.status_code == 200, x_token.text
+    assert pages.status_code == 200, pages.text
+    assert meta_token.json()["access_token"] == "meta-user-token"
+    assert meta_token.json()["expires_at"]
+    assert x_token.json()["refresh_token"] == "x-refresh"
+    assert x_token.json()["expires_at"]
+    assert pages.json()["items"] == [
+        {
+            "page_id": "42",
+            "name": "Page Name",
+            "page_access_token": "page-token",
+            "instagram_user_id": "17841400000000000",
+            "instagram_username": "ig_name",
+        }
+    ]
 
 
 def test_app_channels_expose_live_sync_source_capability(monkeypatch):

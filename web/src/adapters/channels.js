@@ -76,6 +76,27 @@ export function createLinkedinAccessTokenCredential(workspaceId, payload) {
   })
 }
 
+export function createManualPlatformCredential(workspaceId, payload) {
+  return api(`/workspaces/${workspaceId}/credentials/platform/manual`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function validateManualPlatformCredential(workspaceId, payload) {
+  return api(`/workspaces/${workspaceId}/credentials/platform/validate`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function listMetaPages(workspaceId, payload) {
+  return api(`/workspaces/${workspaceId}/credentials/meta/pages`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function createConnection(workspaceId, payload) {
   return api(`/workspaces/${workspaceId}/connections/create`, {
     method: 'POST',

@@ -13,7 +13,7 @@ Postbridge Core helps teams import content, prepare publication plans, and deliv
 
 `postbridge-core` contains the public runtime:
 
-- channel fetchers and publishers for Telegram, MAX, VK, RSS/Zen, LinkedIn publishing, and the built-in Postbridge source;
+- channel fetchers and publishers for Telegram, MAX, VK, RSS/Zen, LinkedIn publishing, Facebook Pages, Instagram Business, X, Bluesky, Mastodon, and the built-in Postbridge source;
 - batch import runs and publication targets;
 - live-sync delivery, status outbox, and worker recovery loops;
 - the shared React frontend with two runtime modes: `selfhost` and `saas`;
@@ -32,6 +32,11 @@ The service API is protected by `CORE_SERVICE_TOKEN` and is intended for trusted
 | `vk` | `vk` | Import and publish through VK wall APIs. |
 | `rss` / `zen` | `rss` / `zen` | RSS import and feed-oriented publishing flow. |
 | - | `linkedin` | Organic post publishing through LinkedIn Posts API. |
+| - | `facebook` | Facebook Page text publishing through Meta Graph API. |
+| - | `instagram` | Instagram Business single-media publishing through Meta Graph API. |
+| - | `x` | Text and media publishing through X API v2. |
+| - | `bluesky` | Text and image publishing through AT Protocol. |
+| - | `mastodon` | Text and media publishing through a configured Mastodon instance. |
 
 See [docs/platforms.md](docs/platforms.md) for credentials and platform-specific behavior.
 

@@ -41,6 +41,47 @@ class LinkedInCredentials(BaseModel):
     expires_at: int | None = None
 
 
+class FacebookCredentials(BaseModel):
+    """Credentials for Facebook Pages publishing."""
+
+    page_access_token: str
+    page_id: str | None = None
+    graph_api_version: str | None = None
+    expires_at: int | None = None
+
+
+class InstagramCredentials(BaseModel):
+    """Credentials for Instagram Business content publishing."""
+
+    access_token: str
+    instagram_user_id: str | None = None
+    graph_api_version: str | None = None
+    expires_at: int | None = None
+
+
+class XCredentials(BaseModel):
+    """Credentials for X API v2 publishing."""
+
+    access_token: str
+    expires_at: int | None = None
+
+
+class BlueskyCredentials(BaseModel):
+    """Credentials for Bluesky/AT Protocol publishing."""
+
+    identifier: str
+    app_password: str
+    service_url: str | None = None
+
+
+class MastodonCredentials(BaseModel):
+    """Credentials for Mastodon publishing."""
+
+    access_token: str
+    instance_url: str | None = None
+    visibility: str | None = None
+
+
 class ZenCredentials(BaseModel):
     """Legacy RSS credentials."""
 

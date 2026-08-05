@@ -17,6 +17,10 @@ fi
 
 echo "Deploy compose: $COMPOSE_DIR/$COMPOSE_FILE"
 echo "Deploy env file: $ENV_FILE"
+compose_project="${POSTBRIDGE_DEPLOY_COMPOSE_PROJECT:-${COMPOSE_PROJECT_NAME:-}}"
+if [[ -n "$compose_project" ]]; then
+  echo "Deploy compose project: $compose_project"
+fi
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" > "$ENV_FILE"
@@ -29,8 +33,19 @@ if ! grep -q "POSTGRES_PASSWORD=[^[:space:]]" "$ENV_FILE" 2>/dev/null; then
   fi
 fi
 
+if [[ -z "${VITE_POSTBRIDGE_DISABLED_PLATFORMS:-}" ]]; then
+  disabled_platforms="$(grep -E "^POSTBRIDGE_DISABLED_PLATFORMS=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'" || true)"
+  if [[ -n "$disabled_platforms" ]]; then
+    export VITE_POSTBRIDGE_DISABLED_PLATFORMS="$disabled_platforms"
+  fi
+fi
+
 compose() {
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+  if [[ -n "$compose_project" ]]; then
+    docker compose -p "$compose_project" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+  else
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+  fi
 }
 
 services="$(compose config --services)"

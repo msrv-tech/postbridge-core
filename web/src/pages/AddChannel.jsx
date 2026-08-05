@@ -3,11 +3,13 @@ import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
   createChannelRegistryItem,
   createLinkedinAccessTokenCredential,
+  createManualPlatformCredential,
   createVkCommunityCredential,
   getLinkedinAuthorizeUrl,
   listLinkedinOrganizations,
   requestMaxChannelVerification,
   validateChannelRegistryItem,
+  validateManualPlatformCredential,
   verifyMaxChannel,
 } from '../adapters/channels'
 import AppShell from '../components/AppShell'
@@ -20,15 +22,33 @@ import { useI18n } from '../i18n'
 // VK: community token from the group settings.
 const VK_OAUTH_ADD_ENABLED = true
 
-const PLATFORMS = [
+function normalizePlatformId(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return normalized === 'twitter' ? 'x' : normalized
+}
+
+const DISABLED_PLATFORMS = new Set(
+  String(import.meta.env.VITE_POSTBRIDGE_DISABLED_PLATFORMS || '')
+    .split(/[;,]/)
+    .map(normalizePlatformId)
+    .filter(Boolean)
+)
+
+const ALL_PLATFORMS = [
   { id: 'telegram', label: 'Telegram' },
   { id: 'max', label: 'MAX' },
   ...(VK_OAUTH_ADD_ENABLED ? [{ id: 'vk', label: 'VK' }] : []),
   { id: 'linkedin', label: 'LinkedIn' },
+  { id: 'facebook', label: 'Facebook' },
+  { id: 'instagram', label: 'Instagram' },
+  { id: 'x', label: 'X' },
+  { id: 'bluesky', label: 'Bluesky' },
+  { id: 'mastodon', label: 'Mastodon' },
   { id: 'rss', label: 'RSS' },
   { id: 'postbridge', label: 'Postbridge' },
 ]
 
+const PLATFORMS = ALL_PLATFORMS.filter((item) => !DISABLED_PLATFORMS.has(normalizePlatformId(item.id)))
 const DEFAULT_TARGET_PLATFORMS = new Set(['telegram', 'max', 'vk'])
 
 const PLACEHOLDERS = {
@@ -36,6 +56,11 @@ const PLACEHOLDERS = {
   max: 'https://web.max.ru/-71838... or -71838691591553',
   vk: '-123456789 or vk.com/club123456789',
   linkedin: 'urn:li:organization:123456 or organization:123456',
+  facebook: '1234567890',
+  instagram: '17841400000000000',
+  x: '@postbridge',
+  bluesky: 'postbridge.bsky.social',
+  mastodon: '@postbridge@mastodon.social',
   rss: 'https://example.com/feed.xml',
   postbridge: 'Workspace is used automatically',
 }
@@ -44,12 +69,21 @@ const DEFAULT_TELEGRAM_BOT_NAME = typeof import.meta.env.VITE_TELEGRAM_BOT_NAME 
   ? import.meta.env.VITE_TELEGRAM_BOT_NAME.trim().replace(/^@/, '')
   : ''
 const MAX_BOT_LINK = import.meta.env.VITE_MAX_BOT_URL || ''
+const GLOBAL_PUBLISH_PLATFORMS = new Set(['facebook', 'instagram', 'x', 'bluesky', 'mastodon'])
+
+const GLOBAL_PLATFORM_COPY = {
+  facebook: 'Enter a Facebook Page ID and Page access token with publishing permission.',
+  instagram: 'Enter an Instagram Business user ID and an access token with content publishing permission.',
+  x: 'Enter an X account label and an OAuth access token with post write permission.',
+  bluesky: 'Enter the Bluesky handle and an app password.',
+  mastodon: 'Enter the Mastodon account label, instance URL, and access token.',
+}
 
 export default function AddChannel() {
   const { t } = useI18n()
   const { workspaceId } = useParams()
   const navigate = useNavigate()
-  const [platform, setPlatform] = useState('telegram')
+  const [platform, setPlatform] = useState(PLATFORMS[0]?.id || 'telegram')
   const [channelId, setChannelId] = useState('')
   const [title, setTitle] = useState('')
   const [asTarget, setAsTarget] = useState(DEFAULT_TARGET_PLATFORMS.has('telegram'))
@@ -81,9 +115,20 @@ export default function AddChannel() {
   const [linkedinAccessToken, setLinkedinAccessToken] = useState('')
   const [linkedinCredentialsRef, setLinkedinCredentialsRef] = useState('')
   const [linkedinOrganizations, setLinkedinOrganizations] = useState([])
+  const [globalCredential, setGlobalCredential] = useState({
+    accessToken: '',
+    pageAccessToken: '',
+    appPassword: '',
+    graphApiVersion: '',
+    serviceUrl: '',
+    instanceUrl: '',
+    visibility: 'public',
+  })
+  const [globalCredentialsRef, setGlobalCredentialsRef] = useState('')
   const isRssSource = platform === 'rss' && rssMode === 'source'
   const isRssTarget = platform === 'rss' && rssMode === 'target'
-  const hasValidatedAccess = platform === 'linkedin' ? validatedWrite : isRssTarget ? validatedWrite : validatedRead
+  const isGlobalPublishPlatform = GLOBAL_PUBLISH_PLATFORMS.has(platform)
+  const hasValidatedAccess = platform === 'linkedin' || isGlobalPublishPlatform ? validatedWrite : isRssTarget ? validatedWrite : validatedRead
   const telegramBotLink = telegramBotName ? `https://t.me/${telegramBotName}` : ''
   const rssTargetFeedId = (channelId.trim() || 'rss').replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'rss'
   const rssTargetUrl = `/rss/${encodeURIComponent(rssTargetFeedId)}.xml`
@@ -95,6 +140,18 @@ export default function AddChannel() {
       .join(' ')
     return message || fallback
   }
+  const globalCredentialPayload = () => ({
+    platform,
+    platform_channel_id: channelId.trim(),
+    display: title.trim(),
+    access_token: globalCredential.accessToken.trim(),
+    page_access_token: globalCredential.pageAccessToken.trim(),
+    app_password: globalCredential.appPassword.trim(),
+    graph_api_version: globalCredential.graphApiVersion.trim(),
+    service_url: globalCredential.serviceUrl.trim(),
+    instance_url: globalCredential.instanceUrl.trim(),
+    visibility: globalCredential.visibility,
+  })
 
   useEffect(() => {
     if (!isSelfhostMode() || !workspaceId) return
@@ -222,6 +279,13 @@ export default function AddChannel() {
         setLinkedinCredentialsRef(credRes.id)
         setValidatedWrite(true)
         setValidatedDisplay(credRes.display || credRes.platform_channel_id)
+      } else if (isGlobalPublishPlatform) {
+        const validationRes = await validateManualPlatformCredential(workspaceId, globalCredentialPayload())
+        setChannelId(validationRes.platform_channel_id)
+        setGlobalCredentialsRef('')
+        setValidatedRead(false)
+        setValidatedWrite(true)
+        setValidatedDisplay(validationRes.display || validationRes.platform_channel_id)
       } else {
         const readRes = await validateChannelRegistryItem(workspaceId, {
           platform,
@@ -271,6 +335,16 @@ export default function AddChannel() {
     setLinkedinAccessToken('')
     setLinkedinCredentialsRef('')
     setLinkedinOrganizations([])
+    setGlobalCredential({
+      accessToken: '',
+      pageAccessToken: '',
+      appPassword: '',
+      graphApiVersion: '',
+      serviceUrl: '',
+      instanceUrl: '',
+      visibility: 'public',
+    })
+    setGlobalCredentialsRef('')
     setRssMode('source')
     setValidatedRead(false)
     setValidatedWrite(false)
@@ -361,7 +435,7 @@ export default function AddChannel() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!hasValidatedAccess) {
-      setError(platform === 'linkedin' ? t('addChannel.errors.validatePublishFirst') : t('addChannel.errors.validateFirst'))
+      setError(platform === 'linkedin' || isGlobalPublishPlatform ? t('addChannel.errors.validatePublishFirst') : t('addChannel.errors.validateFirst'))
       return
     }
     setError('')
@@ -371,14 +445,23 @@ export default function AddChannel() {
         platform,
         platform_channel_id: isRssTarget ? rssTargetFeedId : channelId.trim(),
         title: (title.trim() || validatedDisplay) || (isRssTarget ? 'RSS' : channelId.trim()),
-        can_read: platform === 'linkedin' || isRssTarget ? false : true,
-        can_write: platform === 'linkedin' || isRssTarget ? true : asTarget ? validatedWrite : false,
+        can_read: platform === 'linkedin' || isGlobalPublishPlatform || isRssTarget ? false : true,
+        can_write: platform === 'linkedin' || isGlobalPublishPlatform || isRssTarget ? true : asTarget ? validatedWrite : false,
       }
       if (platform === 'vk' && vkCredentialsRef) {
         createPayload.credentials_ref = vkCredentialsRef
       }
       if (platform === 'linkedin' && linkedinCredentialsRef) {
         createPayload.credentials_ref = linkedinCredentialsRef
+      }
+      if (isGlobalPublishPlatform) {
+        let credentialId = globalCredentialsRef
+        if (!credentialId) {
+          const credRes = await createManualPlatformCredential(workspaceId, globalCredentialPayload())
+          credentialId = credRes.id
+          setGlobalCredentialsRef(credentialId)
+        }
+        createPayload.credentials_ref = credentialId
       }
       await createChannelRegistryItem(workspaceId, createPayload)
       if (platform === 'postbridge') {
@@ -557,6 +640,11 @@ export default function AddChannel() {
               {t('addChannel.linkedin.instructions')}
             </p>
           )}
+          {isGlobalPublishPlatform && (
+            <p className="section-copy">
+              {GLOBAL_PLATFORM_COPY[platform]}
+            </p>
+          )}
           {platform === 'postbridge' && (
             <p className="section-copy">
               {t('addChannel.postbridge.instructions')}
@@ -678,7 +766,124 @@ export default function AddChannel() {
               </p>
             </>
           )}
-          {platform !== 'postbridge' && platform !== 'vk' && platform !== 'linkedin' && (
+          {isGlobalPublishPlatform && (
+            <>
+              <div className="form-group">
+                <label htmlFor="channel-id">
+                  {platform === 'facebook'
+                    ? 'Page ID'
+                    : platform === 'instagram'
+                      ? 'Instagram user ID'
+                      : 'Account'}
+                </label>
+                <input
+                  id="channel-id"
+                  type="text"
+                  value={channelId}
+                  onChange={(e) => setChannelId(e.target.value)}
+                  placeholder={PLACEHOLDERS[platform]}
+                  className="form-control"
+                  required
+                />
+              </div>
+              {platform === 'facebook' && (
+                <div className="form-group">
+                  <label htmlFor="global-page-access-token">Page access token</label>
+                  <input
+                    id="global-page-access-token"
+                    type="password"
+                    value={globalCredential.pageAccessToken}
+                    onChange={(e) => setGlobalCredential((current) => ({ ...current, pageAccessToken: e.target.value }))}
+                    className="form-control"
+                    required
+                  />
+                </div>
+              )}
+              {['instagram', 'x', 'mastodon'].includes(platform) && (
+                <div className="form-group">
+                  <label htmlFor="global-access-token">Access token</label>
+                  <input
+                    id="global-access-token"
+                    type="password"
+                    value={globalCredential.accessToken}
+                    onChange={(e) => setGlobalCredential((current) => ({ ...current, accessToken: e.target.value }))}
+                    className="form-control"
+                    required
+                  />
+                </div>
+              )}
+              {['facebook', 'instagram'].includes(platform) && (
+                <div className="form-group">
+                  <label htmlFor="global-graph-version">Graph API version</label>
+                  <input
+                    id="global-graph-version"
+                    type="text"
+                    value={globalCredential.graphApiVersion}
+                    onChange={(e) => setGlobalCredential((current) => ({ ...current, graphApiVersion: e.target.value }))}
+                    placeholder="v25.0"
+                    className="form-control"
+                  />
+                </div>
+              )}
+              {platform === 'bluesky' && (
+                <>
+                  <div className="form-group">
+                    <label htmlFor="global-app-password">App password</label>
+                    <input
+                      id="global-app-password"
+                      type="password"
+                      value={globalCredential.appPassword}
+                      onChange={(e) => setGlobalCredential((current) => ({ ...current, appPassword: e.target.value }))}
+                      className="form-control"
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="global-service-url">Service URL</label>
+                    <input
+                      id="global-service-url"
+                      type="url"
+                      value={globalCredential.serviceUrl}
+                      onChange={(e) => setGlobalCredential((current) => ({ ...current, serviceUrl: e.target.value }))}
+                      placeholder="https://bsky.social"
+                      className="form-control"
+                    />
+                  </div>
+                </>
+              )}
+              {platform === 'mastodon' && (
+                <>
+                  <div className="form-group">
+                    <label htmlFor="global-instance-url">Instance URL</label>
+                    <input
+                      id="global-instance-url"
+                      type="url"
+                      value={globalCredential.instanceUrl}
+                      onChange={(e) => setGlobalCredential((current) => ({ ...current, instanceUrl: e.target.value }))}
+                      placeholder="https://mastodon.social"
+                      className="form-control"
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="global-visibility">Visibility</label>
+                    <select
+                      id="global-visibility"
+                      value={globalCredential.visibility}
+                      onChange={(e) => setGlobalCredential((current) => ({ ...current, visibility: e.target.value }))}
+                      className="form-control"
+                    >
+                      <option value="public">Public</option>
+                      <option value="unlisted">Unlisted</option>
+                      <option value="private">Private</option>
+                      <option value="direct">Direct</option>
+                    </select>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+          {platform !== 'postbridge' && platform !== 'vk' && platform !== 'linkedin' && !isGlobalPublishPlatform && (
           <div className="form-group">
             <label htmlFor="channel-id">
               {platform === 'telegram'
@@ -716,7 +921,7 @@ export default function AddChannel() {
               className="form-control"
             />
           </div>
-          {platform !== 'postbridge' && platform !== 'linkedin' && platform !== 'rss' && (
+          {platform !== 'postbridge' && platform !== 'linkedin' && platform !== 'rss' && !isGlobalPublishPlatform && (
           <div className="form-group">
             <div
               className="toggle-row"
@@ -777,7 +982,11 @@ export default function AddChannel() {
                 validating ||
                 (platform !== 'postbridge' && platform !== 'linkedin' && !channelId.trim()) ||
                 (platform === 'vk' && !vkAccessToken.trim()) ||
-                (platform === 'linkedin' && !linkedinAccessToken.trim())
+                (platform === 'linkedin' && !linkedinAccessToken.trim()) ||
+                (platform === 'facebook' && !globalCredential.pageAccessToken.trim()) ||
+                (['instagram', 'x', 'mastodon'].includes(platform) && !globalCredential.accessToken.trim()) ||
+                (platform === 'bluesky' && !globalCredential.appPassword.trim()) ||
+                (platform === 'mastodon' && !globalCredential.instanceUrl.trim())
               }
             >
               {validating ? t('common.checking') : platform === 'max' && !maxCodeRequested ? t('login.email.requestCode') : t('common.check')}

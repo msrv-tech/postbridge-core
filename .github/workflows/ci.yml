@@ -151,3 +151,76 @@ jobs:
             POSTBRIDGE_DEPLOY_COMPOSE_FILE=docker-compose.yml \
             POSTBRIDGE_DEPLOY_ENV_FILE=/opt/postbridge-saas/environments/production/.env \
             bash /opt/postbridge-core/scripts/deploy-prod.sh
+
+  deploy-io:
+    needs:
+      - secret-scan
+      - test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    concurrency:
+      group: postbridge-io-core-deploy
+      cancel-in-progress: false
+    runs-on:
+      - self-hosted
+      - prod-io-core
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          path: postbridge-core
+          fetch-depth: 0
+
+      - name: Deploy postbridge-core IO
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SERVER_URL: ${{ github.server_url }}
+          BRANCH: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          notify() {
+            code=$?
+            if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then exit "$code"; fi
+            SHORT_SHA="$(printf '%s' "$SHA" | cut -c1-7)"
+            RUN_URL="${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}"
+            if [ "$code" -eq 0 ]; then
+              DEPLOY_STATUS="success"
+              TITLE="Postbridge Core IO deploy completed"
+            else
+              DEPLOY_STATUS="failure"
+              TITLE="Postbridge Core IO deploy failed"
+            fi
+            MSG="$(printf '%s\nStatus: %s\nRepo: %s\nBranch: %s\nCommit: %s\nWorkflow: %s #%s.%s\nEvent: %s\nActor: %s\nRun: %s' \
+              "$TITLE" "$DEPLOY_STATUS" "$REPOSITORY" "$BRANCH" "$SHORT_SHA" "$WORKFLOW" "$RUN_ID" "$RUN_ATTEMPT" "$EVENT_NAME" "$ACTOR" "$RUN_URL")"
+            curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d "chat_id=${TELEGRAM_CHAT_ID}" \
+              --data-urlencode "text=${MSG}" \
+              -d "disable_web_page_preview=true" || true
+            exit "$code"
+          }
+          trap notify EXIT
+
+          sudo mkdir -p /opt
+          sudo cp /opt/postbridge-core/.env /tmp/postbridge-core-env.bak 2>/dev/null || true
+          sudo rsync -a --delete postbridge-core/ /opt/postbridge-core/
+          sudo cp /tmp/postbridge-core-env.bak /opt/postbridge-core/.env 2>/dev/null || true
+          sudo env \
+            POSTBRIDGE_DEPLOY_COMPOSE_DIR=/opt/postbridge-saas/environments/production \
+            POSTBRIDGE_DEPLOY_COMPOSE_FILE=docker-compose.yml \
+            POSTBRIDGE_DEPLOY_ENV_FILE=/opt/postbridge-saas/environments/production/.env \
+            POSTBRIDGE_DEPLOY_COMPOSE_PROJECT=postbridge_io \
+            POSTBRIDGE_BIND_POSTGRES=127.0.0.1:15432 \
+            POSTBRIDGE_BIND_CORE_API=127.0.0.1:18000 \
+            POSTBRIDGE_BIND_SAAS_API=127.0.0.1:18001 \
+            POSTBRIDGE_BIND_PROMETHEUS=127.0.0.1:19090 \
+            POSTBRIDGE_BIND_ALERTMANAGER=127.0.0.1:19093 \
+            POSTBRIDGE_BIND_GRAFANA=127.0.0.1:13000 \
+            flock /tmp/postbridge-io-deploy.lock bash /opt/postbridge-core/scripts/deploy-prod.sh
+          curl -fsS https://postbridge.io/health
+          curl -fsS https://postbridge.io/api/app/runtime-config

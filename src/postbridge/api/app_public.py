@@ -18,7 +18,7 @@ import ssl
 import time
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import quote, urljoin, urlparse, urlunparse
+from urllib.parse import quote, urlencode, urljoin, urlparse, urlunparse
 from uuid import uuid4
 
 import httpx
@@ -142,6 +142,7 @@ RSS_SOURCE_VALIDATION_MAX_REDIRECTS = 3
 RSS_SOURCE_VALIDATION_TIMEOUT_SECONDS = 2.0
 TELEGRAM_IMPORT_FLOW_TTL_SECONDS = 900
 TELEGRAM_IMPORT_FLOW_CATEGORY = "telegram_import_flow"
+FACEBOOK_GRAPH_BASE = "https://graph.facebook.com"
 
 AUTH_EXEMPT_PREFIXES = (
     "/api/app/auth/",
@@ -407,6 +408,43 @@ class LinkedInAccessTokenRequest(BaseModel):
     display: str | None = Field(default=None, max_length=512)
 
 
+class ManualPlatformCredentialRequest(BaseModel):
+    platform: str = Field(min_length=1, max_length=32)
+    platform_channel_id: str = Field(min_length=1, max_length=512)
+    display: str | None = Field(default=None, max_length=512)
+    access_token: str | None = Field(default=None, max_length=8192)
+    page_access_token: str | None = Field(default=None, max_length=8192)
+    app_password: str | None = Field(default=None, max_length=4096)
+    graph_api_version: str | None = Field(default=None, max_length=32)
+    service_url: str | None = Field(default=None, max_length=512)
+    instance_url: str | None = Field(default=None, max_length=512)
+    visibility: str | None = Field(default=None, max_length=32)
+    expires_at: datetime | None = None
+
+
+class PlatformCredentialValidateRequest(ManualPlatformCredentialRequest):
+    pass
+
+
+class OAuthAuthorizeUrlRequest(BaseModel):
+    platform: str = Field(min_length=1, max_length=32)
+    redirect_uri: str | None = Field(default=None, max_length=1024)
+    state: str | None = Field(default=None, max_length=512)
+    scopes: list[str] | None = None
+
+
+class OAuthTokenExchangeRequest(BaseModel):
+    platform: str = Field(min_length=1, max_length=32)
+    code: str = Field(min_length=1, max_length=4096)
+    redirect_uri: str | None = Field(default=None, max_length=1024)
+    code_verifier: str | None = Field(default=None, max_length=256)
+
+
+class MetaPagesRequest(BaseModel):
+    access_token: str = Field(min_length=1, max_length=8192)
+    graph_api_version: str | None = Field(default=None, max_length=32)
+
+
 class BridgeCreateRequest(BaseModel):
     source_channel_id: str = Field(min_length=36, max_length=36)
     target_channel_id: str = Field(min_length=36, max_length=36)
@@ -628,6 +666,44 @@ def _normalize_linkedin_author_urn(raw: str) -> str:
     raise HTTPException(status_code=400, detail="invalid LinkedIn author id")
 
 
+def _normalize_global_publisher_channel_id(platform: str, raw: str) -> str:
+    value = (raw or "").strip()
+    if not value:
+        raise HTTPException(status_code=400, detail=f"{platform} channel id is required")
+    if platform == "facebook":
+        match = re.search(r"facebook\.com/(?:pages/[^/]+/)?([^/?#]+)", value, re.IGNORECASE)
+        if match:
+            value = match.group(1).strip()
+        if value.startswith("facebook/page/"):
+            value = value.rsplit("/", 1)[-1].strip()
+    elif platform == "instagram":
+        if value.startswith("@"):
+            value = value[1:].strip()
+        if value.startswith("instagram/"):
+            value = value.rsplit("/", 1)[-1].strip()
+    elif platform == "x":
+        match = re.search(r"(?:x|twitter)\.com/([^/?#]+)", value, re.IGNORECASE)
+        if match:
+            value = match.group(1).strip()
+        value = value.removeprefix("@").strip() or "me"
+    elif platform == "bluesky":
+        value = value.removeprefix("@").strip()
+    elif platform == "mastodon":
+        if value.startswith("http://") or value.startswith("https://"):
+            parsed = urlparse(value)
+            handle = parsed.path.strip("/").removeprefix("@")
+            host = parsed.hostname or ""
+            if handle and host:
+                value = f"@{handle}@{host}"
+            elif host:
+                value = host
+        elif value.startswith("mastodon/"):
+            value = value.rsplit("/", 1)[-1].strip()
+    if not value:
+        raise HTTPException(status_code=400, detail=f"{platform} channel id is required")
+    return value
+
+
 def _normalize_registry_channel_id(platform: str, raw: str) -> str:
     normalized_platform = platform.strip().lower()
     value = (raw or "").strip()
@@ -639,6 +715,8 @@ def _normalize_registry_channel_id(platform: str, raw: str) -> str:
         return _normalize_vk_channel_id(value)
     if normalized_platform == "linkedin":
         return _normalize_linkedin_author_urn(value)
+    if normalized_platform in {"facebook", "instagram", "x", "bluesky", "mastodon"}:
+        return _normalize_global_publisher_channel_id(normalized_platform, value)
     if normalized_platform == "rss":
         if not value:
             raise HTTPException(status_code=400, detail="connections.validation.rss.url_required")
@@ -3252,6 +3330,535 @@ def create_linkedin_access_token_credential(
     return {"id": channel.id, "platform_channel_id": author_urn, "display": channel.title}
 
 
+_MANUAL_PUBLISHER_PLATFORMS = frozenset(
+    {"facebook", "instagram", "x", "bluesky", "mastodon"}
+)
+_META_DEFAULT_SCOPES = (
+    "pages_show_list",
+    "pages_read_engagement",
+    "pages_manage_posts",
+    "instagram_basic",
+    "instagram_content_publish",
+)
+_X_DEFAULT_SCOPES = (
+    "tweet.read",
+    "tweet.write",
+    "users.read",
+    "offline.access",
+    "media.write",
+)
+
+
+def _oauth_code_verifier() -> str:
+    return _b64url(secrets.token_bytes(48))
+
+
+def _oauth_code_challenge(verifier: str) -> str:
+    return _b64url(hashlib.sha256(verifier.encode("ascii")).digest())
+
+
+def _oauth_redirect_uri(platform: str, explicit: str | None) -> str:
+    settings = get_settings()
+    value = explicit or (
+        settings.x_oauth_redirect_uri if platform == "x" else settings.meta_oauth_redirect_uri
+    )
+    if not value:
+        raise HTTPException(status_code=422, detail=f"{platform} OAuth redirect URI is not configured")
+    return value
+
+
+def _provider_http_error(exc: httpx.HTTPStatusError, provider: str) -> HTTPException:
+    message = str(exc)
+    try:
+        body = exc.response.json()
+        if isinstance(body, dict):
+            err = body.get("error")
+            if isinstance(err, dict):
+                message = str(err.get("message") or err.get("error_user_msg") or message)
+            else:
+                message = str(
+                    body.get("detail")
+                    or body.get("title")
+                    or body.get("message")
+                    or body.get("error")
+                    or message
+                )
+    except Exception:
+        if exc.response.text:
+            message = exc.response.text[:300]
+    return HTTPException(
+        status_code=502,
+        detail=f"{provider} rejected the credentials: {message}",
+    )
+
+
+def _provider_transport_error(exc: httpx.RequestError, provider: str) -> HTTPException:
+    return HTTPException(status_code=502, detail=f"{provider} credential validation failed: {exc}")
+
+
+def _token_expires_at(data: dict[str, Any]) -> str | None:
+    expires_in = data.get("expires_in")
+    try:
+        seconds = int(expires_in)
+    except (TypeError, ValueError):
+        return None
+    return datetime.fromtimestamp(int(time.time()) + seconds, tz=UTC).isoformat()
+
+
+def _validate_facebook_credentials(
+    *,
+    client: httpx.Client,
+    body: ManualPlatformCredentialRequest,
+) -> dict[str, Any]:
+    token = (body.page_access_token or body.access_token or "").strip()
+    if not token:
+        raise HTTPException(status_code=422, detail="Facebook page access token is required.")
+    page_id = _normalize_global_publisher_channel_id("facebook", body.platform_channel_id)
+    version = (body.graph_api_version or get_settings().meta_graph_api_version).strip()
+    response = client.get(
+        f"{FACEBOOK_GRAPH_BASE}/{version}/{page_id}",
+        params={"fields": "id,name", "access_token": token},
+    )
+    response.raise_for_status()
+    data = response.json()
+    name = data.get("name") if isinstance(data, dict) else None
+    external_id = str(data.get("id") or page_id) if isinstance(data, dict) else page_id
+    return {
+        "ok": True,
+        "platform": "facebook",
+        "platform_channel_id": external_id,
+        "display": str(name or body.display or external_id),
+        "can_read": False,
+        "can_write": True,
+    }
+
+
+def _validate_instagram_credentials(
+    *,
+    client: httpx.Client,
+    body: ManualPlatformCredentialRequest,
+) -> dict[str, Any]:
+    token = (body.access_token or "").strip()
+    if not token:
+        raise HTTPException(status_code=422, detail="Instagram access token is required.")
+    user_id = _normalize_global_publisher_channel_id("instagram", body.platform_channel_id)
+    version = (body.graph_api_version or get_settings().meta_graph_api_version).strip()
+    response = client.get(
+        f"{FACEBOOK_GRAPH_BASE}/{version}/{user_id}",
+        params={"fields": "id,username", "access_token": token},
+    )
+    response.raise_for_status()
+    data = response.json()
+    username = data.get("username") if isinstance(data, dict) else None
+    external_id = str(data.get("id") or user_id) if isinstance(data, dict) else user_id
+    return {
+        "ok": True,
+        "platform": "instagram",
+        "platform_channel_id": external_id,
+        "display": str(username or body.display or external_id),
+        "can_read": False,
+        "can_write": True,
+    }
+
+
+def _validate_x_credentials(
+    *,
+    client: httpx.Client,
+    body: ManualPlatformCredentialRequest,
+) -> dict[str, Any]:
+    token = (body.access_token or "").strip()
+    if not token:
+        raise HTTPException(status_code=422, detail="X access token is required.")
+    response = client.get(
+        "https://api.x.com/2/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"user.fields": "username,name"},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    data = payload.get("data") if isinstance(payload, dict) else None
+    username = data.get("username") if isinstance(data, dict) else None
+    name = data.get("name") if isinstance(data, dict) else None
+    requested = _normalize_global_publisher_channel_id("x", body.platform_channel_id)
+    external_id = str(username or requested)
+    if username and requested not in {"me", external_id, f"@{external_id}"}:
+        raise HTTPException(
+            status_code=422,
+            detail=f"X token belongs to @{external_id}, not {requested}.",
+        )
+    return {
+        "ok": True,
+        "platform": "x",
+        "platform_channel_id": external_id,
+        "display": str(name or f"@{external_id}"),
+        "can_read": False,
+        "can_write": True,
+    }
+
+
+def _validate_bluesky_credentials(
+    *,
+    client: httpx.Client,
+    body: ManualPlatformCredentialRequest,
+) -> dict[str, Any]:
+    identifier = _normalize_global_publisher_channel_id("bluesky", body.platform_channel_id)
+    app_password = (body.app_password or "").strip()
+    if not app_password:
+        raise HTTPException(status_code=422, detail="Bluesky app password is required.")
+    service_url = (body.service_url or get_settings().bluesky_service_url).rstrip("/")
+    response = client.post(
+        f"{service_url}/xrpc/com.atproto.server.createSession",
+        json={"identifier": identifier, "password": app_password},
+    )
+    response.raise_for_status()
+    data = response.json()
+    handle = data.get("handle") if isinstance(data, dict) else None
+    did = data.get("did") if isinstance(data, dict) else None
+    return {
+        "ok": True,
+        "platform": "bluesky",
+        "platform_channel_id": str(handle or identifier),
+        "display": str(handle or body.display or identifier),
+        "can_read": False,
+        "can_write": True,
+        **({"did": did} if did else {}),
+    }
+
+
+def _validate_mastodon_credentials(
+    *,
+    client: httpx.Client,
+    body: ManualPlatformCredentialRequest,
+) -> dict[str, Any]:
+    token = (body.access_token or "").strip()
+    instance_url = (body.instance_url or "").strip().rstrip("/")
+    if not token or not instance_url:
+        raise HTTPException(status_code=422, detail="Mastodon access token and instance URL are required.")
+    response = client.get(
+        f"{instance_url}/api/v1/accounts/verify_credentials",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    response.raise_for_status()
+    data = response.json()
+    acct = data.get("acct") if isinstance(data, dict) else None
+    display_name = data.get("display_name") if isinstance(data, dict) else None
+    requested = _normalize_global_publisher_channel_id("mastodon", body.platform_channel_id)
+    host = urlparse(instance_url).hostname or ""
+    external_id = (
+        f"@{acct}@{host}"
+        if acct and "@" not in str(acct) and host
+        else str(acct or requested)
+    )
+    return {
+        "ok": True,
+        "platform": "mastodon",
+        "platform_channel_id": external_id,
+        "display": str(display_name or acct or body.display or external_id),
+        "can_read": False,
+        "can_write": True,
+    }
+
+
+def _validate_manual_platform_credentials(body: ManualPlatformCredentialRequest) -> dict[str, Any]:
+    platform = body.platform.strip().lower()
+    if platform not in _MANUAL_PUBLISHER_PLATFORMS:
+        raise HTTPException(status_code=422, detail="unsupported manual credential platform")
+    try:
+        with httpx.Client(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+            if platform == "facebook":
+                return _validate_facebook_credentials(client=client, body=body)
+            if platform == "instagram":
+                return _validate_instagram_credentials(client=client, body=body)
+            if platform == "x":
+                return _validate_x_credentials(client=client, body=body)
+            if platform == "bluesky":
+                return _validate_bluesky_credentials(client=client, body=body)
+            if platform == "mastodon":
+                return _validate_mastodon_credentials(client=client, body=body)
+    except httpx.HTTPStatusError as exc:
+        raise _provider_http_error(exc, platform.title()) from exc
+    except httpx.RequestError as exc:
+        raise _provider_transport_error(exc, platform.title()) from exc
+    raise HTTPException(status_code=422, detail="unsupported manual credential platform")
+
+
+@router.post("/credentials/oauth/authorize-url", include_in_schema=False)
+def create_oauth_authorize_url(
+    body: OAuthAuthorizeUrlRequest,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Build a provider OAuth authorization URL for self-host setup."""
+    _require_selfhost_tenant(session)
+    settings = get_settings()
+    platform = body.platform.strip().lower()
+    state = body.state or _b64url(secrets.token_bytes(24))
+    if platform in {"meta", "facebook", "instagram"}:
+        if not settings.meta_oauth_client_id:
+            raise HTTPException(status_code=422, detail="META_OAUTH_CLIENT_ID is not configured")
+        redirect_uri = _oauth_redirect_uri("meta", body.redirect_uri)
+        scopes = body.scopes or list(_META_DEFAULT_SCOPES)
+        query = urlencode(
+            {
+                "client_id": settings.meta_oauth_client_id,
+                "redirect_uri": redirect_uri,
+                "state": state,
+                "scope": ",".join(scopes),
+                "response_type": "code",
+            }
+        )
+        return {
+            "authorize_url": f"https://www.facebook.com/{settings.meta_graph_api_version}/dialog/oauth?{query}",
+            "state": state,
+            "scopes": scopes,
+            "provider": "meta",
+        }
+    if platform == "x":
+        if not settings.x_oauth_client_id:
+            raise HTTPException(status_code=422, detail="X_OAUTH_CLIENT_ID is not configured")
+        redirect_uri = _oauth_redirect_uri("x", body.redirect_uri)
+        verifier = _oauth_code_verifier()
+        scopes = body.scopes or list(_X_DEFAULT_SCOPES)
+        query = urlencode(
+            {
+                "response_type": "code",
+                "client_id": settings.x_oauth_client_id,
+                "redirect_uri": redirect_uri,
+                "scope": " ".join(scopes),
+                "state": state,
+                "code_challenge": _oauth_code_challenge(verifier),
+                "code_challenge_method": "S256",
+            }
+        )
+        return {
+            "authorize_url": f"https://x.com/i/oauth2/authorize?{query}",
+            "state": state,
+            "code_verifier": verifier,
+            "scopes": scopes,
+            "provider": "x",
+        }
+    raise HTTPException(status_code=422, detail="unsupported OAuth platform")
+
+
+@router.post("/credentials/oauth/token", include_in_schema=False)
+def exchange_oauth_code(
+    body: OAuthTokenExchangeRequest,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Exchange an OAuth authorization code for tokens for self-host setup."""
+    _require_selfhost_tenant(session)
+    settings = get_settings()
+    platform = body.platform.strip().lower()
+    if platform in {"meta", "facebook", "instagram"}:
+        if not settings.meta_oauth_client_id or not settings.meta_oauth_client_secret:
+            raise HTTPException(status_code=422, detail="Meta OAuth client id/secret are not configured")
+        redirect_uri = _oauth_redirect_uri("meta", body.redirect_uri)
+        try:
+            with httpx.Client(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+                response = client.get(
+                    f"{FACEBOOK_GRAPH_BASE}/{settings.meta_graph_api_version}/oauth/access_token",
+                    params={
+                        "client_id": settings.meta_oauth_client_id,
+                        "client_secret": settings.meta_oauth_client_secret,
+                        "redirect_uri": redirect_uri,
+                        "code": body.code,
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+        except httpx.HTTPStatusError as exc:
+            raise _provider_http_error(exc, "Meta") from exc
+        except httpx.RequestError as exc:
+            raise _provider_transport_error(exc, "Meta") from exc
+        payload = data if isinstance(data, dict) else {}
+        expires_at = _token_expires_at(payload)
+        return {
+            "provider": "meta",
+            **payload,
+            **({"expires_at": expires_at} if expires_at else {}),
+        }
+    if platform == "x":
+        if not settings.x_oauth_client_id:
+            raise HTTPException(status_code=422, detail="X_OAUTH_CLIENT_ID is not configured")
+        verifier = (body.code_verifier or "").strip()
+        if not verifier:
+            raise HTTPException(status_code=422, detail="X OAuth code_verifier is required")
+        redirect_uri = _oauth_redirect_uri("x", body.redirect_uri)
+        headers: dict[str, str] = {"Content-Type": "application/x-www-form-urlencoded"}
+        data = {
+            "grant_type": "authorization_code",
+            "code": body.code,
+            "redirect_uri": redirect_uri,
+            "client_id": settings.x_oauth_client_id,
+            "code_verifier": verifier,
+        }
+        if settings.x_oauth_client_secret:
+            basic = base64.b64encode(
+                f"{settings.x_oauth_client_id}:{settings.x_oauth_client_secret}".encode("utf-8")
+            ).decode("ascii")
+            headers["Authorization"] = f"Basic {basic}"
+        try:
+            with httpx.Client(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+                response = client.post("https://api.x.com/2/oauth2/token", headers=headers, data=data)
+                response.raise_for_status()
+                token_data = response.json()
+        except httpx.HTTPStatusError as exc:
+            raise _provider_http_error(exc, "X") from exc
+        except httpx.RequestError as exc:
+            raise _provider_transport_error(exc, "X") from exc
+        payload = token_data if isinstance(token_data, dict) else {}
+        expires_at = _token_expires_at(payload)
+        return {
+            "provider": "x",
+            **payload,
+            **({"expires_at": expires_at} if expires_at else {}),
+        }
+    raise HTTPException(status_code=422, detail="unsupported OAuth platform")
+
+
+@router.post("/credentials/meta/pages", include_in_schema=False)
+def list_meta_pages(
+    body: MetaPagesRequest,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    """List Facebook Pages and linked Instagram Business accounts for a Meta user token."""
+    _require_selfhost_tenant(session)
+    version = (body.graph_api_version or get_settings().meta_graph_api_version).strip()
+    try:
+        with httpx.Client(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+            response = client.get(
+                f"{FACEBOOK_GRAPH_BASE}/{version}/me/accounts",
+                params={
+                    "fields": "id,name,access_token,instagram_business_account{id,username}",
+                    "access_token": body.access_token.strip(),
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+    except httpx.HTTPStatusError as exc:
+        raise _provider_http_error(exc, "Meta") from exc
+    except httpx.RequestError as exc:
+        raise _provider_transport_error(exc, "Meta") from exc
+    raw_items = payload.get("data") if isinstance(payload, dict) else []
+    items: list[dict[str, Any]] = []
+    for item in raw_items if isinstance(raw_items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        page_id = str(item.get("id") or "").strip()
+        if not page_id:
+            continue
+        ig = item.get("instagram_business_account")
+        items.append(
+            {
+                "page_id": page_id,
+                "name": item.get("name") or page_id,
+                "page_access_token": item.get("access_token"),
+                "instagram_user_id": str(ig.get("id")) if isinstance(ig, dict) and ig.get("id") else None,
+                "instagram_username": ig.get("username") if isinstance(ig, dict) else None,
+            }
+        )
+    return {"items": items}
+
+
+@router.post("/credentials/platform/validate", include_in_schema=False)
+def validate_manual_platform_credential(
+    body: PlatformCredentialValidateRequest,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Validate manual publisher credentials without storing their plaintext."""
+    _require_selfhost_tenant(session)
+    return _validate_manual_platform_credentials(body)
+
+
+def _manual_platform_secret(platform: str, body: ManualPlatformCredentialRequest) -> tuple[dict[str, Any], str]:
+    if platform == "facebook":
+        token = (body.page_access_token or body.access_token or "").strip()
+        if not token:
+            raise HTTPException(status_code=422, detail="Facebook page access token is required.")
+        return (
+            {
+                "page_access_token": token,
+                "page_id": _normalize_global_publisher_channel_id(platform, body.platform_channel_id),
+                **({"graph_api_version": body.graph_api_version.strip()} if body.graph_api_version else {}),
+            },
+            "facebook_page_access_token",
+        )
+    if platform == "instagram":
+        token = (body.access_token or "").strip()
+        if not token:
+            raise HTTPException(status_code=422, detail="Instagram access token is required.")
+        return (
+            {
+                "access_token": token,
+                "instagram_user_id": _normalize_global_publisher_channel_id(platform, body.platform_channel_id),
+                **({"graph_api_version": body.graph_api_version.strip()} if body.graph_api_version else {}),
+            },
+            "instagram_access_token",
+        )
+    if platform == "x":
+        token = (body.access_token or "").strip()
+        if not token:
+            raise HTTPException(status_code=422, detail="X access token is required.")
+        return ({"access_token": token}, "x_access_token")
+    if platform == "bluesky":
+        identifier = _normalize_global_publisher_channel_id(platform, body.platform_channel_id)
+        app_password = (body.app_password or "").strip()
+        if not app_password:
+            raise HTTPException(status_code=422, detail="Bluesky app password is required.")
+        return (
+            {
+                "identifier": identifier,
+                "app_password": app_password,
+                **({"service_url": body.service_url.strip()} if body.service_url else {}),
+            },
+            "bluesky_app_password",
+        )
+    if platform == "mastodon":
+        token = (body.access_token or "").strip()
+        instance_url = (body.instance_url or "").strip()
+        visibility = (body.visibility or "public").strip().lower()
+        if not token or not instance_url:
+            raise HTTPException(status_code=422, detail="Mastodon access token and instance URL are required.")
+        if visibility not in {"public", "unlisted", "private", "direct"}:
+            raise HTTPException(status_code=422, detail="invalid Mastodon visibility")
+        return (
+            {
+                "access_token": token,
+                "instance_url": instance_url.rstrip("/"),
+                "visibility": visibility,
+            },
+            "mastodon_access_token",
+        )
+    raise HTTPException(status_code=422, detail="unsupported manual credential platform")
+
+
+@router.post("/credentials/platform/manual", include_in_schema=False)
+def create_manual_platform_credential(
+    body: ManualPlatformCredentialRequest,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Store manual publisher credentials directly in Core for self-host."""
+    tenant = _require_selfhost_tenant(session)
+    platform = body.platform.strip().lower()
+    if platform not in _MANUAL_PUBLISHER_PLATFORMS:
+        raise HTTPException(status_code=422, detail="unsupported manual credential platform")
+    platform_channel_id = _normalize_global_publisher_channel_id(platform, body.platform_channel_id)
+    secret, auth_type = _manual_platform_secret(platform, body)
+    display = (body.display or "").strip() or platform_channel_id
+    channel, _credential = _create_or_update_managed_credential_channel(
+        session,
+        tenant_id=tenant.id,
+        platform=platform,
+        platform_channel_id=platform_channel_id,
+        title=display,
+        secret=secret,
+        auth_type=auth_type,
+        can_read=False,
+        can_write=True,
+        expires_at=body.expires_at,
+    )
+    return {"id": channel.id, "platform_channel_id": platform_channel_id, "display": channel.title}
+
+
 @router.post("/channels", include_in_schema=False)
 def create_channel(
     body: ChannelCreateRequest,
@@ -3306,9 +3913,18 @@ def create_channel(
         )
         if errors:
             raise HTTPException(status_code=422, detail=errors[0])
-    if platform in {"vk", "linkedin"} and (can_read or can_write):
+    managed_credential_platforms = {"vk", "linkedin", *_MANUAL_PUBLISHER_PLATFORMS}
+    if platform in managed_credential_platforms and (can_read or can_write):
         if credentials_channel is None:
-            platform_label = "LinkedIn" if platform == "linkedin" else "VK"
+            platform_label = {
+                "vk": "VK",
+                "linkedin": "LinkedIn",
+                "facebook": "Facebook",
+                "instagram": "Instagram",
+                "x": "X",
+                "bluesky": "Bluesky",
+                "mastodon": "Mastodon",
+            }.get(platform, platform)
             raise HTTPException(status_code=422, detail=f"Connect {platform_label} credentials first.")
         if credentials_channel.platform != platform:
             raise HTTPException(status_code=422, detail=f"Choose connected {platform} credentials for this channel.")

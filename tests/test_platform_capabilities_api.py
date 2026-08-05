@@ -66,6 +66,18 @@ def test_platform_capabilities_public_map_covers_registry():
     assert m["linkedin"]["supports_target"] is True
     assert m["linkedin"]["live_sync_publish_supported"] is True
     assert m["linkedin"]["rule_post_text_limit"] == 3000
+    for platform, limit in {
+        "facebook": 63206,
+        "instagram": 2200,
+        "x": 280,
+        "bluesky": 300,
+        "mastodon": 500,
+    }.items():
+        assert m[platform]["supports_source"] is False
+        assert m[platform]["supports_target"] is True
+        assert m[platform]["live_sync_publish_supported"] is True
+        assert m[platform]["historical_migration_target_supported"] is True
+        assert m[platform]["rule_post_text_limit"] == limit
 
 
 def test_service_list_platform_capabilities_ok(client: TestClient):
@@ -80,3 +92,5 @@ def test_service_list_platform_capabilities_ok(client: TestClient):
     assert body["platforms"]["zen"]["ai_adapt_supported"] is True
     assert body["platforms"]["telegram"]["rule_post_text_limit"] == 4096
     assert body["platforms"]["linkedin"]["supports_target"] is True
+    assert body["platforms"]["facebook"]["supports_target"] is True
+    assert body["platforms"]["x"]["rule_post_text_limit"] == 280

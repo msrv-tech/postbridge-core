@@ -24,6 +24,7 @@ These are Vite build-time flags for `web/`. The public Core defaults are intenti
 | `VITE_TELEGRAM_BOT_NAME` | empty | Optional Telegram bot username used in UI links. Empty hides the bot link in self-host builds. |
 | `VITE_MAX_BOT_URL` | empty | Optional MAX bot URL used in UI hints. |
 | `VITE_BILLING_SUPPORT_EMAIL` | `support@example.com` | Optional support address shown in billing UI. |
+| `VITE_POSTBRIDGE_DISABLED_PLATFORMS` | empty | Comma-separated platform ids hidden from the Add Channel UI for this deployment, for example `facebook,instagram,x,twitter` on RU production. |
 
 Example template: [`.env.example`](../.env.example). For production, copy it to your deployment environment and replace all placeholder values.
 
@@ -40,3 +41,29 @@ Example template: [`.env.example`](../.env.example). For production, copy it to 
 | `AI_IMAGE_GENERATION_MODEL` | empty | Image generation model id; Core does not fall back to the text model. |
 | `AI_IMAGE_GENERATION_TIMEOUT_SECONDS` | `300` in self-host, `120` in SaaS | Timeout for image generation and generated image download. |
 | `AI_IMAGE_GENERATION_SIZE` | `1536x1024` | Image size passed to the provider. |
+
+## Platform Integrations
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `LINKEDIN_ACCESS_TOKEN` | empty | Fallback LinkedIn access token for organic post publishing. |
+| `LINKEDIN_AUTHOR_URN` | empty | Optional fallback LinkedIn author URN. |
+| `LINKEDIN_API_VERSION` | `202601` | LinkedIn Rest API version header. |
+| `META_GRAPH_API_VERSION` | `v25.0` | Meta Graph API version for Facebook and Instagram publishers. |
+| `FACEBOOK_PAGE_ACCESS_TOKEN` | empty | Fallback Page access token for Facebook publishing. |
+| `FACEBOOK_PAGE_ID` | empty | Optional fallback Facebook Page id. |
+| `INSTAGRAM_ACCESS_TOKEN` | empty | Fallback token for Instagram Business content publishing. |
+| `INSTAGRAM_USER_ID` | empty | Optional fallback Instagram Business user id. |
+| `X_ACCESS_TOKEN` | empty | Fallback OAuth bearer token for X API v2 post creation. |
+| `X_OAUTH_CLIENT_ID` | empty | Optional X OAuth 2.0 client id for self-host OAuth helper endpoints. |
+| `X_OAUTH_CLIENT_SECRET` | empty | Optional X OAuth 2.0 client secret for confidential clients. |
+| `X_OAUTH_REDIRECT_URI` | empty | Optional X OAuth redirect URI used by helper endpoints. |
+| `BLUESKY_IDENTIFIER` | empty | Fallback Bluesky handle or DID. |
+| `BLUESKY_APP_PASSWORD` | empty | Fallback Bluesky app password. |
+| `BLUESKY_SERVICE_URL` | `https://bsky.social` | AT Protocol service URL. |
+| `MASTODON_ACCESS_TOKEN` | empty | Fallback Mastodon access token. |
+| `MASTODON_INSTANCE_URL` | empty | Mastodon instance base URL, for example `https://mastodon.social`. |
+| `MASTODON_VISIBILITY` | `public` | Default Mastodon visibility: `public`, `unlisted`, `private`, or `direct`. |
+| `META_OAUTH_CLIENT_ID` | empty | Optional Meta App id for self-host OAuth helper endpoints. |
+| `META_OAUTH_CLIENT_SECRET` | empty | Optional Meta App secret for OAuth code exchange. |
+| `META_OAUTH_REDIRECT_URI` | empty | Optional Meta OAuth redirect URI used by helper endpoints. |

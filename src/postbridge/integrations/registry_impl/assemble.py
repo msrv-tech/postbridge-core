@@ -5,12 +5,17 @@ from __future__ import annotations
 from postbridge.integrations.base import SourceFetcher, TargetPublisher
 from postbridge.integrations.platform_ai import DefaultPlatformAiAdapter
 from postbridge.integrations.registry_bundle import PlatformBundle
+from postbridge.integrations.registry_impl import bluesky as bluesky_plat
+from postbridge.integrations.registry_impl import facebook as facebook_plat
+from postbridge.integrations.registry_impl import instagram as instagram_plat
 from postbridge.integrations.registry_impl import max as max_plat
 from postbridge.integrations.registry_impl import linkedin as linkedin_plat
+from postbridge.integrations.registry_impl import mastodon as mastodon_plat
 from postbridge.integrations.registry_impl import postbridge_source
 from postbridge.integrations.registry_impl import rss as rss_plat
 from postbridge.integrations.registry_impl import telegram as telegram_plat
 from postbridge.integrations.registry_impl import vk as vk_plat
+from postbridge.integrations.registry_impl import x as x_plat
 from postbridge.integrations.registry_impl import zen as zen_plat
 from postbridge.integrations.registry_impl.types import PlatformRegistration
 
@@ -27,6 +32,11 @@ def _all_registrations() -> list[PlatformRegistration]:
         rss_plat.make_registration(ai),
         zen_plat.make_registration(ai),
         postbridge_source.make_registration(ai),
+        facebook_plat.make_registration(ai),
+        instagram_plat.make_registration(ai),
+        x_plat.make_registration(ai),
+        bluesky_plat.make_registration(ai),
+        mastodon_plat.make_registration(ai),
     ]
 
 

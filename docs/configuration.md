@@ -62,6 +62,11 @@ Only configure the integrations you plan to use.
 | MAX | `MAX_API_BASE_URL`, `MAX_API_TOKEN` |
 | VK | `VK_ACCESS_TOKEN`, `VK_USER_ACCESS_TOKEN` |
 | LinkedIn | `LINKEDIN_ACCESS_TOKEN`, `LINKEDIN_AUTHOR_URN`, `LINKEDIN_API_VERSION` |
+| Facebook Pages | `FACEBOOK_PAGE_ACCESS_TOKEN`, `FACEBOOK_PAGE_ID`, `META_GRAPH_API_VERSION` |
+| Instagram Business | `INSTAGRAM_ACCESS_TOKEN`, `INSTAGRAM_USER_ID`, `META_GRAPH_API_VERSION` |
+| X | `X_ACCESS_TOKEN` |
+| Bluesky | `BLUESKY_IDENTIFIER`, `BLUESKY_APP_PASSWORD`, `BLUESKY_SERVICE_URL` |
+| Mastodon | `MASTODON_ACCESS_TOKEN`, `MASTODON_INSTANCE_URL`, `MASTODON_VISIBILITY` |
 | AI Gateway | `AI_GATEWAY_ENABLED`, `AI_GATEWAY_BASE_URL`, `AI_GATEWAY_API_KEY` |
 | Media storage | `MEDIA_STORAGE_TYPE`, `MEDIA_STORAGE_PATH`, `S3_*` |
 
@@ -91,7 +96,7 @@ Use the first-run setup wizard for the local administrator and for optional inte
 | Telegram import | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING` |
 | Telegram bot | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `BOT_BACKEND=core_db`, `BOT_MODE=long_polling` or webhook settings |
 | Email | No required SMTP secret in Core self-host today; email delivery remains optional until a mail provider adapter is configured in code |
-| MAX/VK/LinkedIn fallback credentials | `MAX_API_*`, `VK_*`, `LINKEDIN_*` |
+| MAX/VK/LinkedIn/global publisher fallback credentials | `MAX_API_*`, `VK_*`, `LINKEDIN_*`, `FACEBOOK_*`, `INSTAGRAM_*`, `X_*`, `BLUESKY_*`, `MASTODON_*` |
 | Media | `MEDIA_STORAGE_TYPE`, local path or `S3_*` |
 | Internal service access | `CORE_SERVICE_TOKEN` only when another trusted backend calls Core |
 
@@ -105,7 +110,7 @@ Optional integrations are needed only when the matching feature is used:
 | AI text adaptation, agents, image generation | AI gateway settings |
 | Telegram import | Telegram API ID/hash and session |
 | Telegram publishing or bot onboarding | Telegram bot token and username |
-| MAX, VK, LinkedIn | platform credentials for the selected platform |
+| MAX, VK, LinkedIn, Facebook, Instagram, X, Bluesky, Mastodon | platform credentials for the selected platform |
 | Uploaded/generated media persistence | local media storage or S3 settings |
 
 ## Secret Hygiene
