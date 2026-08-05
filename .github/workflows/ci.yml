@@ -222,5 +222,17 @@ jobs:
             POSTBRIDGE_BIND_ALERTMANAGER=127.0.0.1:19093 \
             POSTBRIDGE_BIND_GRAFANA=127.0.0.1:13000 \
             flock /tmp/postbridge-io-deploy.lock bash /opt/postbridge-core/scripts/deploy-prod.sh
-          curl -fsS https://postbridge.io/health
-          curl -fsS https://postbridge.io/api/app/runtime-config
+          wait_for_url() {
+            url="$1"
+            for attempt in $(seq 1 30); do
+              if curl -fsS "$url"; then
+                return 0
+              fi
+              if [ "$attempt" -eq 30 ]; then
+                return 1
+              fi
+              sleep 2
+            done
+          }
+          wait_for_url https://postbridge.io/health
+          wait_for_url https://postbridge.io/api/app/runtime-config
