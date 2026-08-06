@@ -20,6 +20,7 @@ function mapSelfhostPath(path) {
   if (path === '/me') return `${CORE_APP_BASE}/session`;
   if (path === '/auth/providers') return `${CORE_APP_BASE}/auth/providers`;
   if (path.startsWith('/auth/magic-link/')) return `${CORE_APP_BASE}${path}`;
+  if (path === '/auth/review-login') return `${CORE_APP_BASE}${path}`;
   if (path.startsWith('/auth/telegram-web/')) return `${CORE_APP_BASE}${path}`;
   if (path === '/me/billing-email/request') return `${CORE_APP_BASE}/billing-email/request`;
   if (path === '/me/billing-email/verify') return `${CORE_APP_BASE}/billing-email/verify`;

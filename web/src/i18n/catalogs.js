@@ -228,6 +228,8 @@ export const catalogs = {
     'login.email.codeLabel': 'Код из письма',
     'login.email.verifying': 'Вход...',
     'login.email.useAnother': 'Указать другой email',
+    'login.review.metaHint': 'Доступ для ревью Meta. Используйте email и код, выданные Postbridge.',
+    'login.review.codeLabel': 'Код ревью',
 
     'agents.nav.topicScout': 'Агент поиска',
     'agents.nav.editor': 'Агент редактор',
@@ -1805,6 +1807,8 @@ export const catalogs = {
     'login.email.codeLabel': 'Email code',
     'login.email.verifying': 'Logging in...',
     'login.email.useAnother': 'Use another email',
+    'login.review.metaHint': 'Meta review access. Use the email and review code provided by Postbridge.',
+    'login.review.codeLabel': 'Review code',
 
     'agents.nav.topicScout': 'Topic scout',
     'agents.nav.editor': 'Editor agent',

@@ -18,6 +18,13 @@ export function verifyMagicLink(payload) {
   })
 }
 
+export function reviewLogin(payload) {
+  return api('/auth/review-login', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function authenticateMiniApp(endpoint, initData) {
   const url = endpoint === 'max' ? '/auth/max-mini-app' : '/auth/telegram-mini-app'
   return api(url, {

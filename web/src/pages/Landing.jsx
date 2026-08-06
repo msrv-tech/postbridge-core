@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { listAuthProviders, requestMagicLink, verifyMagicLink } from '../adapters/authFlows'
+import { listAuthProviders, requestMagicLink, reviewLogin, verifyMagicLink } from '../adapters/authFlows'
 import { setToken } from '../adapters/sessionToken'
 import PublicLayout from '../components/PublicLayout'
 import TelegramDeepLinkField from '../components/TelegramDeepLinkField'
@@ -65,6 +65,8 @@ export default function Landing() {
   const [tgLinkLoading, setTgLinkLoading] = useState(false)
   const [tgHint, setTgHint] = useState('')
   const [authProviders, setAuthProviders] = useState(null)
+  const [reviewCode, setReviewCode] = useState('')
+  const isMetaReviewLogin = searchParams.get('review') === 'meta'
 
   const providerEnabled = (providerId) => {
     if (!Array.isArray(authProviders) || authProviders.length === 0) {
@@ -176,6 +178,25 @@ export default function Landing() {
     }
   }
 
+  const handleReviewLogin = async (e) => {
+    e.preventDefault()
+    setError('')
+    setVerifying(true)
+    reachMetrikaGoal('auth_started', { method: 'meta_review' })
+    try {
+      const res = await reviewLogin({
+        email: email.trim(),
+        code: reviewCode,
+      })
+      setToken(res.token)
+      reachMetrikaGoal('auth_completed', { method: 'meta_review' })
+      navigate('/')
+    } catch (e) {
+      setError(e.message)
+      setVerifying(false)
+    }
+  }
+
   useEffect(() => {
     const vkErr = searchParams.get('vk_oauth_error')
     const googleErr = searchParams.get('google_oauth_error')
@@ -198,6 +219,40 @@ export default function Landing() {
         <div className="container auth-layout auth-layout-single">
           <div className="card auth-card">
             <h2>{t('login.title')}</h2>
+            {isMetaReviewLogin ? (
+              <form onSubmit={handleReviewLogin}>
+                <p className="section-copy">{t('login.review.metaHint')}</p>
+                <div className="form-group">
+                  <label htmlFor="review-email">{t('common.email')}</label>
+                  <input
+                    id="review-email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="meta-review@postbridge.io"
+                    required
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="review-code">{t('login.review.codeLabel')}</label>
+                  <input
+                    id="review-code"
+                    type="password"
+                    value={reviewCode}
+                    onChange={(e) => setReviewCode(e.target.value)}
+                    autoComplete="current-password"
+                    required
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                {error && <p className="error">{error}</p>}
+                <button type="submit" className="btn btn-block" disabled={verifying || !email.trim() || !reviewCode}>
+                  {verifying ? t('login.email.verifying') : t('common.login')}
+                </button>
+              </form>
+            ) : (
+              <>
             {providerEnabled('telegram') && (
               <div className="telegram-web-link-block" style={{ marginBottom: '1rem' }}>
                 {!tgDeepLink ? (
@@ -317,6 +372,8 @@ export default function Landing() {
               </>
             )}
             {error && !providerEnabled('email') && <p className="error">{error}</p>}
+              </>
+            )}
           </div>
         </div>
       </section>
