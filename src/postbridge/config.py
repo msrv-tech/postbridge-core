@@ -51,6 +51,7 @@ class Settings:
     meta_oauth_client_id: str | None
     meta_oauth_client_secret: str | None
     meta_oauth_redirect_uri: str | None
+    meta_oauth_config_id: str | None
     x_oauth_client_id: str | None
     x_oauth_client_secret: str | None
     x_oauth_redirect_uri: str | None
@@ -255,6 +256,7 @@ def get_settings() -> Settings:
         meta_oauth_client_id=_strip_optional_env(os.getenv("META_OAUTH_CLIENT_ID")),
         meta_oauth_client_secret=_strip_optional_env(os.getenv("META_OAUTH_CLIENT_SECRET")),
         meta_oauth_redirect_uri=_strip_optional_env(os.getenv("META_OAUTH_REDIRECT_URI")),
+        meta_oauth_config_id=_strip_optional_env(os.getenv("META_OAUTH_CONFIG_ID")),
         x_oauth_client_id=_strip_optional_env(os.getenv("X_OAUTH_CLIENT_ID")),
         x_oauth_client_secret=_strip_optional_env(os.getenv("X_OAUTH_CLIENT_SECRET")),
         x_oauth_redirect_uri=_strip_optional_env(os.getenv("X_OAUTH_REDIRECT_URI")),

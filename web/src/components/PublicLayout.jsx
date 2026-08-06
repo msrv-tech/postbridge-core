@@ -56,6 +56,8 @@ export default function PublicLayout({ children, compact = false }) {
             <Link to="/cases/telegram-to-max">{t('common.cases')}</Link>
             <Link to="/agents/help">{t('common.faq')}</Link>
             {!selfhost && <Link to="/pricing">{t('common.pricing')}</Link>}
+            <Link to="/privacy">Privacy</Link>
+            <Link to="/terms">Terms</Link>
             <Link to="/login">{t('common.login')}</Link>
             <a href={`mailto:${BILLING_SUPPORT_EMAIL}`}>{t('common.support')}</a>
           </div>

@@ -67,3 +67,4 @@ Example template: [`.env.example`](../.env.example). For production, copy it to 
 | `META_OAUTH_CLIENT_ID` | empty | Optional Meta App id for self-host OAuth helper endpoints. |
 | `META_OAUTH_CLIENT_SECRET` | empty | Optional Meta App secret for OAuth code exchange. |
 | `META_OAUTH_REDIRECT_URI` | empty | Optional Meta OAuth redirect URI used by helper endpoints. |
+| `META_OAUTH_CONFIG_ID` | empty | Optional Facebook Login for Business configuration id included in Meta OAuth authorization URLs. |
