@@ -115,7 +115,13 @@ if [[ -n "$worker_service" ]]; then
 fi
 
 echo "Building Core images..."
-compose build "${build_services[@]}"
+if [[ "${POSTBRIDGE_DEPLOY_SERIAL_BUILD:-0}" == "1" ]]; then
+  for service in "${build_services[@]}"; do
+    compose build "$service"
+  done
+else
+  compose build "${build_services[@]}"
+fi
 
 echo "Running migrations..."
 compose run --rm --no-deps "$api_service" alembic -c /app/alembic.ini upgrade head

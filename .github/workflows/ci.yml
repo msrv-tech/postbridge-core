@@ -215,6 +215,7 @@ jobs:
             POSTBRIDGE_DEPLOY_COMPOSE_FILE=docker-compose.yml \
             POSTBRIDGE_DEPLOY_ENV_FILE=/opt/postbridge-saas/environments/production/.env \
             POSTBRIDGE_DEPLOY_COMPOSE_PROJECT=postbridge_io \
+            POSTBRIDGE_DEPLOY_SERIAL_BUILD=1 \
             POSTBRIDGE_BIND_POSTGRES=127.0.0.1:15432 \
             POSTBRIDGE_BIND_CORE_API=127.0.0.1:18000 \
             POSTBRIDGE_BIND_SAAS_API=127.0.0.1:18001 \
