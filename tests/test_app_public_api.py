@@ -1838,6 +1838,7 @@ def test_app_oauth_authorize_url_helpers(monkeypatch):
     monkeypatch.setenv("POSTBRIDGE_SELFHOST_TENANT_ID", "10000000-0000-4000-8000-000000000048")
     monkeypatch.setenv("META_OAUTH_CLIENT_ID", "meta-client")
     monkeypatch.setenv("META_OAUTH_REDIRECT_URI", "https://core.test/oauth/meta")
+    monkeypatch.setenv("META_OAUTH_CONFIG_ID", "meta-config")
     monkeypatch.setenv("X_OAUTH_CLIENT_ID", "x-client")
     monkeypatch.setenv("X_OAUTH_REDIRECT_URI", "https://core.test/oauth/x")
     client = TestClient(app)
@@ -1859,6 +1860,8 @@ def test_app_oauth_authorize_url_helpers(monkeypatch):
     assert meta_url.netloc == "www.facebook.com"
     assert meta_qs["client_id"] == ["meta-client"]
     assert meta_qs["redirect_uri"] == ["https://core.test/oauth/meta"]
+    assert meta_qs["config_id"] == ["meta-config"]
+    assert "business_management" in meta_qs["scope"][0]
     assert "pages_manage_posts" in meta_qs["scope"][0]
     assert "instagram_content_publish" in meta_qs["scope"][0]
 

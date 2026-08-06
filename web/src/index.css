@@ -4481,3 +4481,60 @@ textarea:focus {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+.legal-page {
+  max-width: 840px;
+}
+
+.legal-page h1 {
+  margin: 0.25rem 0 0.75rem;
+  font-size: clamp(2.25rem, 5vw, 4rem);
+}
+
+.legal-page .lead {
+  max-width: 720px;
+  color: var(--text-soft);
+  font-size: 1.125rem;
+  line-height: 1.65;
+}
+
+.legal-sections {
+  display: grid;
+  gap: 2rem;
+  margin-top: 3rem;
+}
+
+.legal-sections section,
+.legal-contact {
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.legal-sections h2,
+.legal-contact h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.25rem;
+}
+
+.legal-sections p,
+.legal-contact p {
+  margin: 0.65rem 0;
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+.legal-contact {
+  margin-top: 2rem;
+}
+
+.legal-contact a,
+.legal-related a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.legal-related {
+  margin-top: 2rem;
+  color: var(--text-muted);
+}

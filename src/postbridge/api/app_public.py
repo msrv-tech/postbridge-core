@@ -3334,6 +3334,7 @@ _MANUAL_PUBLISHER_PLATFORMS = frozenset(
     {"facebook", "instagram", "x", "bluesky", "mastodon"}
 )
 _META_DEFAULT_SCOPES = (
+    "business_management",
     "pages_show_list",
     "pages_read_engagement",
     "pages_manage_posts",
@@ -3597,15 +3598,16 @@ def create_oauth_authorize_url(
             raise HTTPException(status_code=422, detail="META_OAUTH_CLIENT_ID is not configured")
         redirect_uri = _oauth_redirect_uri("meta", body.redirect_uri)
         scopes = body.scopes or list(_META_DEFAULT_SCOPES)
-        query = urlencode(
-            {
-                "client_id": settings.meta_oauth_client_id,
-                "redirect_uri": redirect_uri,
-                "state": state,
-                "scope": ",".join(scopes),
-                "response_type": "code",
-            }
-        )
+        query_params = {
+            "client_id": settings.meta_oauth_client_id,
+            "redirect_uri": redirect_uri,
+            "state": state,
+            "scope": ",".join(scopes),
+            "response_type": "code",
+        }
+        if settings.meta_oauth_config_id:
+            query_params["config_id"] = settings.meta_oauth_config_id
+        query = urlencode(query_params)
         return {
             "authorize_url": f"https://www.facebook.com/{settings.meta_graph_api_version}/dialog/oauth?{query}",
             "state": state,

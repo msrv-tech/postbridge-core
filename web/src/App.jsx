@@ -20,6 +20,7 @@ const NewsDetail = lazy(() => import('./pages/NewsDetail'))
 const Landing = lazy(() => import('./pages/Landing'))
 const CaseLanding = lazy(() => import('./pages/CaseLanding'))
 const Pricing = lazy(() => import('./pages/Pricing'))
+const LegalPage = lazy(() => import('./pages/LegalPage'))
 const Channels = lazy(() => import('./pages/Channels'))
 const Admin = lazy(() => import('./pages/Admin'))
 const Wizard = lazy(() => import('./pages/Wizard'))
@@ -182,6 +183,9 @@ export default function App() {
           <Route path="/cases/:slug" element={<CaseLanding />} />
           <Route path="/agents/help" element={<AgentFaq publicView />} />
           <Route path="/pricing" element={isSelfhostMode() ? <Navigate to="/" replace /> : <Pricing />} />
+          <Route path="/privacy" element={<LegalPage />} />
+          <Route path="/terms" element={<LegalPage />} />
+          <Route path="/data-deletion" element={<LegalPage />} />
           <Route path="/login" element={
             isSelfhostMode() ? <SelfhostSetup /> : (
               <GuestRoute>
