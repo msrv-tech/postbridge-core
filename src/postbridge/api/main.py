@@ -312,6 +312,7 @@ def _root_frontend_response(path: str = ""):
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+@app.head("/", response_class=HTMLResponse, include_in_schema=False)
 def root_web_ui():
     if get_settings().postbridge_app_mode == "selfhost":
         return RedirectResponse(url="/web", status_code=307)
@@ -319,5 +320,6 @@ def root_web_ui():
 
 
 @app.get("/{path:path}", include_in_schema=False)
+@app.head("/{path:path}", include_in_schema=False)
 def root_web_asset_or_route(path: str):
     return _root_frontend_response(path)
