@@ -6,6 +6,7 @@ import {
   createManualPlatformCredential,
   createVkCommunityCredential,
   getLinkedinAuthorizeUrl,
+  getXAuthorizeUrl,
   listLinkedinOrganizations,
   requestMaxChannelVerification,
   validateChannelRegistryItem,
@@ -432,6 +433,21 @@ export default function AddChannel() {
     }
   }
 
+  const handleXOAuth = async () => {
+    setError('')
+    setValidating(true)
+    try {
+      const res = await getXAuthorizeUrl(workspaceId)
+      if (res?.authorize_url) {
+        window.location.href = res.authorize_url
+      }
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setValidating(false)
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!hasValidatedAccess) {
@@ -644,6 +660,18 @@ export default function AddChannel() {
             <p className="section-copy">
               {GLOBAL_PLATFORM_COPY[platform]}
             </p>
+          )}
+          {platform === 'x' && !isSelfhostMode() && (
+            <div className="inline-actions" style={{ marginBottom: '1rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleXOAuth}
+                disabled={validating}
+              >
+                {t('addChannel.x.connectOAuth')}
+              </button>
+            </div>
           )}
           {platform === 'postbridge' && (
             <p className="section-copy">

@@ -487,6 +487,7 @@ export const catalogs = {
     'addChannel.linkedin.manualTokenHint': 'Если author пустой, проверка сначала найдёт доступные LinkedIn Pages и предложит выбрать организацию.',
     'addChannel.linkedin.noOrganizations': 'У токена нет доступных LinkedIn Pages с правом публикации.',
     'addChannel.linkedin.chooseOrganization': 'Выберите LinkedIn Page и нажмите «Проверить» ещё раз.',
+    'addChannel.x.connectOAuth': 'Подключить X',
     'addChannel.postbridge.instructions':
       'Postbridge — встроенный источник контента. Публикуйте посты через API или веб-интерфейс, они автоматически синхронизируются в мосты.',
     'addChannel.rss.mode': 'Режим RSS-канала',
@@ -2061,6 +2062,7 @@ export const catalogs = {
     'addChannel.linkedin.manualTokenHint': 'If author is empty, Check first discovers LinkedIn Pages available to this token.',
     'addChannel.linkedin.noOrganizations': 'This token has no LinkedIn Pages with publishing access.',
     'addChannel.linkedin.chooseOrganization': 'Choose a LinkedIn Page and press Check again.',
+    'addChannel.x.connectOAuth': 'Connect X',
     'addChannel.postbridge.instructions':
       'Postbridge is a built-in content source. Publish posts through the API or web interface, and they will sync to bridges automatically.',
     'addChannel.rss.mode': 'RSS channel mode',

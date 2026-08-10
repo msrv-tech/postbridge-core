@@ -62,6 +62,10 @@ export function getLinkedinAuthorizeUrl(workspaceId) {
   return api(`/workspaces/${workspaceId}/credentials/linkedin/authorize-url`)
 }
 
+export function getXAuthorizeUrl(workspaceId) {
+  return api(`/workspaces/${workspaceId}/credentials/x/authorize-url`)
+}
+
 export function listLinkedinOrganizations(workspaceId, payload) {
   return api(`/workspaces/${workspaceId}/credentials/linkedin/organizations`, {
     method: 'POST',
