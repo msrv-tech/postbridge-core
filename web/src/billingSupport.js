@@ -2,7 +2,7 @@ const raw = typeof import.meta.env?.VITE_BILLING_SUPPORT_EMAIL === 'string'
   ? import.meta.env.VITE_BILLING_SUPPORT_EMAIL.trim()
   : ''
 
-export const BILLING_SUPPORT_EMAIL = raw || 'support@example.com'
+export const BILLING_SUPPORT_EMAIL = raw || 'info@postbridge.io'
 
 export function formatSubscriptionPeriod(period, t) {
   const p = String(period || 'month').toLowerCase()

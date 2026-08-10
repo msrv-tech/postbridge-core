@@ -67,6 +67,22 @@ function getOneTimeProducts(t) {
 ]
 }
 
+function isStarsOnlyHost() {
+  if (typeof window === 'undefined') return false
+  const host = window.location.hostname.toLowerCase()
+  return host === 'postbridge.io' || host === 'www.postbridge.io'
+}
+
+function formatStarsPrice(stars) {
+  return `${stars} ⭐`
+}
+
+function formatPlanPrice(plan, starsOnly) {
+  if (!starsOnly) return plan.price
+  if (plan.priceStars != null) return formatStarsPrice(plan.priceStars)
+  return 'Free'
+}
+
 function getComparisonRows(t) {
   return [
     [t('pricing.compare.bridges'), '1', '3', '10'],
@@ -82,6 +98,7 @@ export default function Pricing() {
   const { t } = useI18n()
   const { user } = useAuth()
   const workspaceId = user?.workspaces?.[0]?.id || ''
+  const starsOnly = isStarsOnlyHost()
   const plans = getPlans(t)
   const oneTimeProducts = getOneTimeProducts(t)
   const comparisonRows = getComparisonRows(t)
@@ -119,8 +136,12 @@ export default function Pricing() {
                   {plan.featured && <span className="badge badge-running">{t('pricing.recommended')}</span>}
                 </div>
                 <div className="pricing-price">
-                  <strong className="pricing-price-line">{plan.price}</strong>
-                  {plan.priceStars != null && <span className="pricing-stars">{t('pricing.starsAlternative', { stars: plan.priceStars })}</span>}
+                  <strong className="pricing-price-line">
+                    {formatPlanPrice(plan, starsOnly)}
+                  </strong>
+                  {!starsOnly && plan.priceStars != null && (
+                    <span className="pricing-stars">{t('pricing.starsAlternative', { stars: plan.priceStars })}</span>
+                  )}
                   <span>{plan.period}</span>
                 </div>
                 <ul className="check-list">
@@ -165,8 +186,8 @@ export default function Pricing() {
                     <p className="one-time-desc">{product.description}</p>
                   </div>
                   <div className="one-time-price">
-                    <strong>{product.priceRub} ₽</strong>
-                    <span className="muted">/ {product.priceStars} ⭐</span>
+                    <strong>{starsOnly ? formatStarsPrice(product.priceStars) : `${product.priceRub} ₽`}</strong>
+                    {!starsOnly && <span className="muted">/ {product.priceStars} ⭐</span>}
                     <span className="one-time-period">{t('pricing.oneTime.import.period')}</span>
                   </div>
                 </div>
