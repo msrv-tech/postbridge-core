@@ -70,9 +70,42 @@ async function mockSaasBff(page, calls = []) {
       calls.push({ path, method, authorization: request.headers().authorization || '' })
       return json(saasUser)
     }
-    if (path === '/workspaces/ws-1/posts') {
+    if (path === '/workspaces/ws-1/posts' && method === 'GET') {
       calls.push({ path, method })
       return json({ items: posts, total: posts.length, limit: 20, offset: 0 })
+    }
+    if (path === '/workspaces/ws-1/posts' && method === 'POST') {
+      calls.push({ path, method, body: request.postData() || '' })
+      return json(
+        {
+          code: 'BILLING_USAGE_X_PUBLISH_CREDITS_LIMIT',
+          message: 'Monthly X publishing limit exceeded.',
+          details: {
+            limit: 10,
+            current: 10,
+            requested_delta: 1,
+          },
+        },
+        402,
+      )
+    }
+    if (path === '/workspaces/ws-1/channel-registry') {
+      calls.push({ path, method })
+      return json({
+        items: [
+          {
+            id: 'channel-postbridge',
+            platform: 'postbridge',
+            title: 'Postbridge source',
+            platform_channel_id: 'pb/e2e',
+            can_read: true,
+            can_write: true,
+          },
+        ],
+        total: 1,
+        limit: 20,
+        offset: 0,
+      })
     }
     if (path === '/workspaces/ws-1/media/generation-jobs') {
       calls.push({ path, method })
@@ -96,6 +129,10 @@ async function mockSaasBff(page, calls = []) {
     if (path === '/workspaces/ws-1/core-publication-targets') {
       calls.push({ path, method })
       return json({ items: [], total: 0, limit: 20, offset: 0 })
+    }
+    if (path === '/workspaces/ws-1/posts/platform-previews') {
+      calls.push({ path, method })
+      return json({ items: [] })
     }
     if (path === '/workspaces/ws-1/agent/workspace-policy') {
       calls.push({ path, method })
@@ -198,6 +235,42 @@ test('uses SaaS BFF contracts for an authenticated workspace', async ({ page }) 
     ]),
   )
   expect(calls.some((call) => call.path.startsWith('/api/app/'))).toBe(false)
+})
+
+test('shows an upgrade paywall when X publishing credits are exhausted', async ({ page }) => {
+  const calls = []
+  await mockSaasBff(page, calls)
+  await page.addInitScript(() => {
+    window.localStorage.setItem('postbridge_token', 'saas-token')
+    window.localStorage.setItem('postbridge.locale', 'en')
+  })
+
+  await page.goto('/workspaces/ws-1/content/new')
+
+  await expect(page.getByRole('heading', { name: 'New post' })).toBeVisible()
+  await page.getByRole('textbox', { name: 'Title' }).fill('X paywall smoke')
+  const editor = page.locator('.w-md-editor textarea').first()
+  await expect(editor).toBeVisible()
+  await editor.fill('A short X post that should hit the monthly credit paywall.')
+
+  await page.getByRole('button', { name: 'Publish' }).click()
+
+  await expect(page.getByRole('heading', { name: 'X publishing limit reached' })).toBeVisible()
+  await expect(page.getByText('Your plan includes 10 X credits per month.')).toBeVisible()
+  const metrics = page.locator('.post-editor-x-paywall-metrics')
+  await expect(metrics.getByText('0')).toBeVisible()
+  await expect(metrics.getByText('remaining')).toBeVisible()
+  await expect(metrics.getByText('1')).toBeVisible()
+  await expect(metrics.getByText('needed now')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Upgrade plan' })).toBeVisible()
+  await expect(page.getByText('Monthly X publishing limit exceeded.')).toHaveCount(0)
+  await expect(page).toHaveURL(/\/workspaces\/ws-1\/content\/new$/)
+
+  expect(calls).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ path: '/workspaces/ws-1/posts', method: 'POST' }),
+    ]),
+  )
 })
 
 test('keeps SaaS adapter contracts on BFF paths', async ({ page }) => {

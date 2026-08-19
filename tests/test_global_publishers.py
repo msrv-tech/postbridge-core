@@ -10,7 +10,7 @@ from postbridge.api.schemas import (
     MastodonCredentials,
     XCredentials,
 )
-from postbridge.domain.errors import ConfigurationError
+from postbridge.domain.errors import ConfigurationError, ExternalApiError
 from postbridge.domain.models import PostPayload
 from postbridge.integrations.bluesky.publisher import BlueskyPublisher
 from postbridge.integrations.facebook.publisher import FacebookPublisher
@@ -39,6 +39,9 @@ class _Response:
 class _RecordingClient:
     posts: list[SimpleNamespace] = []
     gets: list[SimpleNamespace] = []
+    get_status_code: int = 200
+    get_content: bytes = b"png-bytes"
+    fail_x_media_upload: bool = False
 
     def __init__(self, *args, **kwargs):
         type(self).posts = []
@@ -54,7 +57,12 @@ class _RecordingClient:
         type(self).gets.append(SimpleNamespace(url=url, kwargs=kwargs))
         if "graph.facebook.com" in url:
             return _Response({"status_code": "FINISHED"})
-        return _Response({}, headers={"content-type": "image/png"}, content=b"png-bytes")
+        return _Response(
+            {},
+            status_code=type(self).get_status_code,
+            headers={"content-type": "image/png"},
+            content=type(self).get_content,
+        )
 
     def post(self, url, *, headers=None, json=None, data=None, files=None, content=None):
         type(self).posts.append(
@@ -68,7 +76,10 @@ class _RecordingClient:
             )
         )
         if url.endswith("/2/media/upload"):
-            return _Response({"data": {"id": "media-1"}})
+            if type(self).fail_x_media_upload:
+                return _Response({"title": "upload failed"}, status_code=429)
+            upload_count = len([p for p in type(self).posts if p.url.endswith("/2/media/upload")])
+            return _Response({"data": {"id": f"media-{upload_count}"}})
         if url.endswith("/api/v2/media"):
             return _Response({"id": "mastodon-media-1"})
         if url.endswith("/photos"):
@@ -103,6 +114,9 @@ class _RecordingClient:
 
 @pytest.fixture(autouse=True)
 def fake_httpx(monkeypatch: pytest.MonkeyPatch):
+    _RecordingClient.get_status_code = 200
+    _RecordingClient.get_content = b"png-bytes"
+    _RecordingClient.fail_x_media_upload = False
     monkeypatch.setattr(httpx, "Client", _RecordingClient)
 
 
@@ -258,6 +272,78 @@ def test_x_publisher_uploads_media_before_tweet():
     assert upload.url == "https://api.x.com/2/media/upload"
     assert upload.files["media"][0] == "a.png"
     assert tweet.json["media"] == {"media_ids": ["media-1"]}
+
+
+def test_x_publisher_uploads_up_to_four_media_urls():
+    publisher = XPublisher(settings=SimpleNamespace(x_access_token=None))
+
+    publisher.publish_post(
+        "",
+        PostPayload(
+            source_post_id="p1",
+            text="Hello X album",
+            media_url="https://cdn.test/a.png",
+            media_urls=[
+                "https://cdn.test/a.png",
+                "https://cdn.test/b.png",
+                "https://cdn.test/c.png",
+                "https://cdn.test/d.png",
+                "https://cdn.test/e.png",
+            ],
+        ),
+        credentials=XCredentials(access_token="token"),
+    )
+
+    uploads = [req for req in _RecordingClient.posts if req.url.endswith("/2/media/upload")]
+    tweet = _RecordingClient.posts[-1]
+    assert [req.files["media"][0] for req in uploads] == ["a.png", "b.png", "c.png", "d.png"]
+    assert tweet.json["media"] == {"media_ids": ["media-1", "media-2", "media-3", "media-4"]}
+
+
+def test_x_publisher_surfaces_media_download_failure():
+    _RecordingClient.get_status_code = 404
+    publisher = XPublisher(settings=SimpleNamespace(x_access_token=None))
+
+    with pytest.raises(ExternalApiError) as excinfo:
+        publisher.publish_post(
+            "",
+            PostPayload(source_post_id="p1", text="Hello X", media_url="https://cdn.test/missing.png"),
+            credentials=XCredentials(access_token="token"),
+        )
+
+    assert excinfo.value.code == "EXTERNAL_API_X_MEDIA_DOWNLOAD_ERROR"
+    assert excinfo.value.retryable is False
+
+
+def test_x_publisher_rejects_oversized_media(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("postbridge.integrations.x.publisher.X_MAX_MEDIA_BYTES", 3)
+    _RecordingClient.get_content = b"xxxx"
+    publisher = XPublisher(settings=SimpleNamespace(x_access_token=None))
+
+    with pytest.raises(ExternalApiError) as excinfo:
+        publisher.publish_post(
+            "",
+            PostPayload(source_post_id="p1", text="Hello X", media_url="https://cdn.test/huge.png"),
+            credentials=XCredentials(access_token="token"),
+        )
+
+    assert excinfo.value.code == "EXTERNAL_API_X_MEDIA_TOO_LARGE"
+    assert excinfo.value.retryable is False
+
+
+def test_x_publisher_surfaces_media_upload_http_error():
+    _RecordingClient.fail_x_media_upload = True
+    publisher = XPublisher(settings=SimpleNamespace(x_access_token=None))
+
+    with pytest.raises(ExternalApiError) as excinfo:
+        publisher.publish_post(
+            "",
+            PostPayload(source_post_id="p1", text="Hello X", media_url="https://cdn.test/a.png"),
+            credentials=XCredentials(access_token="token"),
+        )
+
+    assert excinfo.value.code == "EXTERNAL_API_X_HTTP_ERROR"
+    assert excinfo.value.retryable is True
 
 
 def test_bluesky_publisher_creates_record():
