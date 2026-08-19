@@ -1044,6 +1044,9 @@ select {
 .bridge-node-max { background: #e91e63; color: #fff; }
 .bridge-node-vk { background: #4a76a8; color: #fff; }
 .bridge-node-linkedin { background: #0a66c2; color: #fff; }
+.bridge-node-x { background: #f8fafc; color: #020617; }
+.bridge-node-facebook { background: #1877f2; color: #fff; }
+.bridge-node-instagram { background: #e4405f; color: #fff; }
 .bridge-node-rss { background: #f26522; color: #fff; }
 
 .bridge-arrow {

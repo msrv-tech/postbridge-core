@@ -4,7 +4,17 @@ import PublicLayout from '../components/PublicLayout'
 import { listNews } from '../adapters/news'
 import { useI18n } from '../i18n'
 
-function getSteps(t) {
+function getLandingRegion() {
+  if (typeof window === 'undefined') return 'ru'
+  const host = window.location.hostname.toLowerCase()
+  return host === 'postbridge.io' || host === 'www.postbridge.io' ? 'io' : 'ru'
+}
+
+function getRegionalKey(region, key) {
+  return region === 'io' ? `${key}.io` : key
+}
+
+function getSteps(t, region) {
   return [
   {
     title: t('home.steps.assign.title'),
@@ -16,7 +26,7 @@ function getSteps(t) {
   },
   {
     title: t('home.steps.deliver.title'),
-    text: t('home.steps.deliver.text'),
+    text: t(getRegionalKey(region, 'home.steps.deliver.text')),
   },
 ]
 }
@@ -38,7 +48,7 @@ function getAiPillars(t) {
 ]
 }
 
-function getFeatures(t) {
+function getFeatures(t, region) {
   return [
   {
     title: t('home.features.agentWorkflow.title'),
@@ -50,7 +60,7 @@ function getFeatures(t) {
   },
   {
     title: t('home.features.channels.title'),
-    text: t('home.features.channels.text'),
+    text: t(getRegionalKey(region, 'home.features.channels.text')),
   },
   {
     title: t('home.features.publicationControl.title'),
@@ -71,7 +81,16 @@ function getTrustItems(t) {
   ]
 }
 
-function getAgentBridgeExamples(t) {
+function getAgentBridgeExamples(t, region) {
+  if (region === 'io') {
+    return [
+      { from: 'Postbridge', to: t('platform.telegram'), fromKey: 'postbridge', toKey: 'telegram', label: t('home.bridge.agent.telegram') },
+      { from: 'Postbridge', to: t('platform.linkedin'), fromKey: 'postbridge', toKey: 'linkedin', label: t('home.bridge.agent.linkedin') },
+      { from: 'Postbridge', to: t('platform.x'), fromKey: 'postbridge', toKey: 'x', label: t('home.bridge.agent.x') },
+      { from: 'Postbridge', to: 'RSS', fromKey: 'postbridge', toKey: 'rss', label: t('home.bridge.agent.rss') },
+    ]
+  }
+
   return [
     { from: 'Postbridge', to: t('platform.telegram'), fromKey: 'postbridge', toKey: 'telegram', label: t('home.bridge.agent.telegram') },
     { from: 'Postbridge', to: t('platform.max'), fromKey: 'postbridge', toKey: 'max', label: t('home.bridge.agent.max') },
@@ -80,7 +99,16 @@ function getAgentBridgeExamples(t) {
   ]
 }
 
-function getPlatformBridgeExamples(t) {
+function getPlatformBridgeExamples(t, region) {
+  if (region === 'io') {
+    return [
+      { from: t('platform.telegram'), to: t('platform.x'), fromKey: 'telegram', toKey: 'x', label: t('home.bridge.direct.telegramToX') },
+      { from: 'RSS', to: t('platform.linkedin'), fromKey: 'rss', toKey: 'linkedin', label: t('home.bridge.direct.rssToLinkedin') },
+      { from: 'RSS', to: t('platform.facebook'), fromKey: 'rss', toKey: 'facebook', label: t('home.bridge.direct.rssToFacebook') },
+      { from: 'RSS', to: t('platform.instagram'), fromKey: 'rss', toKey: 'instagram', label: t('home.bridge.direct.rssToInstagram') },
+    ]
+  }
+
   return [
     { from: t('platform.telegram'), to: t('platform.max'), fromKey: 'telegram', toKey: 'max', label: t('home.bridge.direct.crosspost') },
     { from: t('platform.vk'), to: t('platform.max'), fromKey: 'vk', toKey: 'max', label: t('home.bridge.direct.groupToMax') },
@@ -89,7 +117,7 @@ function getPlatformBridgeExamples(t) {
   ]
 }
 
-function getFaqItems(t) {
+function getFaqItems(t, region) {
   return [
   {
     question: t('home.faq.who.question'),
@@ -101,7 +129,7 @@ function getFaqItems(t) {
   },
   {
     question: t('home.faq.destinations.question'),
-    answer: t('home.faq.destinations.answer'),
+    answer: t(getRegionalKey(region, 'home.faq.destinations.answer')),
   },
 ]
 }
@@ -129,6 +157,7 @@ function formatNewsDate(value, locale, t) {
 
 export default function Home() {
   const { locale, t } = useI18n()
+  const landingRegion = getLandingRegion()
   const [newsItems, setNewsItems] = useState([])
   const [newsSourceUrl, setNewsSourceUrl] = useState('')
   const [newsLoading, setNewsLoading] = useState(true)
@@ -154,13 +183,15 @@ export default function Home() {
     }
   }, [])
 
-  const steps = getSteps(t)
+  const steps = getSteps(t, landingRegion)
   const aiPillars = getAiPillars(t)
-  const features = getFeatures(t)
+  const features = getFeatures(t, landingRegion)
   const trustItems = getTrustItems(t)
-  const agentBridgeExamples = getAgentBridgeExamples(t)
-  const platformBridgeExamples = getPlatformBridgeExamples(t)
-  const faqItems = getFaqItems(t)
+  const agentBridgeExamples = getAgentBridgeExamples(t, landingRegion)
+  const platformBridgeExamples = getPlatformBridgeExamples(t, landingRegion)
+  const faqItems = getFaqItems(t, landingRegion)
+  const platformNoteKey = getRegionalKey(landingRegion, 'home.features.platformNote')
+  const heroTextKey = getRegionalKey(landingRegion, 'home.hero.text')
 
   return (
     <PublicLayout>
@@ -171,7 +202,7 @@ export default function Home() {
             <span className="eyebrow">{t('home.hero.eyebrow')}</span>
             <h1 className="hero-title">{t('home.hero.title')}</h1>
             <p className="hero-text">
-              {t('home.hero.text')}
+              {t(heroTextKey)}
             </p>
             <div className="hero-actions">
               <Link to="/login" className="btn">
@@ -335,7 +366,7 @@ export default function Home() {
             ))}
           </div>
           <p className="section-copy muted" style={{ marginTop: '1rem' }}>
-            {t('home.features.platformNote')}
+            {t(platformNoteKey)}
           </p>
         </div>
       </section>

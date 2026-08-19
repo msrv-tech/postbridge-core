@@ -307,6 +307,9 @@ export const catalogs = {
     'platform.max': 'МАХ',
     'platform.vk': 'ВК',
     'platform.linkedin': 'LinkedIn',
+    'platform.facebook': 'Facebook',
+    'platform.instagram': 'Instagram',
+    'platform.x': 'X',
     'platform.zen': 'RSS',
     'platform.rss': 'RSS',
 
@@ -314,6 +317,8 @@ export const catalogs = {
     'home.hero.title': 'Агенты готовят публикации. Postbridge довозит их в каналы.',
     'home.hero.text':
       'Запускайте агентов для поиска тем, проверки источников, черновиков и редакторской доработки. Команда согласует результат, а мосты публикуют его в Телеграм, МАХ, ВК и RSS.',
+    'home.hero.text.io':
+      'Запускайте агентов для поиска тем, проверки источников, черновиков и редакторской доработки. Команда согласует результат, а мосты публикуют его в Telegram, LinkedIn, X, Facebook, Instagram и RSS.',
     'home.hero.startAgent': 'Запустить агента',
     'home.heroCard.badge': 'Ежедневный агент · 08:30',
     'home.heroCard.promptQuote': '«Каждое утро присылай новости про ИИ в бизнесе»',
@@ -344,6 +349,8 @@ export const catalogs = {
     'home.steps.deliver.title': 'Отправьте в каналы',
     'home.steps.deliver.text':
       'После согласования Postbridge проводит контент через редактор, мосты и живую синхронизацию в Телеграм, МАХ, ВК или RSS.',
+    'home.steps.deliver.text.io':
+      'После согласования Postbridge проводит контент через редактор, мосты и живую синхронизацию в Telegram, LinkedIn, X, Facebook, Instagram или RSS.',
     'home.bridge.eyebrow': 'Два сценария мостов',
     'home.bridge.title': 'Агенты пишут в Postbridge, мосты разносят дальше',
     'home.bridge.text':
@@ -353,6 +360,8 @@ export const catalogs = {
     'home.bridge.agent.telegram': 'Пост от агента → канал',
     'home.bridge.agent.max': 'Пост от агента → МАХ',
     'home.bridge.agent.vk': 'Пост от агента → ВК',
+    'home.bridge.agent.linkedin': 'Пост от агента → LinkedIn',
+    'home.bridge.agent.x': 'Пост от агента → X',
     'home.bridge.agent.rss': 'Пост от агента → лента',
     'home.bridge.direct.title': 'Прямой кросспостинг',
     'home.bridge.direct.text': 'Мосты могут работать и без Postbridge-источника: один внешний канал отдаёт посты в другой.',
@@ -360,6 +369,10 @@ export const catalogs = {
     'home.bridge.direct.groupToMax': 'Группа → МАХ',
     'home.bridge.direct.vk': 'Кросспостинг ВК',
     'home.bridge.direct.blogToMax': 'Блог → МАХ',
+    'home.bridge.direct.telegramToX': 'Канал → X',
+    'home.bridge.direct.rssToLinkedin': 'RSS → LinkedIn',
+    'home.bridge.direct.rssToFacebook': 'RSS → Facebook',
+    'home.bridge.direct.rssToInstagram': 'RSS → Instagram',
     'home.ai.eyebrow': 'ИИ-агенты',
     'home.ai.title': 'Не просто чат, а рабочий процесс',
     'home.ai.text':
@@ -382,6 +395,8 @@ export const catalogs = {
     'home.features.bridges.text': 'Агент готовит смысл, а мосты доставляют его в нужные площадки без ручного копирования.',
     'home.features.channels.title': 'Быстрый старт с каналами',
     'home.features.channels.text': 'Добавьте бота и подключите Телеграм, МАХ, ВК, RSS или встроенный источник Postbridge.',
+    'home.features.channels.text.io':
+      'Добавьте бота и подключите Telegram, LinkedIn, X, Facebook, Instagram, RSS или встроенный источник Postbridge.',
     'home.features.publicationControl.title': 'Контроль публикаций',
     'home.features.publicationControl.text':
       'Публикации, исторический перенос, живая синхронизация и ошибки остаются в одном кабинете с понятными статусами.',
@@ -389,6 +404,8 @@ export const catalogs = {
     'home.features.workspace.text':
       'Дашборд, агенты, каналы, мосты, RSS и тарифы живут рядом, чтобы команда не собирала процесс из отдельных сервисов.',
     'home.features.platformNote': 'Сейчас: Телеграм, МАХ, ВК, RSS. В планах — сайты и системы управления контентом.',
+    'home.features.platformNote.io':
+      'Сейчас: Telegram, LinkedIn, X, Facebook, Instagram, RSS. В планах — сайты и системы управления контентом.',
     'home.trust.eyebrow': 'Доверие и контроль',
     'home.trust.title': 'Агенты помогают, но не забирают руль',
     'home.trust.text':
@@ -407,6 +424,8 @@ export const catalogs = {
     'home.faq.destinations.question': 'Куда дальше уходит контент?',
     'home.faq.destinations.answer':
       'В подключённые каналы и мосты: Телеграм, МАХ, ВК, RSS и встроенный источник Postbridge. Частый сценарий — подготовить материал агентом и разнести его по площадкам.',
+    'home.faq.destinations.answer.io':
+      'В подключённые каналы и мосты: Telegram, LinkedIn, X, Facebook, Instagram, RSS и встроенный источник Postbridge. Частый сценарий — подготовить материал агентом и разнести его по площадкам.',
     'home.cta.eyebrow': 'Старт',
     'home.cta.title': 'Запустите агента, согласуйте материал и отправьте его в каналы.',
     'home.cta.try': 'Попробовать',
@@ -1891,6 +1910,9 @@ export const catalogs = {
     'platform.max': 'MAX',
     'platform.vk': 'VK',
     'platform.linkedin': 'LinkedIn',
+    'platform.facebook': 'Facebook',
+    'platform.instagram': 'Instagram',
+    'platform.x': 'X',
     'platform.zen': 'RSS',
     'platform.rss': 'RSS',
 
@@ -1898,6 +1920,8 @@ export const catalogs = {
     'home.hero.title': 'Agents prepare publications. Postbridge delivers them to your channels.',
     'home.hero.text':
       'Run agents to discover topics, check sources, create drafts, and refine editorial work. Your team approves the result, and bridges publish it to Telegram, MAX, VK, and RSS.',
+    'home.hero.text.io':
+      'Run agents to discover topics, check sources, create drafts, and refine editorial work. Your team approves the result, and bridges publish it to Telegram, LinkedIn, X, Facebook, Instagram, and RSS.',
     'home.hero.startAgent': 'Launch an agent',
     'home.heroCard.badge': 'Daily agent · 08:30',
     'home.heroCard.promptQuote': '"Send me business AI news every morning"',
@@ -1928,6 +1952,8 @@ export const catalogs = {
     'home.steps.deliver.title': 'Send to channels',
     'home.steps.deliver.text':
       'After approval, Postbridge moves content through the editor, bridges, and live sync to Telegram, MAX, VK, or RSS.',
+    'home.steps.deliver.text.io':
+      'After approval, Postbridge moves content through the editor, bridges, and live sync to Telegram, LinkedIn, X, Facebook, Instagram, or RSS.',
     'home.bridge.eyebrow': 'Two bridge scenarios',
     'home.bridge.title': 'Agents write in Postbridge, bridges deliver further',
     'home.bridge.text':
@@ -1937,6 +1963,8 @@ export const catalogs = {
     'home.bridge.agent.telegram': 'Agent post → channel',
     'home.bridge.agent.max': 'Agent post → MAX',
     'home.bridge.agent.vk': 'Agent post → VK',
+    'home.bridge.agent.linkedin': 'Agent post → LinkedIn',
+    'home.bridge.agent.x': 'Agent post → X',
     'home.bridge.agent.rss': 'Agent post → feed',
     'home.bridge.direct.title': 'Direct cross-posting',
     'home.bridge.direct.text': 'Bridges can work without a Postbridge source: one external channel sends posts to another.',
@@ -1944,6 +1972,10 @@ export const catalogs = {
     'home.bridge.direct.groupToMax': 'Group → MAX',
     'home.bridge.direct.vk': 'VK cross-posting',
     'home.bridge.direct.blogToMax': 'Blog → MAX',
+    'home.bridge.direct.telegramToX': 'Channel → X',
+    'home.bridge.direct.rssToLinkedin': 'RSS → LinkedIn',
+    'home.bridge.direct.rssToFacebook': 'RSS → Facebook',
+    'home.bridge.direct.rssToInstagram': 'RSS → Instagram',
     'home.ai.eyebrow': 'AI agents',
     'home.ai.title': 'Not just chat, but a workflow',
     'home.ai.text':
@@ -1964,12 +1996,16 @@ export const catalogs = {
     'home.features.bridges.text': 'The agent prepares the meaning, and bridges deliver it to the right platforms without manual copying.',
     'home.features.channels.title': 'Fast channel setup',
     'home.features.channels.text': 'Add the bot and connect Telegram, MAX, VK, RSS, or the built-in Postbridge source.',
+    'home.features.channels.text.io':
+      'Add the bot and connect Telegram, LinkedIn, X, Facebook, Instagram, RSS, or the built-in Postbridge source.',
     'home.features.publicationControl.title': 'Publication control',
     'home.features.publicationControl.text':
       'Publications, historical import, live sync, and errors stay in one workspace with clear statuses.',
     'home.features.workspace.title': 'Unified workspace',
     'home.features.workspace.text': 'Dashboard, agents, channels, bridges, RSS, and pricing live together, so the team does not assemble a workflow from separate services.',
     'home.features.platformNote': 'Now: Telegram, MAX, VK, RSS. Planned: websites and content management systems.',
+    'home.features.platformNote.io':
+      'Now: Telegram, LinkedIn, X, Facebook, Instagram, RSS. Planned: websites and content management systems.',
     'home.trust.eyebrow': 'Trust and control',
     'home.trust.title': 'Agents help without taking the wheel',
     'home.trust.text':
@@ -1988,6 +2024,8 @@ export const catalogs = {
     'home.faq.destinations.question': 'Where does content go next?',
     'home.faq.destinations.answer':
       'To connected channels and bridges: Telegram, MAX, VK, RSS, and the built-in Postbridge source. A common flow is to prepare material with an agent and distribute it across platforms.',
+    'home.faq.destinations.answer.io':
+      'To connected channels and bridges: Telegram, LinkedIn, X, Facebook, Instagram, RSS, and the built-in Postbridge source. A common flow is to prepare material with an agent and distribute it across platforms.',
     'home.cta.eyebrow': 'Start',
     'home.cta.title': 'Launch an agent, approve the material, and send it to your channels.',
     'home.cta.try': 'Try it',
