@@ -112,7 +112,7 @@ function getComparisonRows(t) {
   return [
     [t('pricing.compare.bridges'), '1', '3', '10'],
     [t('pricing.compare.posts'), t('pricing.compare.upTo20'), t('pricing.compare.unlimited'), t('pricing.compare.unlimited')],
-    [t('pricing.compare.xCredits'), '0', '600', '2400'],
+    [t('pricing.compare.xCredits'), '10', '600', '2400'],
     [t('pricing.compare.aiContent'), t('pricing.compare.minimal'), t('pricing.compare.needed'), t('pricing.compare.triplePro')],
     [t('pricing.compare.aiAdaptation'), t('common.no'), t('common.yes'), t('common.yes')],
     [t('pricing.compare.import'), t('pricing.compare.importFreeOneTime'), t('pricing.compare.included'), t('pricing.compare.included')],

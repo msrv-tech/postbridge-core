@@ -78,6 +78,23 @@ function isAgentEditorialChannel(channel) {
   return channel?.platform === 'postbridge'
 }
 
+function normalizeUsageNumber(value, fallback = 0) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function xPublishPaywallUsage(details = {}) {
+  const limit = normalizeUsageNumber(details.limit)
+  const current = normalizeUsageNumber(details.current)
+  const requested = normalizeUsageNumber(details.requested_delta, 1)
+  return {
+    limit,
+    current,
+    requested,
+    remaining: Math.max(0, limit - current),
+  }
+}
+
 function bridgeAdaptationModeLabel(mode, t) {
   if (mode === 'ai_auto') return t('channels.adaptation.aiAuto')
   if (mode === 'ai_review') return t('channels.adaptation.aiReview')
@@ -743,6 +760,7 @@ export default function PostEditor() {
   const [coverGenerationJobId, setCoverGenerationJobId] = useState('')
   const [mediaGenerationJobId, setMediaGenerationJobId] = useState('')
   const [imageGenerationUpgradeOpen, setImageGenerationUpgradeOpen] = useState(false)
+  const [xPublishPaywall, setXPublishPaywall] = useState(null)
   const coverImageFileInputRef = useRef(null)
   const mediaFileInputRef = useRef(null)
 
@@ -871,6 +889,12 @@ export default function PostEditor() {
     navigate(`/workspaces/${workspaceId}/settings?billing=change-plan&plan=pro`)
   }
 
+  const openXPublishPlanChange = () => {
+    if (!billingEnabled) return
+    setXPublishPaywall(null)
+    navigate(`/workspaces/${workspaceId}/settings?billing=change-plan&plan=pro`)
+  }
+
   const savePost = async (
     targetStatus,
     { redirect = true, allowEmptyDraft = false, bridgeReviewApproved = false } = {},
@@ -881,6 +905,7 @@ export default function PostEditor() {
       return null
     }
     setError('')
+    setXPublishPaywall(null)
     setSaving(true)
     try {
       const payload = {
@@ -930,7 +955,15 @@ export default function PostEditor() {
       }
       return savedPost
     } catch (e) {
-      setError(e.message)
+      if (billingEnabled && e?.code === 'BILLING_USAGE_X_PUBLISH_CREDITS_LIMIT') {
+        setXPublishPaywall({
+          message: e.message,
+          details: e.details || {},
+        })
+        setError('')
+      } else {
+        setError(e.message)
+      }
       return null
     } finally {
       setSaving(false)
@@ -2114,6 +2147,55 @@ export default function PostEditor() {
                   type="button"
                   className="btn btn-secondary"
                   onClick={() => setImageGenerationUpgradeOpen(false)}
+                >
+                  {t('common.close')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {billingEnabled && xPublishPaywall && (
+          <div className="modal-overlay" onClick={() => setXPublishPaywall(null)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              {(() => {
+                const usage = xPublishPaywallUsage(xPublishPaywall.details)
+                return (
+                  <>
+                    <h3>{t('postEditor.xPaywall.title')}</h3>
+                    <p className="muted">
+                      {t('postEditor.xPaywall.text', {
+                        limit: usage.limit,
+                        current: usage.current,
+                        remaining: usage.remaining,
+                        requested: usage.requested,
+                      })}
+                    </p>
+                    <div className="post-editor-x-paywall-metrics">
+                      <span>
+                        <strong>{usage.remaining}</strong>
+                        {t('postEditor.xPaywall.remaining')}
+                      </span>
+                      <span>
+                        <strong>{usage.requested}</strong>
+                        {t('postEditor.xPaywall.required')}
+                      </span>
+                    </div>
+                    <p className="muted">{t('postEditor.xPaywall.hint')}</p>
+                  </>
+                )
+              })()}
+              <div className="post-editor-image-upgrade-actions">
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={openXPublishPlanChange}
+                >
+                  {t('common.upgradePlan')}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setXPublishPaywall(null)}
                 >
                   {t('common.close')}
                 </button>
