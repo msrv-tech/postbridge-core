@@ -6,6 +6,7 @@ import {
   createManualPlatformCredential,
   createVkCommunityCredential,
   getLinkedinAuthorizeUrl,
+  getMetaAuthorizeUrl,
   getXAuthorizeUrl,
   listLinkedinOrganizations,
   requestMaxChannelVerification,
@@ -126,9 +127,11 @@ export default function AddChannel() {
     visibility: 'public',
   })
   const [globalCredentialsRef, setGlobalCredentialsRef] = useState('')
+  const [manualMetaCredentialOpen, setManualMetaCredentialOpen] = useState(false)
   const isRssSource = platform === 'rss' && rssMode === 'source'
   const isRssTarget = platform === 'rss' && rssMode === 'target'
   const isGlobalPublishPlatform = GLOBAL_PUBLISH_PLATFORMS.has(platform)
+  const isMetaPublishPlatform = platform === 'facebook' || platform === 'instagram'
   const hasValidatedAccess = platform === 'linkedin' || isGlobalPublishPlatform ? validatedWrite : isRssTarget ? validatedWrite : validatedRead
   const telegramBotLink = telegramBotName ? `https://t.me/${telegramBotName}` : ''
   const rssTargetFeedId = (channelId.trim() || 'rss').replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'rss'
@@ -336,6 +339,7 @@ export default function AddChannel() {
     setLinkedinAccessToken('')
     setLinkedinCredentialsRef('')
     setLinkedinOrganizations([])
+    setManualMetaCredentialOpen(false)
     setGlobalCredential({
       accessToken: '',
       pageAccessToken: '',
@@ -438,6 +442,21 @@ export default function AddChannel() {
     setValidating(true)
     try {
       const res = await getXAuthorizeUrl(workspaceId)
+      if (res?.authorize_url) {
+        window.location.href = res.authorize_url
+      }
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setValidating(false)
+    }
+  }
+
+  const handleMetaOAuth = async () => {
+    setError('')
+    setValidating(true)
+    try {
+      const res = await getMetaAuthorizeUrl(workspaceId)
       if (res?.authorize_url) {
         window.location.href = res.authorize_url
       }
@@ -656,7 +675,7 @@ export default function AddChannel() {
               {t('addChannel.linkedin.instructions')}
             </p>
           )}
-          {isGlobalPublishPlatform && (
+          {isGlobalPublishPlatform && (!isMetaPublishPlatform || isSelfhostMode() || manualMetaCredentialOpen) && (
             <p className="section-copy">
               {GLOBAL_PLATFORM_COPY[platform]}
             </p>
@@ -671,6 +690,30 @@ export default function AddChannel() {
               >
                 {t('addChannel.x.connectOAuth')}
               </button>
+            </div>
+          )}
+          {isMetaPublishPlatform && !isSelfhostMode() && (
+            <div style={{ marginBottom: '1rem' }}>
+              <div className="inline-actions" style={{ marginBottom: '0.75rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleMetaOAuth}
+                  disabled={validating}
+                >
+                  {t('addChannel.meta.connectOAuth')}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setManualMetaCredentialOpen((value) => !value)}
+                >
+                  {manualMetaCredentialOpen ? t('addChannel.meta.hideTokenSetup') : t('addChannel.meta.advancedTokenSetup')}
+                </button>
+              </div>
+              <p className="muted" style={{ fontSize: '0.9rem' }}>
+                {t('addChannel.meta.oauthHint')}
+              </p>
             </div>
           )}
           {platform === 'postbridge' && (
@@ -794,7 +837,7 @@ export default function AddChannel() {
               </p>
             </>
           )}
-          {isGlobalPublishPlatform && (
+          {isGlobalPublishPlatform && (!isMetaPublishPlatform || isSelfhostMode() || manualMetaCredentialOpen) && (
             <>
               <div className="form-group">
                 <label htmlFor="channel-id">
@@ -1008,11 +1051,12 @@ export default function AddChannel() {
               onClick={handleValidate}
               disabled={
                 validating ||
-                (platform !== 'postbridge' && platform !== 'linkedin' && !channelId.trim()) ||
+                (isMetaPublishPlatform && !manualMetaCredentialOpen) ||
+                (platform !== 'postbridge' && platform !== 'linkedin' && (!isMetaPublishPlatform || manualMetaCredentialOpen) && !channelId.trim()) ||
                 (platform === 'vk' && !vkAccessToken.trim()) ||
                 (platform === 'linkedin' && !linkedinAccessToken.trim()) ||
-                (platform === 'facebook' && !globalCredential.pageAccessToken.trim()) ||
-                (['instagram', 'x', 'mastodon'].includes(platform) && !globalCredential.accessToken.trim()) ||
+                (platform === 'facebook' && manualMetaCredentialOpen && !globalCredential.pageAccessToken.trim()) ||
+                (['instagram', 'x', 'mastodon'].includes(platform) && (!isMetaPublishPlatform || manualMetaCredentialOpen) && !globalCredential.accessToken.trim()) ||
                 (platform === 'bluesky' && !globalCredential.appPassword.trim()) ||
                 (platform === 'mastodon' && !globalCredential.instanceUrl.trim())
               }
@@ -1025,7 +1069,7 @@ export default function AddChannel() {
               disabled={
                 loading ||
                 !hasValidatedAccess ||
-                (platform !== 'postbridge' && platform !== 'linkedin' && !isRssTarget && !isRssSource && asTarget && !validatedWrite)
+                (platform !== 'postbridge' && platform !== 'linkedin' && !isMetaPublishPlatform && !isRssTarget && !isRssSource && asTarget && !validatedWrite)
               }
             >
               {loading ? t('addChannel.adding') : t('addChannel.title')}

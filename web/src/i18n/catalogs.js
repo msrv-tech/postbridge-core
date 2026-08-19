@@ -508,6 +508,11 @@ export const catalogs = {
     'addChannel.linkedin.noOrganizations': 'У токена нет доступных LinkedIn Pages с правом публикации.',
     'addChannel.linkedin.chooseOrganization': 'Выберите LinkedIn Page и нажмите «Проверить» ещё раз.',
     'addChannel.x.connectOAuth': 'Подключить X',
+    'addChannel.meta.connectOAuth': 'Подключить Meta',
+    'addChannel.meta.advancedTokenSetup': 'Ручная настройка токена',
+    'addChannel.meta.hideTokenSetup': 'Скрыть ручную настройку',
+    'addChannel.meta.oauthHint':
+      'Подключите Facebook Pages и связанные профессиональные Instagram-аккаунты через Meta OAuth.',
     'addChannel.postbridge.instructions':
       'Postbridge — встроенный источник контента. Публикуйте посты через API или веб-интерфейс, они автоматически синхронизируются в мосты.',
     'addChannel.rss.mode': 'Режим RSS-канала',
@@ -2114,6 +2119,11 @@ export const catalogs = {
     'addChannel.linkedin.noOrganizations': 'This token has no LinkedIn Pages with publishing access.',
     'addChannel.linkedin.chooseOrganization': 'Choose a LinkedIn Page and press Check again.',
     'addChannel.x.connectOAuth': 'Connect X',
+    'addChannel.meta.connectOAuth': 'Connect Meta',
+    'addChannel.meta.advancedTokenSetup': 'Advanced token setup',
+    'addChannel.meta.hideTokenSetup': 'Hide token setup',
+    'addChannel.meta.oauthHint':
+      'Connect Facebook Pages and linked Instagram professional accounts with Meta OAuth.',
     'addChannel.postbridge.instructions':
       'Postbridge is a built-in content source. Publish posts through the API or web interface, and they will sync to bridges automatically.',
     'addChannel.rss.mode': 'RSS channel mode',
