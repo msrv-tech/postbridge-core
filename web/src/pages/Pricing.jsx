@@ -11,6 +11,7 @@ function getPlans(t) {
     code: 'free',
     name: 'Free',
     price: '0 ₽',
+    priceUsd: '$0',
     priceStars: null,
     period: t('pricing.period.forever'),
     description: t('pricing.free.description'),
@@ -19,6 +20,7 @@ function getPlans(t) {
       t('pricing.free.feature.aiDrafts'),
       t('pricing.free.feature.noAiAdaptation'),
       t('pricing.free.feature.postLimit'),
+      t('pricing.free.feature.xCredits'),
       t('pricing.free.feature.import'),
     ],
   },
@@ -26,6 +28,7 @@ function getPlans(t) {
     code: 'pro',
     name: 'Pro',
     price: '1 990 ₽',
+    priceUsd: '$19',
     priceStars: 1109,
     period: t('pricing.period.month'),
     description: t('pricing.pro.description'),
@@ -35,6 +38,7 @@ function getPlans(t) {
       t('pricing.pro.feature.aiBudget'),
       t('pricing.pro.feature.aiAdaptation'),
       t('pricing.pro.feature.unlimitedPosts'),
+      t('pricing.pro.feature.xCredits'),
       t('pricing.feature.importIncluded'),
     ],
   },
@@ -42,6 +46,7 @@ function getPlans(t) {
     code: 'agency',
     name: 'Agency',
     price: '5 990 ₽',
+    priceUsd: '$59',
     priceStars: 3330,
     period: t('pricing.period.month'),
     description: t('pricing.agency.description'),
@@ -50,6 +55,7 @@ function getPlans(t) {
       t('pricing.agency.feature.aiBudget'),
       t('pricing.agency.feature.aiAdaptation'),
       t('pricing.pro.feature.unlimitedPosts'),
+      t('pricing.agency.feature.xCredits'),
       t('pricing.feature.importIncluded'),
     ],
   },
@@ -62,31 +68,51 @@ function getOneTimeProducts(t) {
     name: t('pricing.oneTime.import.name'),
     description: t('pricing.oneTime.import.description'),
     priceRub: 500,
+    priceUsd: '$5',
     priceStars: 280,
   },
 ]
 }
 
-function isStarsOnlyHost() {
+function getPricingRegion() {
   if (typeof window === 'undefined') return false
   const host = window.location.hostname.toLowerCase()
-  return host === 'postbridge.io' || host === 'www.postbridge.io'
+  if (host === 'postbridge.io' || host === 'www.postbridge.io') return 'io'
+  return 'ru'
 }
 
 function formatStarsPrice(stars) {
   return `${stars} ⭐`
 }
 
-function formatPlanPrice(plan, starsOnly) {
-  if (!starsOnly) return plan.price
+function formatPlanPrice(plan, pricingRegion) {
+  if (pricingRegion !== 'io') return plan.price
   if (plan.priceStars != null) return formatStarsPrice(plan.priceStars)
   return 'Free'
+}
+
+function renderPlanSecondaryPrice(t, plan, pricingRegion) {
+  if (pricingRegion === 'io') {
+    return plan.priceUsd ? t('pricing.usdFuture', { usd: plan.priceUsd }) : null
+  }
+  if (plan.priceStars != null) {
+    return t('pricing.starsAlternative', { stars: plan.priceStars })
+  }
+  return null
+}
+
+function renderOneTimeSecondaryPrice(t, product, pricingRegion) {
+  if (pricingRegion === 'io') {
+    return t('pricing.usdFutureOneTime', { usd: product.priceUsd })
+  }
+  return `/ ${product.priceStars} ⭐`
 }
 
 function getComparisonRows(t) {
   return [
     [t('pricing.compare.bridges'), '1', '3', '10'],
     [t('pricing.compare.posts'), t('pricing.compare.upTo20'), t('pricing.compare.unlimited'), t('pricing.compare.unlimited')],
+    [t('pricing.compare.xCredits'), '0', '600', '2400'],
     [t('pricing.compare.aiContent'), t('pricing.compare.minimal'), t('pricing.compare.needed'), t('pricing.compare.triplePro')],
     [t('pricing.compare.aiAdaptation'), t('common.no'), t('common.yes'), t('common.yes')],
     [t('pricing.compare.import'), t('pricing.compare.importFreeOneTime'), t('pricing.compare.included'), t('pricing.compare.included')],
@@ -98,7 +124,7 @@ export default function Pricing() {
   const { t } = useI18n()
   const { user } = useAuth()
   const workspaceId = user?.workspaces?.[0]?.id || ''
-  const starsOnly = isStarsOnlyHost()
+  const pricingRegion = getPricingRegion()
   const plans = getPlans(t)
   const oneTimeProducts = getOneTimeProducts(t)
   const comparisonRows = getComparisonRows(t)
@@ -137,10 +163,10 @@ export default function Pricing() {
                 </div>
                 <div className="pricing-price">
                   <strong className="pricing-price-line">
-                    {formatPlanPrice(plan, starsOnly)}
+                    {formatPlanPrice(plan, pricingRegion)}
                   </strong>
-                  {!starsOnly && plan.priceStars != null && (
-                    <span className="pricing-stars">{t('pricing.starsAlternative', { stars: plan.priceStars })}</span>
+                  {renderPlanSecondaryPrice(t, plan, pricingRegion) && (
+                    <span className="pricing-stars">{renderPlanSecondaryPrice(t, plan, pricingRegion)}</span>
                   )}
                   <span>{plan.period}</span>
                 </div>
@@ -186,8 +212,8 @@ export default function Pricing() {
                     <p className="one-time-desc">{product.description}</p>
                   </div>
                   <div className="one-time-price">
-                    <strong>{starsOnly ? formatStarsPrice(product.priceStars) : `${product.priceRub} ₽`}</strong>
-                    {!starsOnly && <span className="muted">/ {product.priceStars} ⭐</span>}
+                    <strong>{pricingRegion === 'io' ? formatStarsPrice(product.priceStars) : `${product.priceRub} ₽`}</strong>
+                    <span className="muted">{renderOneTimeSecondaryPrice(t, product, pricingRegion)}</span>
                     <span className="one-time-period">{t('pricing.oneTime.import.period')}</span>
                   </div>
                 </div>
