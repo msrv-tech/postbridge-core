@@ -197,6 +197,7 @@ class SyncService:
                     source_type="imported",
                     title=None,
                     body_markdown=body,
+                    media_url=post.media_url,
                     content_status="ready",
                     plan_strategy="immediate",
                     plan_status="scheduled",
