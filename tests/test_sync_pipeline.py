@@ -578,6 +578,79 @@ def test_pipeline_unified_preserves_media_url_on_content(monkeypatch: pytest.Mon
         session.close()
 
 
+def test_retry_manual_keeps_claim_for_inflight_publication_target():
+    session = SESSION_LOCAL()
+    try:
+        store = BatchImportRunStore(session)
+        correlation_id = str(uuid4())
+        job, _ = store.create_run(
+            T_TEST_TENANT,
+            "tg/source",
+            "max/target",
+            requested_limit=2,
+            correlation_id=correlation_id,
+            source_core_channel_id=CORE_TG_SRC,
+            target_core_channel_id=CORE_MAX_CH,
+        )
+        store.store_fetched_posts(
+            job.id,
+            [
+                PostPayload(source_post_id="1", text="first"),
+                PostPayload(source_post_id="2", text="second"),
+            ],
+        )
+        store.claim_publish("tg/source", "1", "max/target")
+        content_id = str(uuid4())
+        plan_id = str(uuid4())
+        target_id = str(uuid4())
+        session.add(
+            ContentItemOrm(
+                id=content_id,
+                tenant_id=T_TEST_TENANT,
+                source_type="imported",
+                body_markdown="first",
+                status="ready",
+            )
+        )
+        session.add(
+            PublicationPlanOrm(
+                id=plan_id,
+                tenant_id=T_TEST_TENANT,
+                content_item_id=content_id,
+                strategy="immediate",
+                status="scheduled",
+            )
+        )
+        session.add(
+            PublicationTargetOrm(
+                id=target_id,
+                tenant_id=T_TEST_TENANT,
+                publication_plan_id=plan_id,
+                channel_id=CORE_MAX_CH,
+                platform="max",
+                status="pending",
+            )
+        )
+        session.flush()
+        store.insert_enqueued_publication(
+            batch_import_run_id=job.id,
+            source_post_id="1",
+            publication_target_id=target_id,
+        )
+        store.claim_publish("tg/source", "2", "max/target")
+        store.mark_failed(
+            job.id,
+            ValidationError(code="TEST", message="dispatch interrupted", details={}),
+            correlation_id,
+        )
+
+        assert store.retry_manual(job.id, correlation_id) is True
+        assert store.claim_publish("tg/source", "1", "max/target") is False
+        assert store.claim_publish("tg/source", "2", "max/target") is True
+    finally:
+        session.close()
+
+
 def test_retry_manual_releases_orphaned_claim_but_keeps_dedup_skip():
     session = SESSION_LOCAL()
     try:
