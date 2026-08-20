@@ -9,7 +9,7 @@ from postbridge.db import Base, ENGINE, BatchImportFetchedPostOrm, SESSION_LOCAL
 from postbridge.domain.errors import ExternalApiError, ValidationError  # noqa: E402
 from postbridge.domain.models import BatchImportRunStatus, PostPayload  # noqa: E402
 from postbridge.infrastructure.crypto.credentials import encrypt_credential_secret  # noqa: E402
-from postbridge.models.domain import ChannelOrm, InstallationSecretOrm, PublicationTargetOrm  # noqa: E402
+from postbridge.models.domain import ChannelOrm, ContentItemOrm, InstallationSecretOrm, PublicationPlanOrm, PublicationTargetOrm  # noqa: E402
 from postbridge.observability.metrics import reset_for_tests  # noqa: E402
 from postbridge.storage.batch_import_run_store import BatchImportRunStore  # noqa: E402
 from postbridge.sync.batch_import_run_reconcile import reconcile_batch_import_runs  # noqa: E402
@@ -533,5 +533,86 @@ def test_store_fetched_posts_and_list_posts_for_publish():
         to_publish = store.list_posts_for_publish(job.id)
         assert len(to_publish) == 2
         assert [p.source_post_id for p in to_publish] == ["1", "3"]
+    finally:
+        session.close()
+
+
+def test_pipeline_unified_preserves_media_url_on_content(monkeypatch: pytest.MonkeyPatch):
+    session = SESSION_LOCAL()
+    try:
+        store = BatchImportRunStore(session)
+        correlation_id = str(uuid4())
+        job, _ = store.create_run(
+            T_TEST_TENANT,
+            "tg/source",
+            "max/target",
+            requested_limit=1,
+            correlation_id=correlation_id,
+            source_core_channel_id=CORE_TG_SRC,
+            target_core_channel_id=CORE_MAX_CH,
+        )
+        _mock_send_task(monkeypatch)
+        service = SyncService(
+            session=session,
+            fetcher=FakeTelegramImporter(
+                posts=[
+                    PostPayload(
+                        source_post_id="photo-1",
+                        text="caption",
+                        media_url="https://cdn.test/photo.jpg",
+                    )
+                ]
+            ),
+        )
+        service.run_job(job.id, correlation_id=correlation_id)
+        target_ids = store.list_enqueued_target_ids(job.id)
+        assert len(target_ids) == 1
+        target = session.get(PublicationTargetOrm, target_ids[0])
+        assert target is not None
+        plan = session.get(PublicationPlanOrm, target.publication_plan_id)
+        assert plan is not None
+        content = session.get(ContentItemOrm, plan.content_item_id)
+        assert content is not None
+        assert content.media_url == "https://cdn.test/photo.jpg"
+    finally:
+        session.close()
+
+
+def test_retry_manual_releases_orphaned_claim_but_keeps_dedup_skip():
+    session = SESSION_LOCAL()
+    try:
+        store = BatchImportRunStore(session)
+        correlation_id = str(uuid4())
+        job, _ = store.create_run(
+            T_TEST_TENANT,
+            "tg/source",
+            "max/target",
+            requested_limit=3,
+            correlation_id=correlation_id,
+            source_core_channel_id=CORE_TG_SRC,
+            target_core_channel_id=CORE_MAX_CH,
+        )
+        store.store_fetched_posts(
+            job.id,
+            [
+                PostPayload(source_post_id="1", text="first"),
+                PostPayload(source_post_id="2", text="second"),
+                PostPayload(source_post_id="3", text="third"),
+            ],
+        )
+        store.claim_publish("tg/source", "1", "max/target")
+        store.claim_publish("tg/source", "2", "max/target")
+        store.insert_enqueued_skip(batch_import_run_id=job.id, source_post_id="2")
+        store.claim_publish("tg/source", "3", "max/target")
+        store.mark_failed(
+            job.id,
+            ValidationError(code="TEST", message="dispatch interrupted", details={}),
+            correlation_id,
+        )
+
+        assert store.retry_manual(job.id, correlation_id) is True
+        assert store.claim_publish("tg/source", "1", "max/target") is True
+        assert store.claim_publish("tg/source", "2", "max/target") is False
+        assert store.claim_publish("tg/source", "3", "max/target") is True
     finally:
         session.close()

@@ -14,7 +14,7 @@ from postbridge.db import (
     PublishedPostOrm,
     StatusEventOutboxOrm,
 )
-from postbridge.models.domain import ChannelOrm
+from postbridge.models.domain import ChannelOrm, PublicationTargetOrm
 from postbridge.domain.errors import PostbridgeError, ValidationError
 from postbridge.domain.models import BatchImportRun, BatchImportRunStatus, PostPayload
 from postbridge.integrations.status_event_client import CONTRACT_VERSION
@@ -404,6 +404,43 @@ class BatchImportRunStore:
         self._enqueue_status_event_for_run(run, correlation_id=correlation_id, occurred_at=now)
         self.session.commit()
 
+    def release_retryable_claims_for_run(self, run_id: str) -> None:
+        """Снимает dedup-claim для постов run, которые не были успешно опубликованы."""
+        run = self._get_or_raise(run_id)
+        enqueued_rows = list(
+            self.session.scalars(
+                select(BatchImportEnqueuedPostOrm).where(
+                    BatchImportEnqueuedPostOrm.batch_import_run_id == run_id
+                )
+            ).all()
+        )
+        published_source_ids: set[str] = set()
+        skipped_source_ids: set[str] = set()
+        for row in enqueued_rows:
+            if row.publication_target_id is None:
+                skipped_source_ids.add(row.source_post_id)
+                continue
+            target = self.session.get(PublicationTargetOrm, row.publication_target_id)
+            if target is not None and target.status == "published":
+                published_source_ids.add(row.source_post_id)
+
+        fetched = list(
+            self.session.scalars(
+                select(BatchImportFetchedPostOrm).where(
+                    BatchImportFetchedPostOrm.batch_import_run_id == run_id
+                )
+            ).all()
+        )
+        for fetched_post in fetched:
+            source_post_id = fetched_post.source_post_id
+            if source_post_id in published_source_ids or source_post_id in skipped_source_ids:
+                continue
+            if self.get_published_post(
+                run.source_channel, source_post_id, run.target_channel
+            ) is not None:
+                self.release_claim(run.source_channel, source_post_id, run.target_channel)
+        self.session.commit()
+
     def retry_manual(self, run_id: str, correlation_id: str) -> bool:
         run = self._get_or_raise(run_id)
         if run.status != BatchImportRunStatus.FAILED.value:
@@ -412,6 +449,7 @@ class BatchImportRunStore:
             return False
         now = datetime.now(UTC)
         if run.target_core_channel_id:
+            self.release_retryable_claims_for_run(run_id)
             self.delete_enqueued_posts_for_run(run_id)
             run.batch_import_dispatch_enqueued_at = None
         run.status = BatchImportRunStatus.PENDING.value
