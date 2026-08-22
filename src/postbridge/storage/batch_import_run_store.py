@@ -336,11 +336,15 @@ class BatchImportRunStore:
             )
         )
         for idx, post in enumerate(posts):
+            media_urls_json = None
+            if post.media_urls:
+                media_urls_json = json.dumps(post.media_urls, ensure_ascii=True)
             row = BatchImportFetchedPostOrm(
                 batch_import_run_id=run_id,
                 source_post_id=post.source_post_id,
                 text=post.text,
                 media_url=post.media_url,
+                media_urls_json=media_urls_json,
                 sort_order=idx,
                 fetched_at=now,
             )
@@ -367,15 +371,29 @@ class BatchImportRunStore:
                 )
             ).all()
         }
-        return [
-            PostPayload(
-                source_post_id=f.source_post_id,
-                text=f.text,
-                media_url=f.media_url,
+        out: list[PostPayload] = []
+        for f in fetched:
+            if f.source_post_id in handled_ids:
+                continue
+            media_urls: list[str] | None = None
+            if f.media_urls_json:
+                try:
+                    parsed = json.loads(f.media_urls_json)
+                    if isinstance(parsed, list):
+                        media_urls = [u for u in parsed if isinstance(u, str) and u]
+                        if not media_urls:
+                            media_urls = None
+                except json.JSONDecodeError:
+                    media_urls = None
+            out.append(
+                PostPayload(
+                    source_post_id=f.source_post_id,
+                    text=f.text,
+                    media_url=f.media_url,
+                    media_urls=media_urls,
+                )
             )
-            for f in fetched
-            if f.source_post_id not in handled_ids
-        ]
+        return out
 
     def count_successful_deliveries(self, run_id: str) -> int:
         """Число постов run, учтённых как успешно «закрытые» без target (dedup-skip)."""
