@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import inspect  # noqa: E402
+from sqlalchemy import inspect, select  # noqa: E402
 
 from postbridge.db import Base, ENGINE, BatchImportFetchedPostOrm, SESSION_LOCAL, BatchImportRunOrm, init_db  # noqa: E402
 from postbridge.domain.errors import ExternalApiError, ValidationError  # noqa: E402
@@ -574,6 +574,90 @@ def test_pipeline_unified_preserves_media_url_on_content(monkeypatch: pytest.Mon
         content = session.get(ContentItemOrm, plan.content_item_id)
         assert content is not None
         assert content.media_url == "https://cdn.test/photo.jpg"
+    finally:
+        session.close()
+
+
+def test_store_fetched_posts_preserves_media_urls_roundtrip():
+    session = SESSION_LOCAL()
+    try:
+        store = BatchImportRunStore(session)
+        correlation_id = str(uuid4())
+        job, _ = store.create_run(
+            T_TEST_TENANT,
+            "pb/workspace",
+            "max/target",
+            requested_limit=1,
+            correlation_id=correlation_id,
+            source_core_channel_id=CORE_TG_SRC,
+            target_core_channel_id=CORE_MAX_CH,
+        )
+        posts = [
+            PostPayload(
+                source_post_id="album-1",
+                text="carousel",
+                media_url="https://cdn.test/a.jpg",
+                media_urls=["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"],
+            )
+        ]
+        store.store_fetched_posts(job.id, posts)
+
+        row = session.scalar(
+            select(BatchImportFetchedPostOrm).where(
+                BatchImportFetchedPostOrm.batch_import_run_id == job.id
+            )
+        )
+        assert row is not None
+        assert row.media_urls_json == json.dumps(
+            ["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"], ensure_ascii=True
+        )
+
+        restored = store.list_posts_for_publish(job.id)
+        assert len(restored) == 1
+        assert restored[0].media_urls == ["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"]
+    finally:
+        session.close()
+
+
+def test_pipeline_unified_preserves_media_urls_on_content(monkeypatch: pytest.MonkeyPatch):
+    session = SESSION_LOCAL()
+    try:
+        store = BatchImportRunStore(session)
+        correlation_id = str(uuid4())
+        job, _ = store.create_run(
+            T_TEST_TENANT,
+            "pb/workspace",
+            "max/target",
+            requested_limit=1,
+            correlation_id=correlation_id,
+            source_core_channel_id=CORE_TG_SRC,
+            target_core_channel_id=CORE_MAX_CH,
+        )
+        _mock_send_task(monkeypatch)
+        service = SyncService(
+            session=session,
+            fetcher=FakeTelegramImporter(
+                posts=[
+                    PostPayload(
+                        source_post_id="album-1",
+                        text="carousel caption",
+                        media_url="https://cdn.test/a.jpg",
+                        media_urls=["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"],
+                    )
+                ]
+            ),
+        )
+        service.run_job(job.id, correlation_id=correlation_id)
+        target_ids = store.list_enqueued_target_ids(job.id)
+        assert len(target_ids) == 1
+        target = session.get(PublicationTargetOrm, target_ids[0])
+        assert target is not None
+        plan = session.get(PublicationPlanOrm, target.publication_plan_id)
+        assert plan is not None
+        content = session.get(ContentItemOrm, plan.content_item_id)
+        assert content is not None
+        assert content.media_url == "https://cdn.test/a.jpg"
+        assert content.media_urls == ["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"]
     finally:
         session.close()
 

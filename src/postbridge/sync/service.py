@@ -189,6 +189,12 @@ class SyncService:
                 continue
             try:
                 body = (post.text or "").strip() or " "
+                media_list: list[str] | None = None
+                if post.media_urls:
+                    media_list = [u for u in post.media_urls if isinstance(u, str) and u]
+                    if not media_list:
+                        media_list = None
+                media_url = post.media_url if isinstance(post.media_url, str) and post.media_url else None
                 result = create_content_with_plan_and_targets(
                     session,
                     tenant_id=job.tenant_id,
@@ -197,7 +203,8 @@ class SyncService:
                     source_type="imported",
                     title=None,
                     body_markdown=body,
-                    media_url=post.media_url,
+                    media_url=media_url,
+                    media_urls=media_list,
                     content_status="ready",
                     plan_strategy="immediate",
                     plan_status="scheduled",
