@@ -325,7 +325,7 @@ def test_channel_post_media_group_first_schedules_buffered_publish(monkeypatch: 
     scheduled: list[dict[str, Any]] = []
 
     def fake_add_to_media_group(**kwargs):
-        return True
+        return 1
 
     def fake_apply_async(*, countdown: int, args: tuple[Any, ...], kwargs: dict[str, Any]):
         scheduled.append({"countdown": countdown, "args": args, "kwargs": kwargs})
@@ -349,6 +349,7 @@ def test_channel_post_media_group_first_schedules_buffered_publish(monkeypatch: 
     )
     _run(tg_handlers._handle_channel_post(message, backend=backend))
     assert scheduled and not published
+    assert scheduled[0]["kwargs"]["buffer_generation"] == 1
 
 
 def test_channel_post_media_group_buffer_failure_falls_back_to_single(monkeypatch: pytest.MonkeyPatch) -> None:

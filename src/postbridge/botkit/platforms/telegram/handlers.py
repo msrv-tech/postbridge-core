@@ -324,14 +324,14 @@ async def _handle_channel_post(message: Message, *, backend: BotBackend) -> None
     media_group_id = getattr(message, "media_group_id", None)
     if media_group_id:
         try:
-            is_first = add_to_media_group(
+            buffer_generation = add_to_media_group(
                 chat_id=chat_id,
                 media_group_id=media_group_id,
                 msg_id=message.message_id,
                 text=text,
                 media_url=media_url,
             )
-            if is_first:
+            if buffer_generation is not None:
                 publish_live_sync_media_group.apply_async(
                     countdown=MG_DELAY_SECONDS,
                     args=(str(chat_id), target, workspace_id, media_group_id),
@@ -340,9 +340,10 @@ async def _handle_channel_post(message: Message, *, backend: BotBackend) -> None
                         "core_tenant_id": core_tenant_id,
                         "target_core_channel_id": target_core_channel_id,
                         "producer": f"telegram_{backend.name}",
+                        "buffer_generation": buffer_generation,
                     },
                 )
-            return
+                return
         except Exception as e:
             logger.warning("media_group buffer failed, publishing as single: %s", e)
 
