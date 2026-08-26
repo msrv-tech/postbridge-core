@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -311,11 +312,23 @@ def test_due_agent_and_cleanup_task_wrappers(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_simple_worker_wrappers_delegate_and_close(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr("postbridge.workers.tasks.recover_stuck_publication_targets", lambda _s, timeout_seconds: 4)
+    delayed: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "postbridge.workers.tasks.recover_stuck_publication_targets",
+        lambda _s, timeout_seconds: ["target-a", "target-b"],
+    )
+    monkeypatch.setattr(
+        "postbridge.workers.tasks.process_publication_target_task",
+        SimpleNamespace(delay=lambda target_id, corr: delayed.append((target_id, corr))),
+    )
     monkeypatch.setattr("postbridge.workers.tasks.reconcile_batch_import_runs", lambda _s: 5)
     monkeypatch.setattr("postbridge.workers.tasks.process_due_scheduled_postbridge_publishes", lambda _s: 6)
 
-    assert recover_stuck_publication_targets_task.run() == 4
+    assert recover_stuck_publication_targets_task.run() == 2
+    assert len(delayed) == 2
+    assert delayed[0][0] == "target-a"
+    assert delayed[1][0] == "target-b"
+    assert delayed[0][1].startswith("recover-stuck-")
     assert reconcile_batch_import_runs_task.run() == 5
     assert process_scheduled_postbridge_publishes_task.run() == 6
 

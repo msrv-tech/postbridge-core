@@ -13,7 +13,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from postbridge.domain.errors import InternalError, PostbridgeError, ValidationError
@@ -137,20 +137,27 @@ def schedule_publication_target_retry(
     return True
 
 
-def recover_stuck_publication_targets(session: Session, *, timeout_seconds: int) -> int:
-    """publishing с устаревшим updated_at → pending."""
+def recover_stuck_publication_targets(session: Session, *, timeout_seconds: int) -> list[str]:
+    """publishing с устаревшим updated_at → pending; возвращает id восстановленных targets."""
     cutoff = datetime.now(UTC) - timedelta(seconds=timeout_seconds)
     now = datetime.now(UTC)
-    result = session.execute(
+    stuck_ids = list(
+        session.scalars(
+            select(PublicationTargetOrm.id).where(
+                PublicationTargetOrm.status == PUBLICATION_TARGET_PUBLISHING,
+                PublicationTargetOrm.updated_at < cutoff,
+            )
+        ).all()
+    )
+    if not stuck_ids:
+        return []
+    session.execute(
         update(PublicationTargetOrm)
-        .where(
-            PublicationTargetOrm.status == PUBLICATION_TARGET_PUBLISHING,
-            PublicationTargetOrm.updated_at < cutoff,
-        )
+        .where(PublicationTargetOrm.id.in_(stuck_ids))
         .values(status=PUBLICATION_TARGET_PENDING, updated_at=now)
     )
     session.commit()
-    return int(result.rowcount or 0)
+    return stuck_ids
 
 
 def _build_post_payload(

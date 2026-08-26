@@ -47,6 +47,7 @@ def deliver_publish_to_core(
     from postbridge.workers.tasks import process_publication_target_task
 
     prod = f" producer={producer}" if producer else ""
+    ing = None
     try:
         media = post.get("media_url") or post.get("media_urls")
         logger.info(
@@ -94,6 +95,21 @@ def deliver_publish_to_core(
         )
         return {"status": "ok", "source_post_id": post.get("source_post_id", "")}
     except Exception as e:
+        if ing is not None and not ing.skipped:
+            from postbridge.services.live_sync_publish_service import (
+                abort_live_sync_after_enqueue_failure,
+            )
+
+            abort_session = SESSION_LOCAL()
+            try:
+                abort_live_sync_after_enqueue_failure(
+                    abort_session,
+                    source_channel=source_channel,
+                    source_post_id=ing.source_post_id,
+                    target_channel=target_channel,
+                )
+            finally:
+                abort_session.close()
         if persist_failure:
             inc_live_publish_failed()
         err_str = str(e)
