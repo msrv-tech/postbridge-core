@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { listAuthProviders, requestMagicLink, reviewLogin, verifyMagicLink } from '../adapters/authFlows'
 import { setToken } from '../adapters/sessionToken'
+import { normalizeAuthReturnTo, rememberAuthReturnTo } from '../adapters/authReturnTo'
 import PublicLayout from '../components/PublicLayout'
 import TelegramDeepLinkField from '../components/TelegramDeepLinkField'
 import { fetchTelegramWebLinkStatus, startTelegramWebLinkSession } from '../telegramWebLinkFlow'
@@ -67,6 +68,16 @@ export default function Landing() {
   const [authProviders, setAuthProviders] = useState(null)
   const [reviewCode, setReviewCode] = useState('')
   const isMetaReviewLogin = searchParams.get('review') === 'meta'
+  const authReturnTo = normalizeAuthReturnTo(searchParams.get('return_to'))
+
+  useEffect(() => {
+    if (authReturnTo) rememberAuthReturnTo(authReturnTo)
+  }, [authReturnTo])
+
+  const finishLogin = (token) => {
+    setToken(token)
+    navigate(authReturnTo || '/')
+  }
 
   const providerEnabled = (providerId) => {
     if (!Array.isArray(authProviders) || authProviders.length === 0) {
@@ -106,9 +117,8 @@ export default function Landing() {
       try {
         const s = await fetchTelegramWebLinkStatus(tgSessionToken)
         if (s.status === 'done' && s.token) {
-          setToken(s.token)
+          finishLogin(s.token)
           reachMetrikaGoal('auth_completed', { method: 'telegram' })
-          navigate('/')
           return
         }
         if (s.status === 'failed') {
@@ -124,7 +134,7 @@ export default function Landing() {
       }
     }, 2000)
     return () => clearInterval(id)
-  }, [tgSessionToken, navigate, t])
+  }, [tgSessionToken, authReturnTo, navigate, t])
 
   useEffect(() => {
     let cancelled = false
@@ -169,9 +179,8 @@ export default function Landing() {
     setVerifying(true)
     try {
       const res = await verifyMagicLink({ code: code.trim().toUpperCase() })
-      setToken(res.token)
+      finishLogin(res.token)
       reachMetrikaGoal('auth_completed', { method: 'email' })
-      navigate('/')
     } catch (e) {
       setError(e.message)
       setVerifying(false)
@@ -188,9 +197,8 @@ export default function Landing() {
         email: email.trim(),
         code: reviewCode,
       })
-      setToken(res.token)
+      finishLogin(res.token)
       reachMetrikaGoal('auth_completed', { method: 'meta_review' })
-      navigate('/')
     } catch (e) {
       setError(e.message)
       setVerifying(false)

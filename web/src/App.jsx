@@ -11,6 +11,7 @@ import { useAuth } from './useAuth'
 import LoadingSkeleton from './components/LoadingSkeleton'
 import MiniAppAuthGate from './components/MiniAppAuthGate'
 import { setToken } from './adapters/sessionToken'
+import { consumeAuthReturnTo } from './adapters/authReturnTo'
 import { hitMetrika, reachMetrikaGoal } from './metrika'
 import { useI18n } from './i18n'
 
@@ -151,13 +152,14 @@ function OAuthTokenHandler({ children }) {
     setToken(tokenMatch[1]);
   }
   const hadToken = !!tokenMatch;
+  const authReturnTo = hadToken ? consumeAuthReturnTo() : null;
   useEffect(() => {
     if (hadToken) {
       reachMetrikaGoal('auth_completed', { method: 'oauth_hash' });
       window.history.replaceState(null, '', location.pathname + location.search);
-      navigate('/', { replace: true });
+      navigate(authReturnTo || '/', { replace: true });
     }
-  }, [navigate, location.pathname, location.search, hadToken]);
+  }, [navigate, location.pathname, location.search, hadToken, authReturnTo]);
   return children;
 }
 
