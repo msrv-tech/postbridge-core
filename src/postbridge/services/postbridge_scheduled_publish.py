@@ -24,6 +24,31 @@ logger = logging.getLogger(__name__)
 _DEFAULT_BATCH = 50
 
 
+class LiveSyncEnqueueError(RuntimeError):
+    def __init__(self, queued_count: int):
+        super().__init__("live sync job queueing failed")
+        self.queued_count = queued_count
+
+
+def _enqueue_live_sync_jobs(jobs: list[_LiveSyncEnqueue]) -> None:
+    queued_count = 0
+    for job in jobs:
+        try:
+            queue_live_sync_publish(
+                source_channel=job.source_channel,
+                target_channel=job.target_channel,
+                post=job.post,
+                workspace_id=job.workspace_id,
+                target_platform=job.target_platform,
+                core_tenant_id=job.core_tenant_id,
+                target_core_channel_id=job.target_core_channel_id,
+                producer="scheduled_postbridge",
+            )
+            queued_count += 1
+        except Exception as exc:
+            raise LiveSyncEnqueueError(queued_count) from exc
+
+
 @dataclass(slots=True)
 class _LiveSyncEnqueue:
     source_channel: str
@@ -257,17 +282,24 @@ def process_due_scheduled_postbridge_publishes(
         if not ok:
             session.rollback()
             continue
+        try:
+            _enqueue_live_sync_jobs(jobs)
+        except LiveSyncEnqueueError as exc:
+            if exc.queued_count == 0:
+                session.rollback()
+                logger.error(
+                    "scheduled postbridge publish: live-sync queue failed before commit, "
+                    "keeping draft for retry: content_id=%s",
+                    cid,
+                    exc_info=exc,
+                )
+                continue
+            logger.warning(
+                "scheduled postbridge publish: live-sync queue partially failed after %s jobs; "
+                "committing published state to avoid duplicate retries: content_id=%s",
+                exc.queued_count,
+                cid,
+            )
         session.commit()
         published += 1
-        for job in jobs:
-            queue_live_sync_publish(
-                source_channel=job.source_channel,
-                target_channel=job.target_channel,
-                post=job.post,
-                workspace_id=job.workspace_id,
-                target_platform=job.target_platform,
-                core_tenant_id=job.core_tenant_id,
-                target_core_channel_id=job.target_core_channel_id,
-                producer="scheduled_postbridge",
-            )
     return published
