@@ -200,6 +200,25 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
+test('returns an OAuth provider login to the server-side consent endpoint', async ({ page }) => {
+  const returnTo = '/oauth/authorize?response_type=code&client_id=mcp-test&state=state-1'
+  await page.route(`**${returnTo}`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      body: '<h1>OAuth consent reached</h1>',
+    })
+  })
+  await page.addInitScript((value) => {
+    window.sessionStorage.setItem('postbridge.auth_return_to', value)
+  }, returnTo)
+
+  await page.goto('/#token=oauth-session-token')
+
+  await expect(page).toHaveURL(new RegExp(`${returnTo.replace(/[?]/g, '\\?')}$`))
+  await expect(page.getByRole('heading', { name: 'OAuth consent reached' })).toBeVisible()
+})
+
 test('keeps SaaS public marketing surfaces at root', async ({ page }) => {
   const calls = []
   await mockSaasBff(page, calls)

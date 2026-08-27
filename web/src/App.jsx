@@ -1,4 +1,4 @@
-import { Component, lazy, Suspense, useEffect } from 'react'
+import { Component, lazy, Suspense, useEffect, useRef } from 'react'
 import { Routes, Route, Navigate, useNavigate, useLocation, useParams } from 'react-router-dom'
 import { isSelfhostMode } from './adapters/runtime'
 import { workspaceEntryPath } from './adapters/workspace'
@@ -144,6 +144,7 @@ function MetrikaRouteTracker() {
 function OAuthTokenHandler({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const handledTokenRef = useRef(false);
   // Read the hash token before ProtectedRoute renders, otherwise useAuth redirects
   // to the home page before useEffect can persist the token.
   const hash = window.location.hash || '';
@@ -152,14 +153,19 @@ function OAuthTokenHandler({ children }) {
     setToken(tokenMatch[1]);
   }
   const hadToken = !!tokenMatch;
-  const authReturnTo = hadToken ? consumeAuthReturnTo() : null;
   useEffect(() => {
-    if (hadToken) {
+    if (hadToken && !handledTokenRef.current) {
+      handledTokenRef.current = true;
+      const authReturnTo = consumeAuthReturnTo();
       reachMetrikaGoal('auth_completed', { method: 'oauth_hash' });
       window.history.replaceState(null, '', location.pathname + location.search);
-      navigate(authReturnTo || '/', { replace: true });
+      if (authReturnTo) {
+        window.location.replace(authReturnTo);
+      } else {
+        navigate('/', { replace: true });
+      }
     }
-  }, [navigate, location.pathname, location.search, hadToken, authReturnTo]);
+  }, [navigate, location.pathname, location.search, hadToken]);
   return children;
 }
 

@@ -76,7 +76,11 @@ export default function Landing() {
 
   const finishLogin = (token) => {
     setToken(token)
-    navigate(authReturnTo || '/')
+    if (authReturnTo) {
+      window.location.assign(authReturnTo)
+    } else {
+      navigate('/')
+    }
   }
 
   const providerEnabled = (providerId) => {
