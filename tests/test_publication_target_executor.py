@@ -3,6 +3,7 @@
 from uuid import uuid4
 
 import pytest
+from datetime import UTC, datetime, timedelta
 
 from postbridge.db import Base, ENGINE, SESSION_LOCAL, BatchImportRunOrm, init_db  # noqa: E402
 from postbridge.models.domain import (  # noqa: E402
@@ -19,6 +20,7 @@ from postbridge.services.publication_target_executor import (  # noqa: E402
     PUBLICATION_TARGET_PUBLISHING,
     PublicationTargetExecutor,
     claim_publication_target_pending,
+    recover_stuck_publication_targets,
 )
 from postbridge.services.publication_planning import create_content_with_plan_and_targets  # noqa: E402
 
@@ -169,6 +171,26 @@ def test_second_worker_cannot_claim_same_target():
     assert t is not None
     assert t.status == PUBLICATION_TARGET_PUBLISHING
     s3.close()
+
+
+def test_recover_stuck_publication_targets_resets_and_returns_ids():
+    _, target_id = _seed_chain_with_max_channel()
+    session = SESSION_LOCAL()
+    try:
+        target = session.get(PublicationTargetOrm, target_id)
+        assert target is not None
+        target.status = PUBLICATION_TARGET_PUBLISHING
+        target.updated_at = datetime.now(UTC) - timedelta(hours=1)
+        session.commit()
+
+        recovered = recover_stuck_publication_targets(session, timeout_seconds=60)
+        assert recovered == [target_id]
+
+        refreshed = session.get(PublicationTargetOrm, target_id)
+        assert refreshed is not None
+        assert refreshed.status == PUBLICATION_TARGET_PENDING
+    finally:
+        session.close()
 
 
 def test_dispatch_endpoint_enqueues(monkeypatch: pytest.MonkeyPatch):

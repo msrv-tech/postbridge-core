@@ -103,6 +103,7 @@ def publish_single(
     """Ingest live-sync + постановка в общую очередь postbridge.publication.process_target."""
     check_sync_publish_auth(request)
     from postbridge.services.live_sync_publish_service import (
+        abort_live_sync_after_enqueue_failure,
         ingest_live_sync_publication,
         live_sync_executor_task_kwargs,
     )
@@ -136,7 +137,16 @@ def publish_single(
             tenant_id=payload.tenant_id,
             target_core_channel_id=payload.target_core_channel_id,
         )
-        process_publication_target_task.delay(ing.target_id, corr, **ls_kw)
+        try:
+            process_publication_target_task.delay(ing.target_id, corr, **ls_kw)
+        except Exception:
+            abort_live_sync_after_enqueue_failure(
+                session,
+                source_channel=payload.source_channel,
+                source_post_id=ing.source_post_id,
+                target_channel=payload.target_channel,
+            )
+            raise
         return {"status": "ok", "source_post_id": source_post_id}
     except PostbridgeError:
         inc_live_publish_failed()

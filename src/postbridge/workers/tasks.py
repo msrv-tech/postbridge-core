@@ -606,14 +606,17 @@ def cleanup_agent_runtime_task(
 
 @celery_app.task(name="postbridge.publication.recover_stuck_targets")
 def recover_stuck_publication_targets_task() -> int:
-    """Celery Beat: сбрасывает зависшие publishing targets в pending."""
+    """Celery Beat: сбрасывает зависшие publishing targets в pending и ставит их в очередь."""
     session = SESSION_LOCAL()
     try:
         settings = get_settings()
-        n = recover_stuck_publication_targets(
+        recovered_ids = recover_stuck_publication_targets(
             session, timeout_seconds=settings.batch_import_run_stuck_timeout_seconds
         )
-        return n
+        corr_prefix = f"recover-stuck-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
+        for target_id in recovered_ids:
+            process_publication_target_task.delay(target_id, f"{corr_prefix}-{target_id}")
+        return len(recovered_ids)
     finally:
         session.close()
 
