@@ -256,6 +256,46 @@ test('uses SaaS BFF contracts for an authenticated workspace', async ({ page }) 
   expect(calls.some((call) => call.path.startsWith('/api/app/'))).toBe(false)
 })
 
+test('shows the worldwide IANA timezone catalog for the IO market', async ({ page }) => {
+  const calls = []
+  await mockSaasBff(page, calls)
+  await page.addInitScript(() => {
+    window.localStorage.setItem('postbridge_token', 'saas-token')
+    window.localStorage.setItem('postbridge.locale', 'en')
+  })
+
+  await page.goto('/')
+  await expect(page).toHaveURL(/\/workspaces\/ws-1\/content$/)
+  await page.getByRole('link', { name: 'Settings', exact: true }).click()
+  await expect(page).toHaveURL(/\/workspaces\/ws-1\/settings$/)
+
+  const timezoneSelect = page.getByLabel('Time zone')
+  await expect(timezoneSelect).toBeVisible()
+  const options = timezoneSelect.locator('option')
+  await expect(options).toHaveCount(40)
+  await expect(timezoneSelect.locator('option[value="UTC"]')).toHaveText(
+    '(UTC+00:00) Coordinated Universal Time',
+  )
+  await expect(timezoneSelect.locator('option[value="Europe/London"]')).toContainText(
+    'United Kingdom & Ireland Time',
+  )
+  await expect(timezoneSelect.locator('option[value="America/New_York"]')).toContainText(
+    'Eastern Time — US & Canada',
+  )
+  await expect(timezoneSelect.locator('option[value="Asia/Tokyo"]')).toContainText(
+    'Japan Standard Time',
+  )
+  expect((await options.allTextContents()).every((label) => !label.includes('/'))).toBe(true)
+  await expect(options.filter({ hasText: /MSK[+−]/ })).toHaveCount(0)
+
+  const russianCatalog = await page.evaluate(async () => {
+    const { getTimezoneSelectOptions } = await import('/src/timezoneOptions.js')
+    return getTimezoneSelectOptions((key) => (key === 'timezone.msk' ? 'MSK' : key), 'ru')
+  })
+  expect(russianCatalog).toHaveLength(11)
+  expect(russianCatalog.every(({ label }) => label.includes('MSK'))).toBe(true)
+})
+
 test('shows an upgrade paywall when X publishing credits are exhausted', async ({ page }) => {
   const calls = []
   await mockSaasBff(page, calls)

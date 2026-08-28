@@ -24,7 +24,7 @@ import {
   requestBillingEmail,
   verifyBillingEmail,
 } from '../adapters/billing'
-import { getTimezoneSelectOptions, RUSSIAN_TIMEZONE_VALUES } from '../timezoneOptions'
+import { getTimezoneSelectOptions } from '../timezoneOptions'
 import { reachMetrikaGoal } from '../metrika'
 import { useI18n } from '../i18n'
 import { clearToken } from '../adapters/sessionToken'
@@ -110,6 +110,14 @@ function normalizeWorkspaceSettings(settings) {
   }
 }
 
+function getTimezoneMarket() {
+  const configured = String(import.meta.env.VITE_POSTBRIDGE_PUBLIC_MARKET || '').trim().toLowerCase()
+  if (configured === 'io' || configured === 'ru') return configured
+  if (typeof window === 'undefined') return 'ru'
+  const hostname = window.location.hostname.toLowerCase()
+  return hostname === 'postbridge.io' || hostname.endsWith('.postbridge.io') ? 'io' : 'ru'
+}
+
 export default function WorkspaceSettings() {
   const { locale, t } = useI18n()
   const { workspaceId } = useParams()
@@ -171,15 +179,17 @@ export default function WorkspaceSettings() {
   const billingEnabled = isBillingEnabled(user)
   const aiTokenRemainder = buildAiTokenRemainder(billingSummary?.billing, t)
   const showAssistantSettings = Boolean(workspaceId) && !isSelfhostMode()
+  const timezoneMarket = getTimezoneMarket()
 
   const setLightThemeEnabled = useCallback((enabled) => {
     setTheme(setStoredTheme(enabled ? THEMES.light : THEMES.dark))
   }, [])
 
   const tzSelectOptions = useMemo(() => {
-    const base = getTimezoneSelectOptions(t)
+    const base = getTimezoneSelectOptions(t, timezoneMarket)
+    const availableValues = new Set(base.map(({ value }) => value))
     const saved = (user?.profile_timezone || '').trim()
-    if (saved && !RUSSIAN_TIMEZONE_VALUES.has(saved)) {
+    if (saved && !availableValues.has(saved)) {
       return [
         ...base,
         {
@@ -189,7 +199,7 @@ export default function WorkspaceSettings() {
       ]
     }
     return base
-  }, [t, user?.profile_timezone])
+  }, [t, timezoneMarket, user?.profile_timezone])
 
   useEffect(() => {
     if (user?.profile_timezone) setTimezone(user.profile_timezone)

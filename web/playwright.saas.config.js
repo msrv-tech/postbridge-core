@@ -26,6 +26,7 @@ export default defineConfig({
     env: {
       VITE_BASE_PATH: '/',
       VITE_POSTBRIDGE_APP_MODE: 'saas',
+      VITE_POSTBRIDGE_PUBLIC_MARKET: 'io',
     },
   },
   projects: [
