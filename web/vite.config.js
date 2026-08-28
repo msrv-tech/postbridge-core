@@ -5,10 +5,18 @@ import react from '@vitejs/plugin-react'
 // Local host-dev SaaS API listens on :8001 by default.
 const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://localhost:8001'
 const base = process.env.VITE_BASE_PATH || '/'
+const publicBaseUrl = (process.env.VITE_POSTBRIDGE_PUBLIC_BASE_URL || 'https://postbridge.io').replace(/\/+$/, '')
+
+const publicBaseUrlPlugin = {
+  name: 'postbridge-public-base-url',
+  transformIndexHtml(html) {
+    return html.replaceAll('__POSTBRIDGE_PUBLIC_BASE_URL__', publicBaseUrl)
+  },
+}
 
 export default defineConfig({
   base,
-  plugins: [react()],
+  plugins: [publicBaseUrlPlugin, react()],
   build: {
     rollupOptions: {
       output: {

@@ -7,30 +7,84 @@
     <meta name="msapplication-TileColor" content="#071b33" />
     <meta name="msapplication-TileImage" content="/mstile-150x150.png" />
     <meta name="facebook-domain-verification" content="pnqfa72toyhc6uq67b88nc37cq9d2z" />
-    <meta name="description" content="Postbridge helps teams connect social channels and publish content from one workspace." />
+    <meta name="description" content="Postbridge.io connects social channels, drafts, scheduling, media, content bridges, and confirmed publishing from one workspace." />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Postbridge" />
-    <meta property="og:description" content="Postbridge helps teams connect social channels and publish content from one workspace." />
-    <meta property="og:url" content="https://postbridge.io/" />
-    <meta property="og:site_name" content="Postbridge" />
-    <meta property="og:image" content="https://postbridge.io/app-icon-1024.png" />
-    <meta property="og:image:secure_url" content="https://postbridge.io/app-icon-1024.png" />
+    <meta property="og:title" content="Postbridge.io" />
+    <meta property="og:description" content="Postbridge.io connects social channels, drafts, scheduling, media, content bridges, and confirmed publishing from one workspace." />
+    <meta property="og:url" content="__POSTBRIDGE_PUBLIC_BASE_URL__/" />
+    <meta property="og:site_name" content="Postbridge.io" />
+    <meta property="og:image" content="__POSTBRIDGE_PUBLIC_BASE_URL__/og/home.png" />
+    <meta property="og:image:secure_url" content="__POSTBRIDGE_PUBLIC_BASE_URL__/og/home.png" />
     <meta property="og:image:type" content="image/png" />
-    <meta property="og:image:width" content="1024" />
-    <meta property="og:image:height" content="1024" />
-    <meta property="og:image:alt" content="Postbridge logo" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Postbridge.io social publishing workspace" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:image" content="https://postbridge.io/app-icon-1024.png" />
-    <link rel="canonical" href="https://postbridge.io/" />
+    <meta name="twitter:title" content="Postbridge.io" />
+    <meta name="twitter:description" content="Social publishing, scheduling, media, and content bridges from one workspace." />
+    <meta name="twitter:image" content="__POSTBRIDGE_PUBLIC_BASE_URL__/og/home.png" />
+    <link rel="canonical" href="__POSTBRIDGE_PUBLIC_BASE_URL__/" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
-    <title>Postbridge</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "__POSTBRIDGE_PUBLIC_BASE_URL__/#organization",
+            "name": "Postbridge.io",
+            "url": "__POSTBRIDGE_PUBLIC_BASE_URL__/",
+            "logo": "__POSTBRIDGE_PUBLIC_BASE_URL__/app-icon-1024.png"
+          },
+          {
+            "@type": "WebSite",
+            "@id": "__POSTBRIDGE_PUBLIC_BASE_URL__/#website",
+            "name": "Postbridge.io",
+            "url": "__POSTBRIDGE_PUBLIC_BASE_URL__/",
+            "publisher": { "@id": "__POSTBRIDGE_PUBLIC_BASE_URL__/#organization" },
+            "inLanguage": "en"
+          },
+          {
+            "@type": "WebApplication",
+            "name": "Postbridge.io",
+            "url": "__POSTBRIDGE_PUBLIC_BASE_URL__/",
+            "applicationCategory": "BusinessApplication",
+            "operatingSystem": "Web",
+            "description": "Social publishing and content distribution from one workspace.",
+            "publisher": { "@id": "__POSTBRIDGE_PUBLIC_BASE_URL__/#organization" },
+            "featureList": [
+              "Social channel connections",
+              "Draft creation",
+              "Scheduled publishing",
+              "Content bridges",
+              "Media uploads",
+              "MCP integration for ChatGPT"
+            ]
+          }
+        ]
+      }
+    </script>
+    <title>Postbridge.io | Social publishing and content bridges</title>
     <!-- Telegram Web App SDK is loaded lazily in MiniAppAuthGate. -->
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main>
+        <h1>Postbridge.io</h1>
+        <p>Social publishing, scheduling, media, and content bridges from one workspace.</p>
+        <nav>
+          <a href="/platforms">Supported platforms</a>
+          <a href="/cases">Publishing use cases</a>
+          <a href="/cases/multi-platform-publishing">Multi-platform publishing</a>
+          <a href="/cases/chatgpt-social-publishing">Publish from ChatGPT</a>
+          <a href="/docs/mcp">MCP for ChatGPT</a>
+          <a href="/pricing">Pricing</a>
+        </nav>
+      </main>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

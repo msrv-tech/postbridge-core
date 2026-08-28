@@ -1,3 +1,5 @@
+import { ioCaseCatalog } from './ioCaseCatalog'
+
 export const DEFAULT_LOCALE = 'en'
 
 export const supportedLocales = [
@@ -1625,6 +1627,7 @@ export const catalogs = {
     'pricing.important.action': 'Перейти к запуску',
   },
   en: {
+    ...ioCaseCatalog,
     'app.nav.aria': 'Workspace navigation',
     'app.nav.content': 'Content',
     'app.nav.channels': 'Channels',

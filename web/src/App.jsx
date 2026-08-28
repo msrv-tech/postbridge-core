@@ -41,6 +41,22 @@ const WorkspaceSettings = lazy(() => import('./pages/WorkspaceSettings'))
 const SettingsRedirect = lazy(() => import('./pages/SettingsRedirect'))
 const SelfhostSetup = lazy(() => import('./pages/SelfhostSetup'))
 
+function NotFound() {
+  return (
+    <div className="public-shell">
+      <main className="public-main">
+        <div className="container">
+          <div className="card" style={{ maxWidth: '36rem', margin: '4rem auto' }}>
+            <h1 style={{ marginTop: 0 }}>Page not found</h1>
+            <p className="muted">The requested Postbridge page does not exist.</p>
+            <a className="btn" href="/">Return to Postbridge</a>
+          </div>
+        </div>
+      </main>
+    </div>
+  )
+}
+
 const CHUNK_RELOAD_STORAGE_KEY = 'postbridge.chunk-reload-attempted'
 
 function isChunkLoadError(error) {
@@ -312,7 +328,7 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
     </MiniAppAuthGate>

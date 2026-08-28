@@ -260,7 +260,10 @@ def web_ui():
         title = _translate_message_key("web.core.title", default="Postbridge Core")
         body = _translate_message_key("web.core.not_found", default="Web UI not found")
         return HTMLResponse(f"<h1>{title}</h1><p>{body}</p>", status_code=404)
-    return FileResponse(web_dir / "index.html", headers={"Cache-Control": "no-store"})
+    return FileResponse(
+        web_dir / "index.html",
+        headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"},
+    )
 
 
 @app.get("/web/{path:path}", include_in_schema=False)
@@ -272,7 +275,10 @@ def web_asset_or_route(path: str):
     full = (web_dir / path).resolve()
     if str(full).startswith(str(web_dir.resolve())) and full.is_file():
         return FileResponse(full)
-    return FileResponse(web_dir / "index.html", headers={"Cache-Control": "no-store"})
+    return FileResponse(
+        web_dir / "index.html",
+        headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"},
+    )
 
 
 @app.get("/health")
@@ -296,6 +302,42 @@ _ROOT_FRONTEND_API_PREFIXES = (
     "metrics",
 )
 
+_ROOT_FRONTEND_ROUTE_PREFIXES = (
+    "admin",
+    "agents",
+    "cases",
+    "data-deletion",
+    "home",
+    "login",
+    "news",
+    "pricing",
+    "privacy",
+    "settings",
+    "setup",
+    "terms",
+    "workspaces",
+)
+
+_ROOT_FRONTEND_NOINDEX_PREFIXES = (
+    "admin",
+    "home",
+    "login",
+    "settings",
+    "setup",
+    "workspaces",
+)
+
+
+def _frontend_not_found() -> HTMLResponse:
+    return HTMLResponse(
+        """<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<meta name="robots" content="noindex, nofollow" /><title>Page not found | Postbridge</title>
+</head><body><main><h1>Page not found</h1><p>The requested Postbridge page does not exist.</p>
+<p><a href="/">Return to Postbridge</a></p></main></body></html>""",
+        status_code=404,
+        headers={"X-Robots-Tag": "noindex, nofollow"},
+    )
+
 
 def _root_frontend_response(path: str = ""):
     """Serve the shared frontend at root for hosted deployments."""
@@ -308,7 +350,12 @@ def _root_frontend_response(path: str = ""):
     full = (web_dir / path).resolve()
     if path and str(full).startswith(str(web_dir.resolve())) and full.is_file():
         return FileResponse(full)
-    return FileResponse(web_dir / "index.html")
+    if path and first_segment not in _ROOT_FRONTEND_ROUTE_PREFIXES:
+        return _frontend_not_found()
+    headers = {"Cache-Control": "no-store"}
+    if first_segment in _ROOT_FRONTEND_NOINDEX_PREFIXES:
+        headers["X-Robots-Tag"] = "noindex, nofollow"
+    return FileResponse(web_dir / "index.html", headers=headers)
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)

@@ -133,6 +133,8 @@ def test_web_serves_selfhost_app_shell(monkeypatch):
     assert "/web/assets/" in response.text
     assert "The web app lives in the SaaS repository" not in response.text
     assert "CORE_SERVICE_TOKEN" not in response.text
+    assert response.headers["x-robots-tag"] == "noindex, nofollow"
+    assert trailing.headers["x-robots-tag"] == "noindex, nofollow"
 
     asset_path = response.text.split('/web/assets/', 1)[1].split('"', 1)[0]
     asset = client.get(f"/web/assets/{asset_path}")
@@ -147,6 +149,53 @@ def test_root_redirects_to_web_in_selfhost_mode(monkeypatch):
 
     assert response.status_code == 307
     assert response.headers["location"] == "/web"
+
+
+def test_hosted_frontend_returns_real_404_and_noindexes_private_routes(monkeypatch):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "saas")
+    client = TestClient(app)
+
+    root = client.get("/")
+    missing = client.get("/definitely-not-a-postbridge-route")
+    login = client.get("/login")
+    workspace = client.get("/workspaces/ws-1/content")
+
+    assert root.status_code == 200
+    assert "__POSTBRIDGE_PUBLIC_BASE_URL__" not in root.text
+    assert root.text.count('rel="canonical"') == 1
+    assert root.text.count('name="twitter:card"') == 1
+    assert missing.status_code == 404
+    assert 'content="noindex, nofollow"' in missing.text
+    assert missing.headers["x-robots-tag"] == "noindex, nofollow"
+    assert login.status_code == 200
+    assert login.headers["x-robots-tag"] == "noindex, nofollow"
+    assert workspace.status_code == 200
+    assert workspace.headers["x-robots-tag"] == "noindex, nofollow"
+
+
+def test_hosted_seo_open_graph_assets_are_1200_by_630(monkeypatch):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "saas")
+    client = TestClient(app)
+    assets = (
+        "home.png",
+        "platforms.png",
+        "cases.png",
+        "mcp.png",
+        "pricing.png",
+        "platform-x.png",
+        "platform-linkedin.png",
+        "case-multi-platform-publishing.png",
+        "case-chatgpt-social-publishing.png",
+    )
+
+    for filename in assets:
+        response = client.get(f"/og/{filename}")
+        assert response.status_code == 200, filename
+        assert response.headers["content-type"] == "image/png"
+        assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+        width = int.from_bytes(response.content[16:20], "big")
+        height = int.from_bytes(response.content[20:24], "big")
+        assert (width, height) == (1200, 630), filename
 
 
 def test_app_runtime_config_saas_mode(monkeypatch):

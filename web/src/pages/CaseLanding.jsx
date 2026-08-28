@@ -6,11 +6,15 @@ import { useI18n } from '../i18n'
 import { reachMetrikaGoal } from '../metrika'
 import { useAuth } from '../useAuth'
 
-function useCaseCtaPath(slug) {
+function useCaseCtaPath(slug, landing) {
   const { user } = useAuth()
   const workspaceId = user?.workspaces?.[0]?.id || ''
 
-  if (slug === 'ai-telegram-posts') {
+  if (landing?.ctaMode === 'mcp') {
+    return '/docs/mcp'
+  }
+
+  if (slug === 'ai-telegram-posts' || landing?.ctaMode === 'compose') {
     if (workspaceId) {
       return `/workspaces/${workspaceId}/content/new?case=${encodeURIComponent(slug)}`
     }
@@ -23,15 +27,22 @@ function useCaseCtaPath(slug) {
   return `/login?case=${encodeURIComponent(slug)}`
 }
 
-function CaseFlowPreview() {
+function CaseFlowPreview({ flow }) {
   const { t } = useI18n()
+  const content = flow || {
+    aria: t('case.flow.aria'),
+    sourceName: 'Telegram',
+    sourceText: t('case.flow.newPost'),
+    destinationName: 'MAX',
+    destinationText: t('case.flow.publication'),
+  }
 
   return (
-    <div className="case-flow-preview" aria-label={t('case.flow.aria')}>
+    <div className="case-flow-preview" aria-label={content.aria}>
       <div className="case-flow-channel case-flow-channel-telegram">
         <span>{t('case.flow.source')}</span>
-        <strong>Telegram</strong>
-        <p>{t('case.flow.newPost')}</p>
+        <strong>{content.sourceName}</strong>
+        <p>{content.sourceText}</p>
       </div>
       <div className="case-flow-pipeline">
         <span className="case-flow-pulse" aria-hidden />
@@ -40,8 +51,8 @@ function CaseFlowPreview() {
       </div>
       <div className="case-flow-channel case-flow-channel-max">
         <span>{t('case.flow.destination')}</span>
-        <strong>MAX</strong>
-        <p>{t('case.flow.publication')}</p>
+        <strong>{content.destinationName}</strong>
+        <p>{content.destinationText}</p>
       </div>
       <div className="case-status-strip">
         <span className="case-status case-status-done">{t('case.status.published')}</span>
@@ -313,7 +324,7 @@ export default function CaseLanding() {
   const { slug = '' } = useParams()
   const landingConfig = getCaseLanding(slug)
   const landing = useMemo(() => translateCaseLanding(landingConfig, t), [landingConfig, t])
-  const ctaPath = useCaseCtaPath(slug)
+  const ctaPath = useCaseCtaPath(slug, landingConfig)
   const [activeScenario, setActiveScenario] = useState(0)
 
   const selectedScenario = useMemo(() => {
@@ -325,8 +336,38 @@ export default function CaseLanding() {
   useEffect(() => {
     if (!landing) return
     const title = landing.kind === 'aiTelegramPosts' ? t('case.aiTelegramPosts.title') : landing.title
+    const description = landing.kind === 'aiTelegramPosts'
+      ? t('case.aiTelegramPosts.subtitle')
+      : landing.subtitle
+    const canonicalUrl = `${window.location.origin}/cases/${landing.slug}`
+    const descriptionMeta = document.querySelector('meta[name="description"]')
+    const canonicalLink = document.querySelector('link[rel="canonical"]')
+    const ogTitle = document.querySelector('meta[property="og:title"]')
+    const ogDescription = document.querySelector('meta[property="og:description"]')
+    const ogUrl = document.querySelector('meta[property="og:url"]')
+    const previous = {
+      title: document.title,
+      description: descriptionMeta?.getAttribute('content'),
+      canonical: canonicalLink?.getAttribute('href'),
+      ogTitle: ogTitle?.getAttribute('content'),
+      ogDescription: ogDescription?.getAttribute('content'),
+      ogUrl: ogUrl?.getAttribute('content'),
+    }
     document.title = `${title} | Postbridge`
+    descriptionMeta?.setAttribute('content', description)
+    canonicalLink?.setAttribute('href', canonicalUrl)
+    ogTitle?.setAttribute('content', title)
+    ogDescription?.setAttribute('content', description)
+    ogUrl?.setAttribute('content', canonicalUrl)
     reachMetrikaGoal('case_view', { case: landing.metrikaCase })
+    return () => {
+      document.title = previous.title
+      if (previous.description) descriptionMeta?.setAttribute('content', previous.description)
+      if (previous.canonical) canonicalLink?.setAttribute('href', previous.canonical)
+      if (previous.ogTitle) ogTitle?.setAttribute('content', previous.ogTitle)
+      if (previous.ogDescription) ogDescription?.setAttribute('content', previous.ogDescription)
+      if (previous.ogUrl) ogUrl?.setAttribute('content', previous.ogUrl)
+    }
   }, [landing, t])
 
   if (!landing) return <Navigate to="/" replace />
@@ -336,6 +377,21 @@ export default function CaseLanding() {
       case: landing.metrikaCase,
       action,
     })
+  }
+
+  const primaryCta = (label, action, className = 'btn') => {
+    if (landing.ctaMode === 'mcp') {
+      return (
+        <a href={ctaPath} className={className} onClick={() => trackCta(action)}>
+          {label}
+        </a>
+      )
+    }
+    return (
+      <Link to={ctaPath} className={className} onClick={() => trackCta(action)}>
+        {label}
+      </Link>
+    )
   }
 
   if (landing.kind === 'aiTelegramPosts') {
@@ -351,9 +407,7 @@ export default function CaseLanding() {
             <h1 className="hero-title case-title">{landing.title}</h1>
             <p className="hero-text">{landing.subtitle}</p>
             <div className="hero-actions">
-              <Link to={ctaPath} className="btn" onClick={() => trackCta('setup')}>
-                {landing.primaryCta}
-              </Link>
+              {primaryCta(landing.primaryCta, 'setup')}
               <a
                 href="#case-scenarios"
                 className="btn btn-secondary"
@@ -363,7 +417,7 @@ export default function CaseLanding() {
               </a>
             </div>
           </div>
-          <CaseFlowPreview />
+          <CaseFlowPreview flow={landing.flow} />
         </div>
       </section>
 
@@ -407,10 +461,14 @@ export default function CaseLanding() {
         <div className="container">
           <div className="section-heading">
             <span className="eyebrow">{t('case.sections.scenarios.eyebrow')}</span>
-            <h2>{t('case.sections.scenarios.title')}</h2>
+            <h2>{landing.sections?.scenariosTitle || t('case.sections.scenarios.title')}</h2>
           </div>
           <div className="case-scenario-layout">
-            <div className="case-scenario-tabs" role="tablist" aria-label={t('case.sections.scenarios.aria')}>
+            <div
+              className="case-scenario-tabs"
+              role="tablist"
+              aria-label={landing.sections?.scenariosAria || t('case.sections.scenarios.aria')}
+            >
               {landing.scenarios.map((scenario, index) => (
                 <button
                   type="button"
@@ -434,9 +492,7 @@ export default function CaseLanding() {
               <span>{t('case.sections.scenarios.number', { number: activeScenario + 1 })}</span>
               <h3>{selectedScenario.title}</h3>
               <p>{selectedScenario.text}</p>
-              <Link to={ctaPath} className="btn btn-secondary" onClick={() => trackCta('scenario_next_step')}>
-                {selectedScenario.nextStep}
-              </Link>
+              {primaryCta(selectedScenario.nextStep, 'scenario_next_step', 'btn btn-secondary')}
             </article>
           </div>
         </div>
@@ -446,7 +502,7 @@ export default function CaseLanding() {
         <div className="container case-two-column">
           <article className="card case-proof-card">
             <span className="eyebrow">{t('case.sections.proof.eyebrow')}</span>
-            <h2>{t('case.sections.proof.title')}</h2>
+            <h2>{landing.sections?.proofTitle || t('case.sections.proof.title')}</h2>
             <ul className="check-list">
               {landing.supported.map((item) => (
                 <li key={item}>{item}</li>
@@ -455,7 +511,7 @@ export default function CaseLanding() {
           </article>
           <article className="card case-not-promised-card">
             <span className="eyebrow">{t('case.sections.notPromised.eyebrow')}</span>
-            <h2>{t('case.sections.notPromised.title')}</h2>
+            <h2>{landing.sections?.notPromisedTitle || t('case.sections.notPromised.title')}</h2>
             <ul className="case-no-list">
               {landing.notPromised.map((item) => (
                 <li key={item}>{item}</li>
@@ -486,15 +542,13 @@ export default function CaseLanding() {
         <div className="container cta-card">
           <div>
             <span className="eyebrow">{t('case.sections.cta.eyebrow')}</span>
-            <h2>{t('case.sections.cta.title')}</h2>
+            <h2>{landing.sections?.ctaTitle || t('case.sections.cta.title')}</h2>
             <p className="section-copy">
-              {t('case.sections.cta.text')}
+              {landing.sections?.ctaText || t('case.sections.cta.text')}
             </p>
           </div>
           <div className="hero-actions">
-            <Link to={ctaPath} className="btn" onClick={() => trackCta('bottom_setup')}>
-              {landing.primaryCta}
-            </Link>
+            {primaryCta(landing.primaryCta, 'bottom_setup')}
             <Link to="/pricing" className="btn btn-secondary" onClick={() => trackCta('pricing')}>
               {t('common.pricing')}
             </Link>
