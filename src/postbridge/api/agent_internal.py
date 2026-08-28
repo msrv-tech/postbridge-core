@@ -17,6 +17,7 @@ from postbridge.agent.embeddings import (
     reindex_channel_content_embeddings,
     reindex_content_item_embedding,
     rotate_channel_content_embeddings,
+    search_content_knowledge,
 )
 from postbridge.agent.storage import (
     archive_agent_task,
@@ -319,6 +320,15 @@ class EmbeddingLifecycleBody(BaseModel):
     channel_limit: int = Field(default=20, ge=1, le=200)
     item_limit: int = Field(default=100, ge=1, le=1000)
     channel_offset: int = Field(default=0, ge=0, le=1_000_000)
+
+
+class KnowledgeSearchBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=1, max_length=4000)
+    channel_ids: list[str] | None = Field(default=None, max_length=50)
+    limit: int = Field(default=8, ge=1, le=20)
+    semantic_enabled: bool = True
 
 
 class EmbeddingMaintenanceBody(BaseModel):
@@ -926,6 +936,23 @@ def get_service_agent_embeddings_lifecycle(
         offset_channels=channel_offset,
     )
     return {"status": "completed", **result}
+
+
+@router.post("/internal/service/agent/knowledge/search", include_in_schema=False)
+def search_service_agent_knowledge(
+    body: KnowledgeSearchBody,
+    tenant_id: str = Depends(require_service_tenant),
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    result = search_content_knowledge(
+        session,
+        tenant_id=tenant_id,
+        query=body.query,
+        channel_ids=body.channel_ids,
+        limit=body.limit,
+        semantic_enabled=body.semantic_enabled,
+    )
+    return {"status": "completed", "tenant_id": tenant_id, **result}
 
 
 @router.post("/internal/service/agent/reindex/drift", include_in_schema=False)

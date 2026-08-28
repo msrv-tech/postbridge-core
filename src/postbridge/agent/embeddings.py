@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from datetime import UTC, datetime, timedelta
 
@@ -8,12 +9,199 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from postbridge.agent.providers.openai_compatible import OpenAICompatibleProvider, ensure_openai_compatible_provider
-from postbridge.agent.tools import find_default_provider, fingerprint_text, upsert_content_embedding
+from postbridge.agent.tools import (
+    find_default_provider,
+    find_similar_embeddings,
+    fingerprint_text,
+    jaccard_similarity,
+    upsert_content_embedding,
+)
 from postbridge.agent.vector_store import get_vector_store
 from postbridge.domain.errors import ValidationError
-from postbridge.models.domain import ChannelOrm, ContentCandidateOrm, ContentEmbeddingOrm, ContentItemOrm
+from postbridge.models.domain import (
+    ChannelOrm,
+    ContentCandidateOrm,
+    ContentEmbeddingOrm,
+    ContentItemOrm,
+    PublicationPlanOrm,
+    PublicationTargetOrm,
+)
 
 
+logger = logging.getLogger(__name__)
+
+
+def search_content_knowledge(
+    session: Session,
+    *,
+    tenant_id: str,
+    query: str,
+    channel_ids: list[str] | None = None,
+    limit: int = 8,
+    semantic_enabled: bool = True,
+) -> dict[str, object]:
+    normalized_query = query.strip()
+    if not normalized_query:
+        raise ValidationError(
+            code="VALIDATION_QUERY_REQUIRED",
+            message="query is required",
+            details={},
+        )
+    result_limit = max(1, min(20, int(limit or 8)))
+    channels = _channels_for_tenant(
+        session,
+        tenant_id=tenant_id,
+        channel_id=None,
+        limit=500,
+    )
+    available_channel_ids = {row.id for row in channels}
+    selected_channel_ids = list(
+        dict.fromkeys(
+            sorted(available_channel_ids) if channel_ids is None else channel_ids
+        )
+    )
+    missing = sorted(set(selected_channel_ids) - available_channel_ids)
+    if missing:
+        raise ValidationError(
+            code="VALIDATION_CHANNEL_NOT_FOUND",
+            message="channel not found",
+            details={"channel_ids": missing},
+        )
+
+    semantic_matches: dict[str, dict[str, object]] = {}
+    token_usage: dict[str, object] = {}
+    semantic_available = False
+    if semantic_enabled and selected_channel_ids:
+        try:
+            provider, _embedding_model = _resolve_embedding_provider(
+                session, tenant_id=tenant_id
+            )
+            vector, raw_usage = provider.invoke_embedding(text=normalized_query)
+            token_usage = dict(raw_usage) if isinstance(raw_usage, dict) else {}
+            semantic_available = True
+            per_channel_limit = max(result_limit * 3, 20)
+            for channel_id in selected_channel_ids:
+                for match in find_similar_embeddings(
+                    session,
+                    tenant_id=tenant_id,
+                    channel_id=channel_id,
+                    vector=vector,
+                    entity_type="content_item",
+                    top_k=per_channel_limit,
+                ):
+                    entity_id = str(match.get("entity_id") or "")
+                    if not entity_id:
+                        continue
+                    score = float(match.get("score") or 0.0)
+                    current = semantic_matches.get(entity_id)
+                    if current is None or score > float(current["score"]):
+                        semantic_matches[entity_id] = {
+                            "score": score,
+                            "channel_id": channel_id,
+                        }
+        except Exception as exc:
+            logger.warning(
+                "Semantic knowledge search unavailable tenant_id=%s error=%s",
+                tenant_id,
+                type(exc).__name__,
+            )
+
+    embedding_corpus_rows = session.execute(
+        select(ContentEmbeddingOrm.entity_id, ContentEmbeddingOrm.channel_id).where(
+            ContentEmbeddingOrm.tenant_id == tenant_id,
+            ContentEmbeddingOrm.entity_type == "content_item",
+            ContentEmbeddingOrm.channel_id.in_(selected_channel_ids),
+        )
+    ).all()
+    publication_corpus_rows = session.execute(
+        select(
+            PublicationPlanOrm.content_item_id,
+            PublicationTargetOrm.channel_id,
+        )
+        .join(
+            PublicationTargetOrm,
+            PublicationTargetOrm.publication_plan_id == PublicationPlanOrm.id,
+        )
+        .where(
+            PublicationPlanOrm.tenant_id == tenant_id,
+            PublicationTargetOrm.channel_id.in_(selected_channel_ids),
+        )
+    ).all()
+    corpus_channel_by_entity: dict[str, str] = {}
+    for entity_id, channel_id in [*embedding_corpus_rows, *publication_corpus_rows]:
+        if entity_id not in corpus_channel_by_entity:
+            corpus_channel_by_entity[str(entity_id)] = str(channel_id)
+    corpus_ids = set(corpus_channel_by_entity)
+    rows = (
+        list(
+            session.scalars(
+                select(ContentItemOrm)
+                .where(
+                    ContentItemOrm.tenant_id == tenant_id,
+                    ContentItemOrm.id.in_(corpus_ids),
+                )
+                .order_by(ContentItemOrm.updated_at.desc())
+                .limit(500)
+            ).all()
+        )
+        if corpus_ids
+        else []
+    )
+    query_fingerprint = fingerprint_text(normalized_query)
+    ranked: list[dict[str, object]] = []
+    for row in rows:
+        text = _content_embedding_text(row)
+        keyword_score = jaccard_similarity(
+            query_fingerprint, fingerprint_text(text)
+        )
+        semantic = semantic_matches.get(row.id)
+        semantic_score = float(semantic["score"]) if semantic else 0.0
+        score = max(semantic_score, keyword_score)
+        if score <= 0:
+            continue
+        match_type = (
+            "hybrid"
+            if semantic_score > 0 and keyword_score > 0
+            else ("semantic" if semantic_score > 0 else "keyword")
+        )
+        ranked.append(
+            {
+                "content_item_id": row.id,
+                "channel_id": (
+                    semantic.get("channel_id")
+                    if semantic
+                    else corpus_channel_by_entity.get(row.id)
+                ),
+                "status": row.status,
+                "title": row.title,
+                "snippet": " ".join((row.body_markdown or "").split())[:1600],
+                "score": round(score, 6),
+                "semantic_score": round(semantic_score, 6),
+                "keyword_score": round(keyword_score, 6),
+                "match_type": match_type,
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+            }
+        )
+    ranked.sort(
+        key=lambda item: (float(item["score"]), str(item.get("updated_at") or "")),
+        reverse=True,
+    )
+    items = ranked[:result_limit]
+    has_semantic = any(float(item["semantic_score"]) > 0 for item in items)
+    has_keyword = any(float(item["keyword_score"]) > 0 for item in items)
+    retrieval_mode = (
+        "hybrid"
+        if has_semantic and has_keyword
+        else ("semantic" if has_semantic else "keyword")
+    )
+    return {
+        "query": normalized_query,
+        "retrieval_mode": retrieval_mode,
+        "semantic_available": semantic_available,
+        "channel_ids": selected_channel_ids,
+        "items": items,
+        "token_usage": token_usage,
+    }
 def reindex_channel_content_embeddings(
     session: Session,
     *,

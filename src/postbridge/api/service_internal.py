@@ -496,6 +496,8 @@ class ServicePublicationCreate(BaseModel):
     core_channel_ids: list[str] = Field(min_length=1)
     title: str | None = Field(default=None, max_length=512)
     body_markdown: str | None = None
+    media_url: str | None = Field(default=None, max_length=2048)
+    media_urls: list[str] | None = None
     author_user_id: str | None = Field(default=None, max_length=64)
     dispatch: bool = False
 
@@ -515,6 +517,8 @@ def create_service_publication(
         author_user_id=body.author_user_id,
         title=body.title,
         body_markdown=body.body_markdown,
+        media_url=body.media_url,
+        media_urls=body.media_urls,
         content_status="ready",
         plan_strategy="immediate",
         plan_status="scheduled",

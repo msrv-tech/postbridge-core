@@ -40,6 +40,7 @@ from postbridge.agent.providers.openai_compatible import OpenAICompatibleProvide
 from postbridge.agent.policies import AutonomyPolicy, evaluate_policy_guardrails  # noqa: E402
 from postbridge.services.ai_image_generation import ImageGenerationResult  # noqa: E402
 from postbridge.agent.vector_store import get_vector_store  # noqa: E402
+from postbridge.agent.embeddings import search_content_knowledge  # noqa: E402
 from postbridge.db import Base, ENGINE, SESSION_LOCAL, init_db  # noqa: E402
 from postbridge.models.domain import (
     AgentRunOrm,
@@ -324,6 +325,116 @@ def test_search_similar_publications_finds_source_and_headline_matches():
 
     assert result["high_confidence_duplicate"] is True
     assert {item["match_type"] for item in result["matches"]} >= {"source_url", "headline_exact"}
+    session.close()
+
+
+def test_search_content_knowledge_combines_semantic_and_keyword_results(monkeypatch):
+    from postbridge.agent import embeddings
+
+    class FakeEmbeddingProvider:
+        def invoke_embedding(self, *, text: str):
+            assert text == "city bridge reconstruction"
+            return [1.0, 0.0], {"total_tokens": 4}
+
+    session = SESSION_LOCAL()
+    content_id = str(uuid4())
+    session.add(
+        ContentItemOrm(
+            id=content_id,
+            tenant_id=TENANT,
+            source_type="agent",
+            title="City bridge reconstruction",
+            body_markdown="The bridge reopened after a complete reconstruction.",
+            status="published",
+        )
+    )
+    session.add(
+        ContentEmbeddingOrm(
+            id=str(uuid4()),
+            tenant_id=TENANT,
+            channel_id=CHANNEL,
+            entity_type="content_item",
+            entity_id=content_id,
+            model_name="embedding-test",
+            vector_json="[1.0, 0.0]",
+            text_hash="bridge city reconstruction",
+        )
+    )
+    session.commit()
+    monkeypatch.setattr(
+        embeddings,
+        "_resolve_embedding_provider",
+        lambda _session, *, tenant_id: (FakeEmbeddingProvider(), "embedding-test"),
+    )
+    monkeypatch.setattr(
+        embeddings,
+        "find_similar_embeddings",
+        lambda *_args, **_kwargs: [
+            {"entity_id": content_id, "score": 0.93, "model_name": "embedding-test"}
+        ],
+    )
+
+    result = search_content_knowledge(
+        session,
+        tenant_id=TENANT,
+        query="city bridge reconstruction",
+        channel_ids=[CHANNEL],
+        limit=5,
+    )
+
+    assert result["retrieval_mode"] == "hybrid"
+    assert result["semantic_available"] is True
+    assert result["token_usage"] == {"total_tokens": 4}
+    assert result["items"][0]["content_item_id"] == content_id
+    assert result["items"][0]["semantic_score"] == 0.93
+    assert "bridge reopened" in result["items"][0]["snippet"]
+
+    keyword_result = search_content_knowledge(
+        session,
+        tenant_id=TENANT,
+        query="city bridge reconstruction",
+        channel_ids=[CHANNEL],
+        limit=5,
+        semantic_enabled=False,
+    )
+    assert keyword_result["retrieval_mode"] == "keyword"
+    assert keyword_result["items"][0]["channel_id"] == CHANNEL
+    session.close()
+
+
+def test_search_content_knowledge_does_not_expand_empty_channel_scope(monkeypatch):
+    from postbridge.agent import embeddings
+
+    session = SESSION_LOCAL()
+    session.add(
+        ContentItemOrm(
+            id=str(uuid4()),
+            tenant_id=TENANT,
+            source_type="agent",
+            title="Private unindexed draft",
+            body_markdown="This content is not attached to an allowed channel.",
+            status="draft",
+        )
+    )
+    session.commit()
+    monkeypatch.setattr(
+        embeddings,
+        "_resolve_embedding_provider",
+        lambda *_args, **_kwargs: pytest.fail("embedding must stay disabled"),
+    )
+
+    result = search_content_knowledge(
+        session,
+        tenant_id=TENANT,
+        query="private unindexed draft",
+        channel_ids=[],
+        semantic_enabled=False,
+    )
+
+    assert result["channel_ids"] == []
+    assert result["semantic_available"] is False
+    assert result["items"] == []
+    assert result["token_usage"] == {}
     session.close()
 
 

@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from postbridge.db import Base, ENGINE, BatchImportRunOrm, init_db  # noqa: E402
-from postbridge.models.domain import ChannelOrm, TenantOrm  # noqa: E402
+from postbridge.models.domain import ChannelOrm, ContentItemOrm, TenantOrm  # noqa: E402
 from postbridge.services.ai_image_generation import build_post_image_prompt  # noqa: E402
 
 
@@ -115,6 +115,8 @@ def test_ensure_tenant_and_channel_and_publication(client: TestClient):
             "core_channel_ids": [ch_id],
             "title": "Hi",
             "body_markdown": "Body",
+            "media_url": "https://cdn.example.test/cover.png",
+            "media_urls": ["https://cdn.example.test/cover.png"],
             "dispatch": False,
         },
         headers=h,
@@ -122,6 +124,14 @@ def test_ensure_tenant_and_channel_and_publication(client: TestClient):
     assert r3.status_code == 200
     body = r3.json()
     assert len(body["publication_target_ids"]) == 1
+    session = __import__("postbridge.db", fromlist=["SESSION_LOCAL"]).SESSION_LOCAL()
+    try:
+        content = session.get(ContentItemOrm, body["content_item_id"])
+        assert content is not None
+        assert content.media_url == "https://cdn.example.test/cover.png"
+        assert content.media_urls == ["https://cdn.example.test/cover.png"]
+    finally:
+        session.close()
 
     tid_target = body["publication_target_ids"][0]
     r4 = client.get(f"/internal/service/publication-targets/{tid_target}", headers=h)
