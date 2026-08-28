@@ -30,6 +30,39 @@ from postbridge.models.domain import (
 
 logger = logging.getLogger(__name__)
 
+KNOWLEDGE_SEARCH_CORPUS_ROW_LIMIT = 500
+
+
+def _content_items_for_knowledge_ranking(
+    session: Session,
+    *,
+    tenant_id: str,
+    corpus_ids: set[str],
+    semantic_entity_ids: set[str],
+) -> list[ContentItemOrm]:
+    rows_by_id: dict[str, ContentItemOrm] = {}
+    if semantic_entity_ids:
+        for row in session.scalars(
+            select(ContentItemOrm).where(
+                ContentItemOrm.tenant_id == tenant_id,
+                ContentItemOrm.id.in_(semantic_entity_ids),
+            )
+        ).all():
+            rows_by_id[row.id] = row
+    keyword_ids = corpus_ids - set(rows_by_id)
+    if keyword_ids:
+        for row in session.scalars(
+            select(ContentItemOrm)
+            .where(
+                ContentItemOrm.tenant_id == tenant_id,
+                ContentItemOrm.id.in_(keyword_ids),
+            )
+            .order_by(ContentItemOrm.updated_at.desc())
+            .limit(KNOWLEDGE_SEARCH_CORPUS_ROW_LIMIT)
+        ).all():
+            rows_by_id.setdefault(row.id, row)
+    return list(rows_by_id.values())
+
 
 def search_content_knowledge(
     session: Session,
@@ -133,18 +166,13 @@ def search_content_knowledge(
             corpus_channel_by_entity[str(entity_id)] = str(channel_id)
     corpus_ids = set(corpus_channel_by_entity)
     rows = (
-        list(
-            session.scalars(
-                select(ContentItemOrm)
-                .where(
-                    ContentItemOrm.tenant_id == tenant_id,
-                    ContentItemOrm.id.in_(corpus_ids),
-                )
-                .order_by(ContentItemOrm.updated_at.desc())
-                .limit(500)
-            ).all()
+        _content_items_for_knowledge_ranking(
+            session,
+            tenant_id=tenant_id,
+            corpus_ids=corpus_ids,
+            semantic_entity_ids=set(semantic_matches),
         )
-        if corpus_ids
+        if corpus_ids or semantic_matches
         else []
     )
     query_fingerprint = fingerprint_text(normalized_query)
