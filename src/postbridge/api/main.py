@@ -306,6 +306,7 @@ _ROOT_FRONTEND_ROUTE_PREFIXES = (
     "admin",
     "agents",
     "cases",
+    "dashboard",
     "data-deletion",
     "home",
     "login",
@@ -320,6 +321,7 @@ _ROOT_FRONTEND_ROUTE_PREFIXES = (
 
 _ROOT_FRONTEND_NOINDEX_PREFIXES = (
     "admin",
+    "dashboard",
     "home",
     "login",
     "settings",

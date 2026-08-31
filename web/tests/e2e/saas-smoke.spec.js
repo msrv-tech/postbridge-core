@@ -64,7 +64,13 @@ async function mockSaasBff(page, calls = []) {
     }
     if (path === '/auth/providers') {
       calls.push({ path, method })
-      return json({ providers: [{ id: 'email', label: 'Email' }, { id: 'telegram', label: 'Telegram' }] })
+      return json({
+        providers: [
+          { id: 'yandex', label: 'Yandex', type: 'oauth', start_url: '/auth/yandex/start' },
+          { id: 'email', label: 'Email', type: 'magic_code' },
+          { id: 'telegram', label: 'Telegram', type: 'deep_link' },
+        ],
+      })
     }
     if (path === '/me') {
       calls.push({ path, method, authorization: request.headers().authorization || '' })
@@ -217,6 +223,34 @@ test('returns an OAuth provider login to the server-side consent endpoint', asyn
 
   await expect(page).toHaveURL(new RegExp(`${returnTo.replace(/[?]/g, '\\?')}$`))
   await expect(page.getByRole('heading', { name: 'OAuth consent reached' })).toBeVisible()
+})
+
+test('renders the configured Yandex login provider', async ({ page }) => {
+  await mockSaasBff(page)
+
+  await page.goto('/login')
+
+  const yandexLogin = page.locator('a[href="/auth/yandex/start"]')
+  await expect(yandexLogin).toBeVisible()
+  await expect(yandexLogin).toContainText('Yandex')
+})
+
+test('accepts a legacy OAuth callback token on the dashboard route', async ({ page }) => {
+  const calls = []
+  await mockSaasBff(page, calls)
+
+  await page.goto('/dashboard#token=oauth-session-token')
+
+  await expect(page).toHaveURL(/\/workspaces\/ws-1\/content$/)
+  await expect(page.getByRole('heading', { name: 'Content' })).toBeVisible()
+  await expect
+    .poll(() => page.evaluate(() => window.localStorage.getItem('postbridge_token')))
+    .toBe('oauth-session-token')
+  expect(calls).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ path: '/me', method: 'GET', authorization: 'Bearer oauth-session-token' }),
+    ]),
+  )
 })
 
 test('keeps SaaS public marketing surfaces at root', async ({ page }) => {

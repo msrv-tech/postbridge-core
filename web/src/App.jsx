@@ -200,6 +200,7 @@ export default function App() {
       <Suspense fallback={<LoadingSkeleton />}>
         <Routes>
           <Route path="/" element={<HomeRoute />} />
+          <Route path="/dashboard" element={<HomeRoute />} />
           <Route path="/setup" element={<SelfhostSetup />} />
           <Route path="/home" element={<Home />} />
           <Route path="/news" element={isSelfhostMode() ? <Navigate to="/" replace /> : <News />} />

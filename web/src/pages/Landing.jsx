@@ -40,6 +40,13 @@ function AuthProviderLogo({ provider }) {
       </span>
     )
   }
+  if (provider === 'yandex') {
+    return (
+      <span className="auth-provider-logo auth-provider-logo-yandex" aria-hidden="true">
+        Я
+      </span>
+    )
+  }
   if (provider === 'linkedin') {
     return (
       <span className="auth-provider-logo auth-provider-logo-linkedin" aria-hidden="true">
@@ -211,10 +218,14 @@ export default function Landing() {
 
   useEffect(() => {
     const vkErr = searchParams.get('vk_oauth_error')
+    const yandexErr = searchParams.get('yandex_oauth_error')
     const googleErr = searchParams.get('google_oauth_error')
     const linkedinErr = searchParams.get('linkedin_oauth_error')
     if (vkErr) {
       setError(t('login.vk.error', { error: vkErr }))
+      setSearchParams({}, { replace: true })
+    } else if (yandexErr) {
+      setError(t('login.yandex.error', { error: yandexErr }))
       setSearchParams({}, { replace: true })
     } else if (googleErr) {
       setError(t('login.google.error', { error: googleErr }))
@@ -324,6 +335,16 @@ export default function Landing() {
               >
                 <AuthProviderLogo provider="vk" />
                 {t('login.vk')}
+              </a>
+            )}
+            {providerEnabled('yandex') && (
+              <a
+                href="/auth/yandex/start"
+                className="btn btn-outline btn-block auth-provider-button auth-provider-button-spaced"
+                onClick={() => reachMetrikaGoal('auth_started', { method: 'yandex' })}
+              >
+                <AuthProviderLogo provider="yandex" />
+                {t('login.yandex')}
               </a>
             )}
             {providerEnabled('email') && (

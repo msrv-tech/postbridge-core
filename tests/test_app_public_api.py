@@ -158,6 +158,7 @@ def test_hosted_frontend_returns_real_404_and_noindexes_private_routes(monkeypat
     root = client.get("/")
     missing = client.get("/definitely-not-a-postbridge-route")
     login = client.get("/login")
+    dashboard = client.get("/dashboard")
     workspace = client.get("/workspaces/ws-1/content")
 
     assert root.status_code == 200
@@ -169,6 +170,8 @@ def test_hosted_frontend_returns_real_404_and_noindexes_private_routes(monkeypat
     assert missing.headers["x-robots-tag"] == "noindex, nofollow"
     assert login.status_code == 200
     assert login.headers["x-robots-tag"] == "noindex, nofollow"
+    assert dashboard.status_code == 200
+    assert dashboard.headers["x-robots-tag"] == "noindex, nofollow"
     assert workspace.status_code == 200
     assert workspace.headers["x-robots-tag"] == "noindex, nofollow"
 
