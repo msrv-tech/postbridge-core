@@ -335,15 +335,16 @@ select {
 
 .platform-showcase {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
   gap: 0.9rem;
   margin-top: 1.5rem;
 }
 
 .platform-showcase-item {
-  display: grid;
-  gap: 0.75rem;
-  min-height: 11.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-height: 5rem;
   padding: 1rem;
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 8px;
@@ -351,15 +352,9 @@ select {
   box-shadow: 0 14px 34px rgba(2, 8, 23, 0.18);
 }
 
-.platform-showcase-topline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
 .platform-glyph {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   width: 2.25rem;
@@ -372,29 +367,9 @@ select {
   text-transform: uppercase;
 }
 
-.platform-status {
-  display: inline-flex;
-  align-items: center;
-  min-height: 1.65rem;
-  padding: 0.2rem 0.55rem;
-  border: 1px solid rgba(125, 211, 252, 0.2);
-  border-radius: 999px;
-  background: rgba(14, 165, 233, 0.1);
-  color: #bae6fd;
-  font-size: 0.76rem;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
 .platform-showcase-item h3 {
   margin: 0;
   font-size: 1.15rem;
-}
-
-.platform-showcase-item p {
-  margin: 0;
-  color: var(--text-muted);
-  line-height: 1.55;
 }
 
 .platform-glyph-telegram { background: #0088cc; }
@@ -4019,17 +3994,6 @@ textarea:focus {
   border-color: rgba(148, 163, 184, 0.24);
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 14px 32px rgba(15, 23, 42, 0.08);
-}
-
-[data-theme='light'] .platform-status {
-  border-color: rgba(14, 165, 233, 0.18);
-  background: rgba(224, 242, 254, 0.72);
-  color: #0369a1;
-}
-
-[data-theme='light'] .platform-glyph-postbridge {
-  background: #0f172a;
-  color: #fff;
 }
 
 [data-theme='light'] .bridge-scenario {

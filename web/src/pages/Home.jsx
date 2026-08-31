@@ -54,56 +54,26 @@ function getSupportedPlatforms(t, region) {
       {
         key: 'telegram',
         name: t('platform.telegram'),
-        status: t('home.platforms.status.live'),
-        detail: t('home.platforms.io.telegram'),
       },
       {
         key: 'linkedin',
         name: t('platform.linkedin'),
-        status: t('home.platforms.status.live'),
-        detail: t('home.platforms.io.linkedin'),
       },
       {
         key: 'x',
         name: t('platform.x'),
-        status: t('home.platforms.status.live'),
-        detail: t('home.platforms.io.x'),
-      },
-      {
-        key: 'facebook',
-        name: t('platform.facebook'),
-        status: t('home.platforms.status.review'),
-        detail: t('home.platforms.io.facebook'),
-      },
-      {
-        key: 'instagram',
-        name: t('platform.instagram'),
-        status: t('home.platforms.status.review'),
-        detail: t('home.platforms.io.instagram'),
       },
       {
         key: 'bluesky',
         name: t('platform.bluesky'),
-        status: t('home.platforms.status.live'),
-        detail: t('home.platforms.io.bluesky'),
       },
       {
         key: 'mastodon',
         name: t('platform.mastodon'),
-        status: t('home.platforms.status.live'),
-        detail: t('home.platforms.io.mastodon'),
       },
       {
         key: 'rss',
         name: t('platform.rss'),
-        status: t('home.platforms.status.live'),
-        detail: t('home.platforms.io.rss'),
-      },
-      {
-        key: 'postbridge',
-        name: t('platform.postbridge'),
-        status: t('home.platforms.status.live'),
-        detail: t('home.platforms.io.postbridge'),
       },
     ]
   }
@@ -112,38 +82,18 @@ function getSupportedPlatforms(t, region) {
     {
       key: 'telegram',
       name: t('platform.telegram'),
-      status: t('home.platforms.status.live'),
-      detail: t('home.platforms.ru.telegram'),
     },
     {
       key: 'vk',
       name: t('platform.vk'),
-      status: t('home.platforms.status.live'),
-      detail: t('home.platforms.ru.vk'),
     },
     {
       key: 'max',
       name: t('platform.max'),
-      status: t('home.platforms.status.live'),
-      detail: t('home.platforms.ru.max'),
     },
     {
       key: 'rss',
       name: t('platform.rss'),
-      status: t('home.platforms.status.live'),
-      detail: t('home.platforms.ru.rss'),
-    },
-    {
-      key: 'postbridge',
-      name: t('platform.postbridge'),
-      status: t('home.platforms.status.live'),
-      detail: t('home.platforms.ru.postbridge'),
-    },
-    {
-      key: 'zen',
-      name: t('home.platforms.ru.zenName'),
-      status: t('home.platforms.status.import'),
-      detail: t('home.platforms.ru.zen'),
     },
   ]
 }
@@ -204,8 +154,8 @@ function getPlatformBridgeExamples(t, region) {
     return [
       { from: t('platform.telegram'), to: t('platform.x'), fromKey: 'telegram', toKey: 'x', label: t('home.bridge.direct.telegramToX') },
       { from: 'RSS', to: t('platform.linkedin'), fromKey: 'rss', toKey: 'linkedin', label: t('home.bridge.direct.rssToLinkedin') },
-      { from: 'RSS', to: t('platform.facebook'), fromKey: 'rss', toKey: 'facebook', label: t('home.bridge.direct.rssToFacebook') },
-      { from: 'RSS', to: t('platform.instagram'), fromKey: 'rss', toKey: 'instagram', label: t('home.bridge.direct.rssToInstagram') },
+      { from: 'RSS', to: t('platform.bluesky'), fromKey: 'rss', toKey: 'bluesky', label: t('home.bridge.direct.rssToBluesky') },
+      { from: 'RSS', to: t('platform.mastodon'), fromKey: 'rss', toKey: 'mastodon', label: t('home.bridge.direct.rssToMastodon') },
     ]
   }
 
@@ -387,21 +337,14 @@ export default function Home() {
           <div className="section-heading">
             <span className="eyebrow">{t('home.platforms.eyebrow')}</span>
             <h2>{t(getRegionalKey(landingRegion, 'home.platforms.title'))}</h2>
-            <p className="section-copy">
-              {t(getRegionalKey(landingRegion, 'home.platforms.text'))}
-            </p>
           </div>
           <div className="platform-showcase" aria-label={t('home.platforms.aria')}>
             {supportedPlatforms.map((platform) => (
               <article className={`platform-showcase-item platform-showcase-item-${platform.key}`} key={platform.key}>
-                <div className="platform-showcase-topline">
-                  <span className={`platform-glyph platform-glyph-${platform.key}`} aria-hidden>
-                    {platform.name.slice(0, 2)}
-                  </span>
-                  <span className="platform-status">{platform.status}</span>
-                </div>
+                <span className={`platform-glyph platform-glyph-${platform.key}`} aria-hidden>
+                  {platform.name.slice(0, 2)}
+                </span>
                 <h3>{platform.name}</h3>
-                <p>{platform.detail}</p>
               </article>
             ))}
           </div>
