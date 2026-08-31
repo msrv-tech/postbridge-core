@@ -144,6 +144,10 @@ function RedirectAiCanvasToEditor() {
   return <Navigate to={`/workspaces/${workspaceId}/content/new`} replace />;
 }
 
+function PlatformsRedirect() {
+  return <Navigate to="/home#platforms" replace />;
+}
+
 function ConnectVkLegacyRedirect() {
   const { workspaceId } = useParams();
   return <Navigate to={`/workspaces/${workspaceId}/channels`} replace />;
@@ -203,6 +207,7 @@ export default function App() {
           <Route path="/dashboard" element={<HomeRoute />} />
           <Route path="/setup" element={<SelfhostSetup />} />
           <Route path="/home" element={<Home />} />
+          <Route path="/platforms" element={<PlatformsRedirect />} />
           <Route path="/news" element={isSelfhostMode() ? <Navigate to="/" replace /> : <News />} />
           <Route path="/news/:slug" element={isSelfhostMode() ? <Navigate to="/" replace /> : <NewsDetail />} />
           <Route path="/cases/:slug" element={<CaseLanding />} />
