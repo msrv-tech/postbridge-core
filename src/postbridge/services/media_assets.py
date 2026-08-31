@@ -8,7 +8,10 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from postbridge.domain.errors import ValidationError
-from postbridge.infrastructure.media_storage import upload_media_object
+from postbridge.infrastructure.media_storage import (
+    delete_media_object,
+    upload_media_object,
+)
 from postbridge.models.domain import MediaAssetOrm, TenantOrm
 
 
@@ -74,3 +77,25 @@ def store_media_asset(
     )
     session.commit()
     return {"media_asset_id": asset_id, "url": url}
+
+
+def delete_media_asset(session: Session, *, tenant_id: str, media_asset_id: str) -> None:
+    row = session.get(MediaAssetOrm, media_asset_id)
+    if row is None or row.tenant_id != tenant_id:
+        raise ValidationError(
+            code="VALIDATION_MEDIA_ASSET_NOT_FOUND",
+            message="media asset not found",
+            message_key="error.validation.media_asset_not_found",
+            details={"media_asset_id": media_asset_id},
+        )
+    try:
+        delete_media_object(row.object_key)
+    except RuntimeError as exc:
+        raise ValidationError(
+            code="MEDIA_STORAGE_NOT_CONFIGURED",
+            message=str(exc),
+            message_key="error.validation.media_storage_not_configured",
+            details={},
+        ) from exc
+    session.delete(row)
+    session.commit()

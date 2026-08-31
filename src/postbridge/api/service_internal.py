@@ -71,7 +71,7 @@ from postbridge.services.postbridge_workspace_content import (
     list_postbridge_content_items,
     update_postbridge_content_item,
 )
-from postbridge.services.media_assets import store_media_asset
+from postbridge.services.media_assets import delete_media_asset, store_media_asset
 from postbridge.services.publication_planning import create_content_with_plan_and_targets
 from postbridge.storage.batch_import_run_store import BatchImportRunStore
 from postbridge.workers.tasks import process_batch_import_run_task, process_publication_target_task
@@ -1418,6 +1418,24 @@ async def service_upload_media(
         data=data,
         content_type=file.content_type or "",
     )
+
+
+@router.delete(
+    "/internal/service/media/{media_asset_id}",
+    status_code=204,
+    include_in_schema=False,
+)
+def service_delete_media(
+    media_asset_id: str,
+    tenant_id: str = Depends(require_service_tenant),
+    session: Session = Depends(get_db_session),
+) -> Response:
+    delete_media_asset(
+        session,
+        tenant_id=tenant_id,
+        media_asset_id=media_asset_id,
+    )
+    return Response(status_code=204)
 
 
 @router.post("/internal/service/media/generate", include_in_schema=False)

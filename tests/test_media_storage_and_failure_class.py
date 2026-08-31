@@ -26,6 +26,10 @@ def test_upload_media_object_local(tmp_path, monkeypatch: pytest.MonkeyPatch) ->
     assert url == "https://cdn.test/media/folder/file%20name.txt"
     assert (tmp_path / "folder/file name.txt").read_bytes() == b"data"
 
+    media_storage.delete_media_object("folder/file name.txt")
+
+    assert not (tmp_path / "folder/file name.txt").exists()
+
 
 def test_upload_media_object_requires_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(media_storage, "get_settings", lambda: SimpleNamespace(media_storage_type="none"))
@@ -53,6 +57,9 @@ def test_upload_media_object_s3_public_and_presigned(monkeypatch: pytest.MonkeyP
 
         def generate_presigned_url(self, action: str, **kwargs: object) -> str:
             return f"https://signed.test/{action}"
+
+        def delete_object(self, **kwargs: object) -> None:
+            calls.append(kwargs)
 
     boto3 = ModuleType("boto3")
     boto3.client = lambda *args, **kwargs: Client()  # type: ignore[attr-defined]
@@ -84,6 +91,10 @@ def test_upload_media_object_s3_public_and_presigned(monkeypatch: pytest.MonkeyP
     settings.s3_public_base_url = ""
     assert media_storage._upload_s3("key", b"data", "", settings) == "https://signed.test/get_object"
     assert "ContentType" not in calls[-1]
+
+    media_storage._delete_s3("key", settings)
+
+    assert calls[-1] == {"Bucket": "bucket", "Key": "key"}
 
 
 @pytest.mark.parametrize(

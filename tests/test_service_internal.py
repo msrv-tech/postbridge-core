@@ -176,7 +176,37 @@ def test_service_media_upload_local(client: TestClient, tmp_path, monkeypatch: p
     body = r.json()
     assert body["media_asset_id"]
     assert body["url"].startswith("http://testserver/media/")
-    assert (tmp_path / f"tenants/{tid}/media/{body['media_asset_id']}.png").is_file()
+    stored_path = tmp_path / f"tenants/{tid}/media/{body['media_asset_id']}.png"
+    assert stored_path.is_file()
+
+    other_tid = str(uuid4())
+    other_headers = _headers(other_tid)
+    client.post(
+        "/internal/service/tenants/ensure",
+        json={"name": "Other"},
+        headers=other_headers,
+    )
+    wrong_tenant = client.delete(
+        f"/internal/service/media/{body['media_asset_id']}",
+        headers=other_headers,
+    )
+    assert wrong_tenant.status_code == 422
+    assert wrong_tenant.json()["code"] == "VALIDATION_MEDIA_ASSET_NOT_FOUND"
+    assert stored_path.is_file()
+
+    deleted = client.delete(
+        f"/internal/service/media/{body['media_asset_id']}",
+        headers=h,
+    )
+    assert deleted.status_code == 204, deleted.text
+    assert not stored_path.exists()
+
+    repeated = client.delete(
+        f"/internal/service/media/{body['media_asset_id']}",
+        headers=h,
+    )
+    assert repeated.status_code == 422
+    assert repeated.json()["code"] == "VALIDATION_MEDIA_ASSET_NOT_FOUND"
 
 
 def test_post_image_prompt_combines_style_request_and_post_context():
