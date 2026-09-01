@@ -3,6 +3,13 @@ import { Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { updateCurrentUser } from '../adapters/account'
 import { getWorkspaceAgentPolicy, upsertWorkspaceAgentPolicy } from '../adapters/agent'
 import { getDashboardSummary } from '../adapters/dashboard'
+import {
+  createWorkspaceExternalAppInstallIntent,
+  getWorkspaceExternalAppConnection,
+  listWorkspaceExternalAppInstallations,
+  listWorkspaceExternalApps,
+  revokeWorkspaceExternalAppInstallation,
+} from '../adapters/externalApps'
 import { dispatchPublicationTarget, listPublicationTargetProjections } from '../adapters/publicationTargets'
 import { isSelfhostMode } from '../adapters/runtime'
 import {
@@ -110,6 +117,15 @@ function normalizeWorkspaceSettings(settings) {
   }
 }
 
+function externalAppStatusLabel(status, t) {
+  if (status === 'ready_for_dev') return t('settings.ecosystemApps.status.readyForDev')
+  if (status === 'discovery') return t('settings.ecosystemApps.status.discovery')
+  if (status === 'planned') return t('settings.ecosystemApps.status.planned')
+  if (status === 'beta') return t('settings.ecosystemApps.status.beta')
+  if (status === 'available') return t('settings.ecosystemApps.status.available')
+  return status || '—'
+}
+
 function getTimezoneMarket() {
   const configured = String(import.meta.env.VITE_POSTBRIDGE_PUBLIC_MARKET || '').trim().toLowerCase()
   if (configured === 'io' || configured === 'ru') return configured
@@ -167,6 +183,20 @@ export default function WorkspaceSettings() {
   const [updateCommandCopied, setUpdateCommandCopied] = useState(false)
   const [assistantHidden, setAssistantHiddenState] = useState(() => isSupportAssistantHidden(workspaceId))
   const [theme, setTheme] = useState(() => getStoredTheme())
+  const [externalApps, setExternalApps] = useState([])
+  const [externalAppsUsage, setExternalAppsUsage] = useState({
+    used: 0,
+    limit: null,
+  })
+  const [externalAppsLoading, setExternalAppsLoading] = useState(false)
+  const [externalAppsError, setExternalAppsError] = useState('')
+  const [externalAppConnection, setExternalAppConnection] = useState(null)
+  const [externalAppConnectingId, setExternalAppConnectingId] = useState('')
+  const [externalAppConnectionError, setExternalAppConnectionError] = useState('')
+  const [externalAppInstallations, setExternalAppInstallations] = useState([])
+  const [externalAppIntent, setExternalAppIntent] = useState(null)
+  const [externalAppInstallingId, setExternalAppInstallingId] = useState('')
+  const [externalAppRevokingId, setExternalAppRevokingId] = useState('')
 
   const preferredDomainsText = useMemo(
     () => (workspaceAgentPolicy.preferred_domains || []).join('\n'),
@@ -180,6 +210,7 @@ export default function WorkspaceSettings() {
   const aiTokenRemainder = buildAiTokenRemainder(billingSummary?.billing, t)
   const showAssistantSettings = Boolean(workspaceId) && !isSelfhostMode()
   const timezoneMarket = getTimezoneMarket()
+  const showEcosystemApps = Boolean(workspaceId) && !isSelfhostMode() && timezoneMarket === 'ru'
 
   const setLightThemeEnabled = useCallback((enabled) => {
     setTheme(setStoredTheme(enabled ? THEMES.light : THEMES.dark))
@@ -243,6 +274,30 @@ export default function WorkspaceSettings() {
   useEffect(() => {
     loadBillingSummary()
   }, [loadBillingSummary])
+
+  const loadExternalApps = useCallback(() => {
+    if (!showEcosystemApps || !workspaceId) return
+    setExternalAppsLoading(true)
+    setExternalAppsError('')
+    listWorkspaceExternalApps(workspaceId)
+      .then((response) => {
+        setExternalApps(response.items || [])
+        setExternalAppsUsage({
+          used: response.external_app_drafts_used_month ?? 0,
+          limit: response.external_app_drafts_limit_month ?? null,
+        })
+        return listWorkspaceExternalAppInstallations(workspaceId)
+      })
+      .then((response) => {
+        setExternalAppInstallations(response.items || [])
+      })
+      .catch((error) => setExternalAppsError(error.message || t('settings.ecosystemApps.loadFailed')))
+      .finally(() => setExternalAppsLoading(false))
+  }, [showEcosystemApps, t, workspaceId])
+
+  useEffect(() => {
+    loadExternalApps()
+  }, [loadExternalApps])
 
   const loadVersionCheck = useCallback(() => {
     if (!isSelfhostMode()) return
@@ -556,6 +611,45 @@ export default function WorkspaceSettings() {
     setBillingEmailModal(null)
   }
 
+  const handleExternalAppConnection = (appId) => {
+    if (!workspaceId || !appId) return
+    setExternalAppConnectingId(appId)
+    setExternalAppConnectionError('')
+    getWorkspaceExternalAppConnection(workspaceId, appId)
+      .then((connection) => setExternalAppConnection(connection))
+      .catch((error) => {
+        setExternalAppConnection(null)
+        setExternalAppConnectionError(error.message || t('settings.ecosystemApps.connectionFailed'))
+      })
+      .finally(() => setExternalAppConnectingId(''))
+  }
+
+  const handleExternalAppInstallIntent = (appId) => {
+    if (!workspaceId || !appId) return
+    setExternalAppInstallingId(appId)
+    setExternalAppConnectionError('')
+    createWorkspaceExternalAppInstallIntent(workspaceId, appId)
+      .then((intent) => setExternalAppIntent(intent))
+      .catch((error) => {
+        setExternalAppIntent(null)
+        setExternalAppConnectionError(error.message || t('settings.ecosystemApps.installFailed'))
+      })
+      .finally(() => setExternalAppInstallingId(''))
+  }
+
+  const handleExternalAppRevoke = (installationId) => {
+    if (!workspaceId || !installationId) return
+    setExternalAppRevokingId(installationId)
+    setExternalAppConnectionError('')
+    revokeWorkspaceExternalAppInstallation(workspaceId, installationId)
+      .then(() => listWorkspaceExternalAppInstallations(workspaceId))
+      .then((response) => setExternalAppInstallations(response.items || []))
+      .catch((error) => {
+        setExternalAppConnectionError(error.message || t('settings.ecosystemApps.revokeFailed'))
+      })
+      .finally(() => setExternalAppRevokingId(''))
+  }
+
   const executeSubscriptionCreate = async (plan, provider) => {
     if (!billingEnabled) return
     setTariffError('')
@@ -844,6 +938,209 @@ export default function WorkspaceSettings() {
                     {updateCommandCopied ? t('settings.updates.copied') : t('settings.updates.copyCommand')}
                   </button>
                 </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {showEcosystemApps && (
+        <div className="card" style={{ marginBottom: '1.5rem' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: '1rem',
+              flexWrap: 'wrap',
+            }}
+          >
+            <div>
+              <h3 className="h-small" style={{ marginTop: 0 }}>
+                {t('settings.ecosystemApps.title')}
+              </h3>
+              <p className="muted post-editor-hint">
+                {t('settings.ecosystemApps.text')}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-small"
+              onClick={loadExternalApps}
+              disabled={externalAppsLoading}
+            >
+              {externalAppsLoading ? t('common.loading') : t('common.refresh')}
+            </button>
+          </div>
+
+          {externalAppsError && <p className="error">{externalAppsError}</p>}
+          {externalAppConnectionError && <p className="error">{externalAppConnectionError}</p>}
+
+          {!externalAppsLoading && !externalAppsError && externalApps.length > 0 && (
+            <p className="muted post-editor-hint">
+              {t('settings.ecosystemApps.freeUsage', {
+                used: externalAppsUsage.used,
+                limit: externalAppsUsage.limit ?? t('settings.aiTokens.unlimited'),
+              })}
+            </p>
+          )}
+
+          {externalAppsLoading && <p className="muted">{t('common.loading')}</p>}
+          {!externalAppsLoading && !externalAppsError && (
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              {externalApps.map((app) => (
+                <div
+                  key={app.id}
+                  className="status-row"
+                  style={{ alignItems: 'flex-start', gap: '1rem' }}
+                >
+                  <div style={{ flex: '1 1 18rem' }}>
+                    <div className="app-header-actions" style={{ justifyContent: 'flex-start', gap: '0.5rem' }}>
+                      <strong>{app.display_name}</strong>
+                      <span className="plan-badge">
+                        {externalAppStatusLabel(app.status, t)}
+                      </span>
+                      {app.free_drafts_per_month > 0 && (
+                        <span className="plan-requested-badge">
+                          {t('settings.ecosystemApps.freeDrafts', { count: app.free_drafts_per_month })}
+                        </span>
+                      )}
+                      {app.requires_paid_plan && app.enabled_for_workspace === false && (
+                        <span className="plan-requested-badge">
+                          {t('settings.ecosystemApps.paidOnly')}
+                        </span>
+                      )}
+                    </div>
+                    <p className="muted post-editor-hint" style={{ marginBottom: 0 }}>
+                      {app.summary}
+                    </p>
+                    {app.mvp_actions?.length > 0 && (
+                      <p className="muted post-editor-hint" style={{ marginBottom: 0 }}>
+                        {t('settings.ecosystemApps.actions')}: {app.mvp_actions.slice(0, 5).join(', ')}
+                        {app.mvp_actions.length > 5 ? '...' : ''}
+                      </p>
+                    )}
+                  </div>
+                  <div className="toolbar" style={{ justifyContent: 'flex-end', marginTop: 0 }}>
+                    {app.documentation_url && (
+                      <a
+                        href={app.documentation_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn btn-secondary btn-small"
+                      >
+                        {t('settings.ecosystemApps.docs')}
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-small"
+                      onClick={() => handleExternalAppConnection(app.id)}
+                      disabled={externalAppConnectingId === app.id}
+                    >
+                      {externalAppConnectingId === app.id
+                        ? t('common.loading')
+                        : t('settings.ecosystemApps.connection')}
+                    </button>
+                    {!app.uses_postbridge_mcp && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={() => handleExternalAppInstallIntent(app.id)}
+                        disabled={externalAppInstallingId === app.id}
+                      >
+                        {externalAppInstallingId === app.id
+                          ? t('common.loading')
+                          : t('settings.ecosystemApps.createInstallIntent')}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {externalAppIntent && (
+            <div className="empty-state" style={{ marginTop: '1rem', padding: '1rem' }}>
+              <strong>{t('settings.ecosystemApps.installIntent')}</strong>
+              <p className="muted post-editor-hint" style={{ marginBottom: 0 }}>
+                {t('settings.ecosystemApps.callbackUrl')}: {externalAppIntent.postbridge_callback_url}
+              </p>
+              <p className="muted post-editor-hint" style={{ marginBottom: 0, wordBreak: 'break-all' }}>
+                state: {externalAppIntent.state}
+              </p>
+              {externalAppIntent.requested_scopes?.length > 0 && (
+                <p className="muted post-editor-hint" style={{ marginBottom: 0 }}>
+                  {t('settings.ecosystemApps.scopes')}: {externalAppIntent.requested_scopes.join(', ')}
+                </p>
+              )}
+            </div>
+          )}
+
+          {externalAppInstallations.length > 0 && (
+            <div style={{ marginTop: '1rem' }}>
+              <h4 className="h-small">{t('settings.ecosystemApps.installations')}</h4>
+              <div style={{ display: 'grid', gap: '0.5rem' }}>
+                {externalAppInstallations.map((installation) => (
+                  <div key={installation.id} className="status-row" style={{ gap: '1rem' }}>
+                    <div>
+                      <strong>{installation.external_account_name || installation.app_id}</strong>
+                      <p className="muted post-editor-hint" style={{ margin: 0 }}>
+                        {installation.app_id} · {installation.status}
+                      </p>
+                    </div>
+                    {installation.status !== 'revoked' && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={() => handleExternalAppRevoke(installation.id)}
+                        disabled={externalAppRevokingId === installation.id}
+                      >
+                        {externalAppRevokingId === installation.id
+                          ? t('common.loading')
+                          : t('settings.ecosystemApps.revoke')}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {externalAppConnection && (
+            <div className="empty-state" style={{ marginTop: '1rem', padding: '1rem' }}>
+              <div className="app-header-actions" style={{ justifyContent: 'space-between', gap: '1rem' }}>
+                <div>
+                  <strong>{externalAppConnection.manifest?.name || externalAppConnection.app_id}</strong>
+                <p className="muted post-editor-hint" style={{ margin: 0 }}>
+                  {t('settings.ecosystemApps.connectionType')}: {externalAppConnection.connection_type}
+                </p>
+                {externalAppConnection.external_app_drafts_limit_month && (
+                  <p className="muted post-editor-hint" style={{ margin: 0 }}>
+                    {t('settings.ecosystemApps.freeUsage', {
+                      used: externalAppConnection.external_app_drafts_used_month ?? 0,
+                      limit: externalAppConnection.external_app_drafts_limit_month,
+                    })}
+                  </p>
+                )}
+              </div>
+                {externalAppConnection.manifest?.mcp?.server_url && (
+                  <a
+                    className="btn btn-small"
+                    href={externalAppConnection.manifest.mcp.server_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {t('settings.ecosystemApps.openMcp')}
+                  </a>
+                )}
+              </div>
+              {externalAppConnection.next_steps?.length > 0 && (
+                <ol className="muted post-editor-hint" style={{ marginBottom: 0 }}>
+                  {externalAppConnection.next_steps.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
               )}
             </div>
           )}
