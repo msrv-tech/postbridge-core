@@ -11,7 +11,7 @@ import { useAuth } from './useAuth'
 import LoadingSkeleton from './components/LoadingSkeleton'
 import MiniAppAuthGate from './components/MiniAppAuthGate'
 import { setToken } from './adapters/sessionToken'
-import { consumeAuthReturnTo } from './adapters/authReturnTo'
+import { consumeAuthReturnTo, consumeOAuthCallbackExpected } from './adapters/authReturnTo'
 import { hitMetrika, reachMetrikaGoal } from './metrika'
 import { useI18n } from './i18n'
 
@@ -161,6 +161,8 @@ function MetrikaRouteTracker() {
   return null;
 }
 
+let oauthCallbackGateForLoad
+
 function OAuthTokenHandler({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -169,23 +171,31 @@ function OAuthTokenHandler({ children }) {
   // to the home page before useEffect can persist the token.
   const hash = window.location.hash || '';
   const tokenMatch = hash.match(/[#&]token=([^&]+)/);
-  if (tokenMatch) {
+  if (!tokenMatch) {
+    oauthCallbackGateForLoad = undefined;
+  } else if (oauthCallbackGateForLoad === undefined) {
+    oauthCallbackGateForLoad = consumeOAuthCallbackExpected();
+  }
+  const oauthExpected = Boolean(tokenMatch && oauthCallbackGateForLoad);
+  if (tokenMatch && oauthExpected) {
     setToken(tokenMatch[1]);
   }
-  const hadToken = !!tokenMatch;
+  const hadToken = oauthExpected;
   useEffect(() => {
-    if (hadToken && !handledTokenRef.current) {
+    if (tokenMatch && !handledTokenRef.current) {
       handledTokenRef.current = true;
-      const authReturnTo = consumeAuthReturnTo();
-      reachMetrikaGoal('auth_completed', { method: 'oauth_hash' });
       window.history.replaceState(null, '', location.pathname + location.search);
-      if (authReturnTo) {
-        window.location.replace(authReturnTo);
-      } else {
-        navigate('/', { replace: true });
+      if (hadToken) {
+        const authReturnTo = consumeAuthReturnTo();
+        reachMetrikaGoal('auth_completed', { method: 'oauth_hash' });
+        if (authReturnTo) {
+          window.location.replace(authReturnTo);
+        } else {
+          navigate('/', { replace: true });
+        }
       }
     }
-  }, [navigate, location.pathname, location.search, hadToken]);
+  }, [navigate, location.pathname, location.search, hadToken, tokenMatch]);
   return children;
 }
 

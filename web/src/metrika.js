@@ -34,10 +34,19 @@ export function initMetrika() {
   })
 }
 
+export function sanitizeMetrikaUrl(url) {
+  if (typeof url !== 'string' || !url.includes('token=')) {
+    return url
+  }
+  return url
+    .replace(/([#?&])token=[^&#]*/g, '$1token=[redacted]')
+    .replace(/[#?&]token=[^&#]*/g, '')
+}
+
 export function hitMetrika(url) {
   if (!canUseMetrika()) return
   initMetrika()
-  window.ym(METRIKA_COUNTER_ID, 'hit', url)
+  window.ym(METRIKA_COUNTER_ID, 'hit', sanitizeMetrikaUrl(url))
 }
 
 export function reachMetrikaGoal(goal, params = {}) {
