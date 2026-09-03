@@ -225,6 +225,39 @@ test('returns an OAuth provider login to the server-side consent endpoint', asyn
   await expect(page.getByRole('heading', { name: 'OAuth consent reached' })).toBeVisible()
 })
 
+test('clears stale MCP return_to when opening login without return_to query', async ({ page }) => {
+  const staleReturnTo = '/oauth/authorize?response_type=code&client_id=mcp-test&state=old'
+  await mockSaasBff(page)
+  await page.addInitScript((value) => {
+    window.sessionStorage.setItem('postbridge.auth_return_to', value)
+  }, staleReturnTo)
+
+  await page.goto('/login')
+
+  await expect
+    .poll(() => page.evaluate(() => window.sessionStorage.getItem('postbridge.auth_return_to')))
+    .toBeNull()
+})
+
+test('does not redirect OAuth hash logins to a stale MCP return_to', async ({ page }) => {
+  const staleReturnTo = '/oauth/authorize?response_type=code&client_id=mcp-test&state=old'
+  const calls = []
+  await mockSaasBff(page, calls)
+
+  await page.goto('/login')
+  await page.evaluate((value) => {
+    window.sessionStorage.setItem('postbridge.auth_return_to', value)
+  }, staleReturnTo)
+  await page.reload()
+  await expect
+    .poll(() => page.evaluate(() => window.sessionStorage.getItem('postbridge.auth_return_to')))
+    .toBeNull()
+  await page.goto('/dashboard#token=oauth-session-token')
+
+  await expect(page).toHaveURL(/\/workspaces\/ws-1\/content$/)
+  await expect(page.getByRole('heading', { name: 'Content' })).toBeVisible()
+})
+
 test('renders the configured Yandex login provider', async ({ page }) => {
   await mockSaasBff(page)
 
