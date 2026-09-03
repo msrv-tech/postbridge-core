@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { listAuthProviders, requestMagicLink, reviewLogin, verifyMagicLink } from '../adapters/authFlows'
 import { setToken } from '../adapters/sessionToken'
-import { normalizeAuthReturnTo, rememberAuthReturnTo } from '../adapters/authReturnTo'
+import { consumeAuthReturnTo, normalizeAuthReturnTo, rememberAuthReturnTo } from '../adapters/authReturnTo'
 import PublicLayout from '../components/PublicLayout'
 import TelegramDeepLinkField from '../components/TelegramDeepLinkField'
 import { fetchTelegramWebLinkStatus, startTelegramWebLinkSession } from '../telegramWebLinkFlow'
@@ -78,11 +78,16 @@ export default function Landing() {
   const authReturnTo = normalizeAuthReturnTo(searchParams.get('return_to'))
 
   useEffect(() => {
-    if (authReturnTo) rememberAuthReturnTo(authReturnTo)
+    if (authReturnTo) {
+      rememberAuthReturnTo(authReturnTo)
+    } else {
+      consumeAuthReturnTo()
+    }
   }, [authReturnTo])
 
   const finishLogin = (token) => {
     setToken(token)
+    consumeAuthReturnTo()
     if (authReturnTo) {
       window.location.assign(authReturnTo)
     } else {
