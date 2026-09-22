@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from sqlalchemy import String, cast, or_, select
 from sqlalchemy.orm import Session
 
 from postbridge.domain.errors import ValidationError
@@ -12,7 +14,9 @@ from postbridge.infrastructure.media_storage import (
     delete_media_object,
     upload_media_object,
 )
-from postbridge.models.domain import MediaAssetOrm, TenantOrm
+from postbridge.models.domain import ContentItemOrm, MediaAssetOrm, TenantOrm
+
+logger = logging.getLogger(__name__)
 
 
 def store_media_asset(
@@ -79,6 +83,33 @@ def store_media_asset(
     return {"media_asset_id": asset_id, "url": url}
 
 
+def _media_asset_url_marker(media_asset_id: str) -> str:
+    return f"/media/{media_asset_id}."
+
+
+def _media_asset_referenced_by_content(
+    session: Session,
+    *,
+    tenant_id: str,
+    media_asset_id: str,
+) -> bool:
+    marker = _media_asset_url_marker(media_asset_id)
+    referenced = session.scalar(
+        select(ContentItemOrm.id)
+        .where(
+            ContentItemOrm.tenant_id == tenant_id,
+            or_(
+                ContentItemOrm.media_url.contains(marker),
+                cast(ContentItemOrm.media_urls, String).contains(marker),
+                ContentItemOrm.body_structured_json.contains(marker),
+                ContentItemOrm.body_markdown.contains(marker),
+            ),
+        )
+        .limit(1)
+    )
+    return referenced is not None
+
+
 def delete_media_asset(session: Session, *, tenant_id: str, media_asset_id: str) -> None:
     row = session.get(MediaAssetOrm, media_asset_id)
     if row is None or row.tenant_id != tenant_id:
@@ -88,14 +119,25 @@ def delete_media_asset(session: Session, *, tenant_id: str, media_asset_id: str)
             message_key="error.validation.media_asset_not_found",
             details={"media_asset_id": media_asset_id},
         )
-    try:
-        delete_media_object(row.object_key)
-    except RuntimeError as exc:
+    if _media_asset_referenced_by_content(
+        session,
+        tenant_id=tenant_id,
+        media_asset_id=media_asset_id,
+    ):
         raise ValidationError(
-            code="MEDIA_STORAGE_NOT_CONFIGURED",
-            message=str(exc),
-            message_key="error.validation.media_storage_not_configured",
-            details={},
-        ) from exc
+            code="VALIDATION_MEDIA_ASSET_IN_USE",
+            message="media asset is referenced by workspace content",
+            message_key="error.validation.media_asset_in_use",
+            details={"media_asset_id": media_asset_id},
+        )
+    object_key = row.object_key
     session.delete(row)
     session.commit()
+    try:
+        delete_media_object(object_key)
+    except RuntimeError as exc:
+        logger.warning(
+            "Media asset %s deleted from database but storage cleanup failed: %s",
+            media_asset_id,
+            exc,
+        )

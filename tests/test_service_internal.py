@@ -209,6 +209,48 @@ def test_service_media_upload_local(client: TestClient, tmp_path, monkeypatch: p
     assert repeated.json()["code"] == "VALIDATION_MEDIA_ASSET_NOT_FOUND"
 
 
+def test_service_media_delete_rejects_in_use_asset(
+    client: TestClient, tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("MEDIA_STORAGE_TYPE", "local")
+    monkeypatch.setenv("MEDIA_STORAGE_PATH", str(tmp_path))
+    monkeypatch.setenv("MEDIA_BASE_URL", "http://testserver/media")
+
+    tid = str(uuid4())
+    h = _headers(tid)
+    client.post("/internal/service/tenants/ensure", json={"name": "W"}, headers=h)
+
+    upload = client.post(
+        "/internal/service/media/upload",
+        headers=h,
+        files={"file": ("x.png", BytesIO(b"abc"), "image/png")},
+    )
+    assert upload.status_code == 200, upload.text
+    body = upload.json()
+    stored_path = tmp_path / f"tenants/{tid}/media/{body['media_asset_id']}.png"
+    assert stored_path.is_file()
+
+    content = client.post(
+        "/internal/service/content-items/postbridge",
+        headers=h,
+        json={
+            "title": "Post with image",
+            "content_md": "hello",
+            "media_url": body["url"],
+            "media_urls": [body["url"]],
+        },
+    )
+    assert content.status_code == 200, content.text
+
+    blocked = client.delete(
+        f"/internal/service/media/{body['media_asset_id']}",
+        headers=h,
+    )
+    assert blocked.status_code == 422
+    assert blocked.json()["code"] == "VALIDATION_MEDIA_ASSET_IN_USE"
+    assert stored_path.is_file()
+
+
 def test_post_image_prompt_combines_style_request_and_post_context():
     prompt = build_post_image_prompt(
         user_prompt="show a bridge between post and channels",
