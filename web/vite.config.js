@@ -7,6 +7,9 @@ const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://localhost:80
 const base = process.env.VITE_BASE_PATH || '/'
 const publicBaseUrl = (process.env.VITE_POSTBRIDGE_PUBLIC_BASE_URL || 'https://postbridge.io').replace(/\/+$/, '')
 const publicBrand = publicBaseUrl.includes('postbridge.ru') ? 'Postbridge.ru' : 'Postbridge.io'
+const publicTitle = publicBaseUrl.includes('postbridge.ru')
+  ? 'ИИ постинг'
+  : 'AI posting'
 
 const publicBaseUrlPlugin = {
   name: 'postbridge-public-base-url',
@@ -14,6 +17,7 @@ const publicBaseUrlPlugin = {
     return html
       .replaceAll('__POSTBRIDGE_PUBLIC_BASE_URL__', publicBaseUrl)
       .replaceAll('__POSTBRIDGE_BRAND__', publicBrand)
+      .replaceAll('__POSTBRIDGE_TITLE__', publicTitle)
   },
 }
 

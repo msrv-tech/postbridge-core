@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchRuntimeConfig } from '../adapters/runtime'
+import { getPublicBrandName } from '../branding'
 import { catalogs, DEFAULT_LOCALE, supportedLocales } from './catalogs'
 
 const STORAGE_KEY = 'postbridge.locale'
@@ -73,6 +74,7 @@ export function I18nProvider({ children }) {
   useEffect(() => {
     document.documentElement.lang = locale
     window.localStorage.setItem(STORAGE_KEY, locale)
+    document.title = `${getPublicBrandName()} | ${catalogs[locale]?.['seo.title'] || catalogs[DEFAULT_LOCALE]['seo.title']}`
   }, [locale])
 
   const setLocale = useCallback((nextLocale) => {
