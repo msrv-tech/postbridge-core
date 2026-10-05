@@ -106,7 +106,7 @@ export default function AppShell({
             <div className="app-header-top-left">
               <Link to={brandHref} className="brand brand-small">
                 <img src={brandMarkSrc} alt="" className="brand-mark" width="26" height="26" />
-                Postbridge
+                Postbridge.io
               </Link>
               <nav className="app-nav" aria-label={t('app.nav.aria')}>
                 <NavLink to={contentHref} className={navClassName(isContentActive)}>

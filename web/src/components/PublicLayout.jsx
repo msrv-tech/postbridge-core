@@ -24,7 +24,7 @@ export default function PublicLayout({ children, compact = false }) {
         <div className="container public-header-inner">
           <Link to="/" className="brand">
             <img src={brandMarkSrc} alt="" className="brand-mark" width="28" height="28" />
-            Postbridge
+            Postbridge.io
           </Link>
           <nav className="public-nav" aria-label={t('public.nav.aria')}>
             {!selfhost && <Link to="/news">{t('common.news')}</Link>}
