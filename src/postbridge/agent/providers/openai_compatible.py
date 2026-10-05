@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,6 +12,8 @@ from postbridge.ai.urls import join_openai_compatible_path
 from postbridge.config import get_settings
 from postbridge.domain.errors import ConfigurationError, ExternalApiError
 from postbridge.models.domain import LlmProviderConfigOrm
+
+logger = logging.getLogger(__name__)
 
 
 def _strip_optional_json_fence(raw: str) -> str:
@@ -90,6 +94,8 @@ class OpenAICompatibleProvider:
     api_key: str | None = None
     timeout_seconds: float = 60.0
     max_tokens: int = 2048
+    max_attempts: int = 3
+    retry_base_delay_seconds: float = 0.5
     provider_type: str = "openai_compatible"
 
     @classmethod
@@ -142,26 +148,40 @@ class OpenAICompatibleProvider:
 
     def _post_to(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         url = join_openai_compatible_path(self.base_url, path)
-        try:
-            with httpx.Client(timeout=httpx.Timeout(self.timeout_seconds)) as client:
-                response = client.post(url, json=payload, headers=self._headers())
-        except httpx.TimeoutException as exc:
-            raise ExternalApiError(
-                code="EXTERNAL_AI_GATEWAY_TIMEOUT",
-                message="agent LLM request timed out",
-                source="agent_llm",
-                retryable=True,
-                details={},
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise ExternalApiError(
-                code="EXTERNAL_AI_GATEWAY_TRANSPORT",
-                message="agent LLM transport error",
-                source="agent_llm",
-                retryable=True,
-                details={"reason": str(exc)},
-            ) from exc
-        if response.status_code >= 400:
+        attempts = max(1, int(self.max_attempts))
+        response: httpx.Response | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                with httpx.Client(timeout=httpx.Timeout(self.timeout_seconds)) as client:
+                    response = client.post(url, json=payload, headers=self._headers())
+            except httpx.TimeoutException as exc:
+                if attempt < attempts:
+                    self._wait_before_retry(path, attempt, "timeout")
+                    continue
+                raise ExternalApiError(
+                    code="EXTERNAL_AI_GATEWAY_TIMEOUT",
+                    message="agent LLM request timed out",
+                    source="agent_llm",
+                    retryable=True,
+                    details={"attempts": attempts},
+                ) from exc
+            except httpx.HTTPError as exc:
+                if attempt < attempts:
+                    self._wait_before_retry(path, attempt, type(exc).__name__)
+                    continue
+                raise ExternalApiError(
+                    code="EXTERNAL_AI_GATEWAY_TRANSPORT",
+                    message="agent LLM transport error",
+                    source="agent_llm",
+                    retryable=True,
+                    details={"reason": str(exc), "attempts": attempts},
+                ) from exc
+            if response.status_code < 400:
+                break
+            retryable = response.status_code >= 500 or response.status_code == 429
+            if retryable and attempt < attempts:
+                self._wait_before_retry(path, attempt, f"HTTP {response.status_code}")
+                continue
             try:
                 body: Any = response.json()
             except ValueError:
@@ -170,9 +190,10 @@ class OpenAICompatibleProvider:
                 code="EXTERNAL_AI_GATEWAY_HTTP_ERROR",
                 message="agent LLM returned error status",
                 source="agent_llm",
-                retryable=response.status_code >= 500 or response.status_code == 429,
-                details={"status_code": response.status_code, "body": body},
+                retryable=retryable,
+                details={"status_code": response.status_code, "body": body, "attempts": attempt},
             )
+        assert response is not None
         try:
             data = response.json()
         except ValueError as exc:
@@ -192,6 +213,18 @@ class OpenAICompatibleProvider:
                 details={},
             )
         return data
+
+    def _wait_before_retry(self, path: str, attempt: int, reason: str) -> None:
+        delay = max(0.0, float(self.retry_base_delay_seconds)) * (2 ** (attempt - 1))
+        logger.warning(
+            "Retrying agent LLM request %s after %s (attempt %s/%s)",
+            path,
+            reason,
+            attempt,
+            max(1, int(self.max_attempts)),
+        )
+        if delay > 0:
+            time.sleep(delay)
 
     def invoke_text(self, *, messages: list[dict[str, str]], temperature: float = 0.2) -> tuple[str, dict[str, Any]]:
         body = self._post(

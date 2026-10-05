@@ -70,7 +70,13 @@ def test_provider_post_to_wraps_transport_and_response_shape_errors(monkeypatch:
         "postbridge.agent.providers.openai_compatible.httpx.Client",
         lambda **kwargs: RealHttpxClient(transport=httpx.MockTransport(handler), **kwargs),
     )
-    provider = OpenAICompatibleProvider(base_url="https://ai.example", model_name="m", api_key="k", timeout_seconds=5)
+    provider = OpenAICompatibleProvider(
+        base_url="https://ai.example",
+        model_name="m",
+        api_key="k",
+        timeout_seconds=5,
+        max_attempts=1,
+    )
 
     with pytest.raises(ExternalApiError) as timeout_exc:
         provider._post_to("/v1/chat/completions", {"x": 1})
@@ -93,6 +99,69 @@ def test_provider_post_to_wraps_transport_and_response_shape_errors(monkeypatch:
     assert json_exc.value.code == "EXTERNAL_AI_GATEWAY_INVALID_RESPONSE"
     assert shape_exc.value.code == "EXTERNAL_AI_GATEWAY_INVALID_RESPONSE"
     assert ok == {"ok": True}
+
+
+def test_provider_retries_retryable_gateway_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = iter(
+        [
+            httpx.Response(502, json={"error": "temporary"}),
+            httpx.ConnectError("reset"),
+            httpx.Response(200, json={"ok": True}),
+        ]
+    )
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        item = next(responses)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    monkeypatch.setattr(
+        "postbridge.agent.providers.openai_compatible.httpx.Client",
+        lambda **kwargs: RealHttpxClient(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        "postbridge.agent.providers.openai_compatible.time.sleep",
+        sleeps.append,
+    )
+    provider = OpenAICompatibleProvider(
+        base_url="https://ai.example",
+        model_name="m",
+        max_attempts=3,
+        retry_base_delay_seconds=0.25,
+    )
+
+    assert provider._post_to("/v1/chat/completions", {"x": 1}) == {"ok": True}
+    assert len(calls) == 3
+    assert sleeps == [0.25, 0.5]
+
+
+def test_provider_does_not_retry_non_retryable_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(400, json={"error": "bad request"})
+
+    monkeypatch.setattr(
+        "postbridge.agent.providers.openai_compatible.httpx.Client",
+        lambda **kwargs: RealHttpxClient(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    provider = OpenAICompatibleProvider(
+        base_url="https://ai.example",
+        model_name="m",
+        max_attempts=3,
+        retry_base_delay_seconds=0,
+    )
+
+    with pytest.raises(ExternalApiError) as exc_info:
+        provider._post_to("/v1/chat/completions", {"x": 1})
+
+    assert exc_info.value.retryable is False
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize(
@@ -246,4 +315,3 @@ def test_ensure_openai_compatible_provider_validates_provider_type(monkeypatch: 
     provider = ensure_openai_compatible_provider(None)
     assert provider.base_url == "https://ai.example"
     assert provider.model_name == "m"
-

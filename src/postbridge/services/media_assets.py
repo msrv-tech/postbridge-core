@@ -7,12 +7,21 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
+from postbridge.config import get_settings
 from postbridge.domain.errors import ValidationError
 from postbridge.infrastructure.media_storage import (
     delete_media_object,
     upload_media_object,
 )
 from postbridge.models.domain import MediaAssetOrm, TenantOrm
+
+
+def _public_media_url(*, asset_id: str, storage_url: str) -> str:
+    settings = get_settings()
+    base_url = (settings.media_base_url or "").strip().rstrip("/")
+    if settings.media_storage_type == "s3" and base_url:
+        return f"{base_url}/{asset_id}"
+    return storage_url
 
 
 def store_media_asset(
@@ -55,7 +64,7 @@ def store_media_asset(
     asset_id = str(uuid4())
     object_key = f"tenants/{tenant_id}/media/{asset_id}.{ext}"
     try:
-        url = upload_media_object(object_key, data, content_type)
+        storage_url = upload_media_object(object_key, data, content_type)
     except RuntimeError as exc:
         raise ValidationError(
             code="MEDIA_STORAGE_NOT_CONFIGURED",
@@ -63,6 +72,7 @@ def store_media_asset(
             message_key="error.validation.media_storage_not_configured",
             details={},
         ) from exc
+    url = _public_media_url(asset_id=asset_id, storage_url=storage_url)
     now = datetime.now(UTC)
     session.add(
         MediaAssetOrm(

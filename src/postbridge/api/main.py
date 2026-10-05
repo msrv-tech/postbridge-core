@@ -22,7 +22,8 @@ from sqlalchemy import func, select
 from postbridge.db import RssFeedItemOrm, SESSION_LOCAL, init_db
 from postbridge.domain.errors import InternalError, PostbridgeError, ValidationError
 from postbridge.i18n import get_i18n
-from postbridge.models.domain import TenantOrm
+from postbridge.infrastructure.media_storage import read_media_object
+from postbridge.models.domain import MediaAssetOrm, TenantOrm
 from postbridge.observability.metrics import export_prometheus
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 
@@ -61,8 +62,32 @@ def _media_storage_dir() -> Path:
 
 
 @app.get("/media/{path:path}", include_in_schema=False)
-def serve_media(path: str) -> FileResponse:
-    """Serve files from MEDIA_STORAGE_PATH for on-premise live-sync media."""
+def serve_media(path: str) -> Response:
+    """Serve local media or proxy a managed S3 asset through Core."""
+    settings = get_settings()
+    if settings.media_storage_type == "s3":
+        if not path or "/" in path:
+            raise HTTPException(status_code=404, detail="error.http.not_found")
+        session = SESSION_LOCAL()
+        try:
+            asset = session.get(MediaAssetOrm, path)
+            if asset is None:
+                raise HTTPException(status_code=404, detail="error.http.not_found")
+            object_key = asset.object_key
+            content_type = asset.content_type
+        finally:
+            session.close()
+        try:
+            content = read_media_object(object_key)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="error.http.not_found") from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail="error.http.media_unavailable") from exc
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
     media_root = _media_storage_dir()
     full = (media_root / path).resolve()
     if not str(full).startswith(str(media_root.resolve())):

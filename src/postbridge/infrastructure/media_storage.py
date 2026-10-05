@@ -44,6 +44,20 @@ def delete_media_object(object_key: str) -> None:
     )
 
 
+def read_media_object(object_key: str) -> bytes:
+    """Read an object through the configured canonical media storage."""
+    settings = get_settings()
+    mode = settings.media_storage_type
+    if mode == "local":
+        return _read_local(object_key, settings)
+    if mode == "s3":
+        return _read_s3(object_key, settings)
+    raise RuntimeError(
+        "MEDIA_STORAGE_NOT_CONFIGURED: set MEDIA_STORAGE_TYPE to local or s3 "
+        "and configure MEDIA_STORAGE_PATH/MEDIA_BASE_URL or S3_*"
+    )
+
+
 def _upload_local(object_key: str, data: bytes, settings) -> str:
     if not settings.media_storage_path or not settings.media_base_url:
         raise RuntimeError("local media requires MEDIA_STORAGE_PATH and MEDIA_BASE_URL")
@@ -67,7 +81,19 @@ def _delete_local(object_key: str, settings) -> None:
     full_path.unlink(missing_ok=True)
 
 
-def _upload_s3(object_key: str, data: bytes, content_type: str, settings) -> str:
+def _read_local(object_key: str, settings) -> bytes:
+    if not settings.media_storage_path:
+        raise RuntimeError("local media requires MEDIA_STORAGE_PATH")
+    base_path = Path(settings.media_storage_path).resolve()
+    full_path = (base_path / object_key).resolve()
+    try:
+        full_path.relative_to(base_path)
+    except ValueError as exc:
+        raise RuntimeError("invalid local media object key") from exc
+    return full_path.read_bytes()
+
+
+def _s3_client(settings):
     if not settings.s3_bucket:
         raise RuntimeError("s3 media requires S3_BUCKET")
 
@@ -80,7 +106,7 @@ def _upload_s3(object_key: str, data: bytes, content_type: str, settings) -> str
         request_checksum_calculation="when_required",
         response_checksum_validation="when_required",
     )
-    client = boto3.client(
+    return boto3.client(
         "s3",
         endpoint_url=settings.s3_endpoint_url or None,
         region_name=settings.s3_region,
@@ -88,6 +114,10 @@ def _upload_s3(object_key: str, data: bytes, content_type: str, settings) -> str
         aws_secret_access_key=settings.s3_secret_key or None,
         config=cfg,
     )
+
+
+def _upload_s3(object_key: str, data: bytes, content_type: str, settings) -> str:
+    client = _s3_client(settings)
     extra: dict[str, str] = {}
     if content_type:
         extra["ContentType"] = content_type
@@ -102,24 +132,33 @@ def _upload_s3(object_key: str, data: bytes, content_type: str, settings) -> str
 
 
 def _delete_s3(object_key: str, settings) -> None:
-    if not settings.s3_bucket:
-        raise RuntimeError("s3 media requires S3_BUCKET")
-
-    import boto3
-    from botocore.config import Config
-
-    cfg = Config(
-        signature_version="s3v4",
-        retries={"mode": "standard", "max_attempts": 2},
-        request_checksum_calculation="when_required",
-        response_checksum_validation="when_required",
-    )
-    client = boto3.client(
-        "s3",
-        endpoint_url=settings.s3_endpoint_url or None,
-        region_name=settings.s3_region,
-        aws_access_key_id=settings.s3_access_key or None,
-        aws_secret_access_key=settings.s3_secret_key or None,
-        config=cfg,
-    )
+    client = _s3_client(settings)
     client.delete_object(Bucket=settings.s3_bucket, Key=object_key)
+
+
+def _read_s3(object_key: str, settings) -> bytes:
+    from botocore.exceptions import BotoCoreError, ClientError
+
+    client = _s3_client(settings)
+    try:
+        response = client.get_object(Bucket=settings.s3_bucket, Key=object_key)
+    except ClientError as exc:
+        error = exc.response
+        code = str(error.get("Error", {}).get("Code", "")) if isinstance(error, dict) else ""
+        if code in {"404", "NoSuchKey", "NotFound"}:
+            raise FileNotFoundError(object_key) from exc
+        raise RuntimeError("failed to read media object from s3") from exc
+    except BotoCoreError as exc:
+        raise RuntimeError("failed to read media object from s3") from exc
+    body = response.get("Body") if isinstance(response, dict) else None
+    if body is None or not hasattr(body, "read"):
+        raise RuntimeError("s3 media response body is missing")
+    try:
+        data = body.read()
+    finally:
+        close = getattr(body, "close", None)
+        if callable(close):
+            close()
+    if not isinstance(data, bytes):
+        raise RuntimeError("s3 media response body is invalid")
+    return data
