@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import PublicLayout from '../components/PublicLayout'
+import { getPublicBrandName } from '../branding'
 import { getCaseLanding, translateCaseLanding } from '../caseLandings'
 import { useI18n } from '../i18n'
 import { reachMetrikaGoal } from '../metrika'
@@ -326,6 +327,7 @@ export default function CaseLanding() {
   const landing = useMemo(() => translateCaseLanding(landingConfig, t), [landingConfig, t])
   const ctaPath = useCaseCtaPath(slug, landingConfig)
   const [activeScenario, setActiveScenario] = useState(0)
+  const brandName = getPublicBrandName()
 
   const selectedScenario = useMemo(() => {
     if (!landing) return null
@@ -353,7 +355,7 @@ export default function CaseLanding() {
       ogDescription: ogDescription?.getAttribute('content'),
       ogUrl: ogUrl?.getAttribute('content'),
     }
-    document.title = `${title} | Postbridge`
+    document.title = `${title} | ${brandName}`
     descriptionMeta?.setAttribute('content', description)
     canonicalLink?.setAttribute('href', canonicalUrl)
     ogTitle?.setAttribute('content', title)
@@ -368,7 +370,7 @@ export default function CaseLanding() {
       if (previous.ogDescription) ogDescription?.setAttribute('content', previous.ogDescription)
       if (previous.ogUrl) ogUrl?.setAttribute('content', previous.ogUrl)
     }
-  }, [landing, t])
+  }, [brandName, landing, t])
 
   if (!landing) return <Navigate to="/" replace />
 

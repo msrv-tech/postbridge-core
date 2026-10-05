@@ -6,11 +6,14 @@ import react from '@vitejs/plugin-react'
 const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://localhost:8001'
 const base = process.env.VITE_BASE_PATH || '/'
 const publicBaseUrl = (process.env.VITE_POSTBRIDGE_PUBLIC_BASE_URL || 'https://postbridge.io').replace(/\/+$/, '')
+const publicBrand = publicBaseUrl.includes('postbridge.ru') ? 'Postbridge.ru' : 'Postbridge.io'
 
 const publicBaseUrlPlugin = {
   name: 'postbridge-public-base-url',
   transformIndexHtml(html) {
-    return html.replaceAll('__POSTBRIDGE_PUBLIC_BASE_URL__', publicBaseUrl)
+    return html
+      .replaceAll('__POSTBRIDGE_PUBLIC_BASE_URL__', publicBaseUrl)
+      .replaceAll('__POSTBRIDGE_BRAND__', publicBrand)
   },
 }
 

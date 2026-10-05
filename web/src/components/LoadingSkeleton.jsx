@@ -1,9 +1,11 @@
 import { useI18n } from '../i18n'
+import { getPublicBrandName } from '../branding'
 
 const brandMarkSrc = `${import.meta.env.BASE_URL}postbridge-mark.svg`
 
 export default function LoadingSkeleton() {
   const { t } = useI18n()
+  const brandName = getPublicBrandName()
 
   return (
     <div className="public-shell">
@@ -11,7 +13,7 @@ export default function LoadingSkeleton() {
         <div className="container public-header-inner">
           <span className="brand">
             <img src={brandMarkSrc} alt="" className="brand-mark" width="28" height="28" />
-            Postbridge
+            {brandName}
           </span>
           <div className="public-nav" style={{ opacity: 0.6 }}>
             <span>{t('loading.nav.pricing')}</span>

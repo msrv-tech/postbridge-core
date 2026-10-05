@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { isSelfhostMode } from '../adapters/runtime'
 import { BILLING_SUPPORT_EMAIL } from '../billingSupport'
 import { listPublicCaseLandings } from '../caseLandings'
+import { getPublicBrandName } from '../branding'
 import { LanguageSelect, useI18n } from '../i18n'
 
 const brandMarkSrc = `${import.meta.env.BASE_URL}postbridge-mark.svg`
@@ -17,6 +18,7 @@ const showIoDirectory = publicCaseLinks.some((item) =>
 export default function PublicLayout({ children, compact = false }) {
   const { t } = useI18n()
   const selfhost = isSelfhostMode()
+  const brandName = getPublicBrandName()
 
   return (
     <div className="public-shell">
@@ -24,7 +26,7 @@ export default function PublicLayout({ children, compact = false }) {
         <div className="container public-header-inner">
           <Link to="/" className="brand">
             <img src={brandMarkSrc} alt="" className="brand-mark" width="28" height="28" />
-            Postbridge.io
+            {brandName}
           </Link>
           <nav className="public-nav" aria-label={t('public.nav.aria')}>
             {!selfhost && <Link to="/news">{t('common.news')}</Link>}

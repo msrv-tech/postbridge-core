@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import { listMediaGenerationJobs } from '../adapters/media'
+import { getPublicBrandName } from '../branding'
 import { LanguageSelect, useI18n } from '../i18n'
 import SupportAssistantWidget from './SupportAssistantWidget'
 
@@ -34,6 +35,7 @@ export default function AppShell({
 }) {
   const location = useLocation()
   const { t } = useI18n()
+  const brandName = getPublicBrandName()
   const workspaceMatch = location.pathname.match(/\/workspaces\/([^/]+)/)
   const workspaceFromPath = workspaceMatch?.[1] || ''
   const workspaceFromQuery = new URLSearchParams(location.search).get('workspace') || ''
@@ -106,7 +108,7 @@ export default function AppShell({
             <div className="app-header-top-left">
               <Link to={brandHref} className="brand brand-small">
                 <img src={brandMarkSrc} alt="" className="brand-mark" width="26" height="26" />
-                Postbridge.io
+                {brandName}
               </Link>
               <nav className="app-nav" aria-label={t('app.nav.aria')}>
                 <NavLink to={contentHref} className={navClassName(isContentActive)}>
