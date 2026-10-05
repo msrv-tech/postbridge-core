@@ -50,7 +50,7 @@ compose() {
 
 services="$(compose config --services)"
 has_service() {
-  printf '%s\n' "$services" | grep -qx "$1"
+  grep -qx "$1" <<<"$services"
 }
 
 postgres_service=""
