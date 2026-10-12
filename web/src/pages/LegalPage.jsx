@@ -1,8 +1,11 @@
+import { useEffect, useState } from 'react'
 import { Link, Navigate, useLocation } from 'react-router-dom'
 import { BILLING_SUPPORT_EMAIL } from '../billingSupport'
+import { getPublicMarket } from '../branding'
 import PublicLayout from '../components/PublicLayout'
+import { useI18n } from '../i18n'
 
-const documents = {
+const ioDocuments = {
   '/privacy': {
     title: 'Privacy Policy',
     updated: 'August 5, 2026',
@@ -130,20 +133,69 @@ const documents = {
 
 export default function LegalPage() {
   const { pathname } = useLocation()
-  const document = documents[pathname]
-  if (!document) return <Navigate to="/" replace />
+  const { t } = useI18n()
+  const isRu = getPublicMarket() === 'ru'
+  const [remoteState, setRemoteState] = useState(null)
+
+  useEffect(() => {
+    if (!isRu || !ioDocuments[pathname]) return undefined
+    const controller = new AbortController()
+    fetch(`/api/legal-documents/${pathname.slice(1)}`, {
+      headers: { Accept: 'application/json' },
+      credentials: 'omit',
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Legal document unavailable')
+        const data = await response.json()
+        if (data.lang !== 'ru' || !Array.isArray(data.sections)) {
+          throw new Error('Unexpected legal document')
+        }
+        setRemoteState({ pathname, document: data, error: false })
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') {
+          setRemoteState({ pathname, document: null, error: true })
+        }
+      })
+    return () => controller.abort()
+  }, [isRu, pathname])
+
+  if (!ioDocuments[pathname]) return <Navigate to="/" replace />
+  const currentState = remoteState?.pathname === pathname ? remoteState : null
+  const legalDocument = isRu ? currentState?.document : ioDocuments[pathname]
+  if (!legalDocument) {
+    return (
+      <PublicLayout>
+        <section className="section">
+          <div className="container legal-page">
+            <p role={currentState?.error ? 'alert' : 'status'}>
+              {t(currentState?.error ? 'legal.loadError' : 'legal.loading')}
+            </p>
+            {currentState?.error && <a href={pathname}>{t('legal.reload')}</a>}
+          </div>
+        </section>
+      </PublicLayout>
+    )
+  }
+  const contactEmail = legalDocument.contact_email || BILLING_SUPPORT_EMAIL
+  const relatedLinks = legalDocument.links || [
+    { path: '/privacy', label: 'Privacy Policy' },
+    { path: '/terms', label: 'Terms of Service' },
+    { path: '/data-deletion', label: 'Data Deletion' },
+  ]
 
   return (
     <PublicLayout>
       <section className="section">
-        <div className="container legal-page">
+        <div className={`container legal-page${isRu ? ' legal-page-ru' : ''}`}>
           <p className="eyebrow">Postbridge</p>
-          <h1>{document.title}</h1>
-          <p className="muted">Last updated: {document.updated}</p>
-          <p className="lead">{document.intro}</p>
+          <h1>{legalDocument.title}</h1>
+          <p className="muted">{legalDocument.updated_label || 'Last updated:'} {legalDocument.updated}</p>
+          <p className="lead">{legalDocument.intro}</p>
 
           <div className="legal-sections">
-            {document.sections.map((section) => (
+            {legalDocument.sections.map((section) => (
               <section key={section.title}>
                 <h2>{section.title}</h2>
                 {section.body.map((item) => (
@@ -154,18 +206,19 @@ export default function LegalPage() {
           </div>
 
           <div className="legal-contact">
-            <h2>Contact</h2>
+            <h2>{legalDocument.contact_title || 'Contact'}</h2>
             <p>
-              Email: <a href={`mailto:${BILLING_SUPPORT_EMAIL}`}>{BILLING_SUPPORT_EMAIL}</a>
+              {legalDocument.contact_email_label || 'Email'}: <a href={`mailto:${contactEmail}`}>{contactEmail}</a>
             </p>
           </div>
 
           <p className="legal-related">
-            <Link to="/privacy">Privacy Policy</Link>
-            <span aria-hidden="true"> · </span>
-            <Link to="/terms">Terms of Service</Link>
-            <span aria-hidden="true"> · </span>
-            <Link to="/data-deletion">Data Deletion</Link>
+            {relatedLinks.map((link, index) => (
+              <span key={link.path}>
+                {index > 0 && <span aria-hidden="true"> · </span>}
+                <Link to={link.path}>{link.label}</Link>
+              </span>
+            ))}
           </p>
         </div>
       </section>

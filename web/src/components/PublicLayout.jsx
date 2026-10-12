@@ -66,8 +66,8 @@ export default function PublicLayout({ children, compact = false }) {
             {showIoDirectory && <a href="/docs/mcp">MCP</a>}
             <Link to="/agents/help">{t('common.faq')}</Link>
             {!selfhost && <Link to="/pricing">{t('common.pricing')}</Link>}
-            <Link to="/privacy">Privacy</Link>
-            <Link to="/terms">Terms</Link>
+            <a href="/privacy">{t('public.nav.privacy')}</a>
+            <a href="/terms">{t('public.nav.terms')}</a>
             <Link to="/login">{t('common.login')}</Link>
             <a href={`mailto:${BILLING_SUPPORT_EMAIL}`}>{t('common.support')}</a>
           </div>

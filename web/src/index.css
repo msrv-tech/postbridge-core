@@ -4597,6 +4597,11 @@ textarea:focus {
   font-size: clamp(2.25rem, 5vw, 4rem);
 }
 
+.legal-page-ru h1 {
+  font-size: clamp(1.75rem, 3vw, 2.5rem);
+  line-height: 1.2;
+}
+
 .legal-page .lead {
   max-width: 720px;
   color: var(--text-soft);
