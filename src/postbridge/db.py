@@ -127,6 +127,7 @@ class BatchImportFetchedPostOrm(Base):
     source_post_id: Mapped[str] = mapped_column(String(128), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     media_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    media_urls_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
