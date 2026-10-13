@@ -201,6 +201,9 @@ export default function LegalPage() {
                 {section.body.map((item) => (
                   <p key={item}>{item}</p>
                 ))}
+                {section.links?.map((link) => (
+                  <p key={link.path}><a href={link.path}>{link.label}</a></p>
+                ))}
               </section>
             ))}
           </div>

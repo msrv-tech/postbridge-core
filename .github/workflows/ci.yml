@@ -51,6 +51,9 @@ jobs:
       - name: Check frontend i18n boundaries
         run: npm --prefix web run check:i18n
 
+      - name: Test analytics consent
+        run: npm --prefix web run test:consent
+
       - name: Install Playwright browser
         run: npm --prefix web exec playwright install --with-deps chromium
 

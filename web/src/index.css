@@ -4649,3 +4649,25 @@ textarea:focus {
   margin-top: 2rem;
   color: var(--text-muted);
 }
+.cookie-banner {
+  position: fixed;
+  inset: auto 0 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 20px max(20px, calc((100vw - 1120px) / 2));
+  background: var(--bg, #fff);
+  color: var(--text, #172033);
+  border-top: 1px solid var(--border, #d9e0eb);
+  box-shadow: 0 -4px 20px #00000012;
+}
+.cookie-banner-text { flex: 1; padding-right: 24px; }
+.cookie-banner-close { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); font-size: 22px; line-height: 1; cursor: pointer; }
+.cookie-banner-close:hover { color: var(--text); background: var(--surface-hover); }
+.cookie-banner-text p { margin: 8px 0 0; font-size: 14px; line-height: 1.5; }
+.cookie-banner-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .cookie-banner { flex-direction: column; align-items: stretch; gap: 16px; padding: 16px; }
+  .cookie-banner-actions .btn { flex: 1; }
+}

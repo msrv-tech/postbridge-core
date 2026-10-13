@@ -9,6 +9,7 @@ function LegacyDeliveryStatusRedirect() {
 }
 import { useAuth } from './useAuth'
 import LoadingSkeleton from './components/LoadingSkeleton'
+import CookieConsent from './components/CookieConsent'
 import MiniAppAuthGate from './components/MiniAppAuthGate'
 import { setToken } from './adapters/sessionToken'
 import { consumeAuthReturnTo } from './adapters/authReturnTo'
@@ -156,7 +157,7 @@ function ConnectVkLegacyRedirect() {
 function MetrikaRouteTracker() {
   const location = useLocation();
   useEffect(() => {
-    hitMetrika(location.pathname + location.search + location.hash);
+    hitMetrika(location.pathname);
   }, [location.pathname, location.search, location.hash]);
   return null;
 }
@@ -198,6 +199,7 @@ export default function App() {
       errorText={t('app.errorBoundary.text')}
       reloadLabel={t('app.errorBoundary.reload')}
     >
+    <CookieConsent />
     <OAuthTokenHandler>
     <MiniAppAuthGate>
       <MetrikaRouteTracker />

@@ -9,6 +9,12 @@ export const supportedLocales = [
 
 export const catalogs = {
   ru: {
+    'cookies.title': 'Настройки cookies',
+    'cookies.text': 'Необходимое хранилище браузера используется для входа и настроек. С вашего согласия мы включаем Яндекс Метрику и Вебвизор для анализа посещений и взаимодействий с сайтом. Закрытие плашки оставляет аналитику выключенной и не ограничивает работу сервиса.',
+    'cookies.policy': 'Политика конфиденциальности',
+    'cookies.accept': 'Принять',
+    'cookies.close': 'Закрыть без согласия на аналитику',
+    'cookies.storageError': 'Не удалось сохранить выбор в браузере. Аналитика не включается без сохранённого согласия.',
     'app.nav.aria': 'Навигация кабинета',
     'app.nav.content': 'Контент',
     'app.nav.channels': 'Каналы',
@@ -1706,6 +1712,12 @@ export const catalogs = {
     'pricing.important.action': 'Перейти к запуску',
   },
   en: {
+    'cookies.title': 'Cookie preferences',
+    'cookies.text': 'Essential browser storage supports sign-in and preferences. With your consent, we enable Yandex Metrica and Webvisor to analyse visits and interactions. Closing this banner keeps analytics disabled and does not limit the service.',
+    'cookies.policy': 'Privacy policy',
+    'cookies.accept': 'Accept',
+    'cookies.close': 'Close without consenting to analytics',
+    'cookies.storageError': 'Your choice could not be saved in this browser. Analytics requires saved consent.',
     ...ioCaseCatalog,
     'app.nav.aria': 'Workspace navigation',
     'app.nav.content': 'Content',
