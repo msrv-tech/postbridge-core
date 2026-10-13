@@ -438,6 +438,83 @@ def test_search_content_knowledge_does_not_expand_empty_channel_scope(monkeypatc
     session.close()
 
 
+def test_search_content_knowledge_keeps_semantic_hits_outside_corpus_row_limit(monkeypatch):
+    from postbridge.agent import embeddings
+
+    class FakeEmbeddingProvider:
+        def invoke_embedding(self, *, text: str):
+            return [1.0, 0.0], {"total_tokens": 3}
+
+    session = SESSION_LOCAL()
+    stale_match_id = str(uuid4())
+    recent_filler_id = str(uuid4())
+    stale_updated_at = datetime(2020, 1, 1, tzinfo=UTC)
+    recent_updated_at = datetime(2026, 1, 1, tzinfo=UTC)
+    session.add(
+        ContentItemOrm(
+            id=stale_match_id,
+            tenant_id=TENANT,
+            source_type="agent",
+            title="Historic bridge reopening",
+            body_markdown="The bridge reopened after reconstruction in 2020.",
+            status="published",
+            updated_at=stale_updated_at,
+        )
+    )
+    session.add(
+        ContentItemOrm(
+            id=recent_filler_id,
+            tenant_id=TENANT,
+            source_type="agent",
+            title="Recent workspace update",
+            body_markdown="Unrelated filler content for corpus window pressure.",
+            status="published",
+            updated_at=recent_updated_at,
+        )
+    )
+    for entity_id in (stale_match_id, recent_filler_id):
+        session.add(
+            ContentEmbeddingOrm(
+                id=str(uuid4()),
+                tenant_id=TENANT,
+                channel_id=CHANNEL,
+                entity_type="content_item",
+                entity_id=entity_id,
+                model_name="embedding-test",
+                vector_json="[1.0, 0.0]",
+                text_hash=f"hash-{entity_id}",
+            )
+        )
+    session.commit()
+    monkeypatch.setattr(embeddings, "KNOWLEDGE_SEARCH_CORPUS_ROW_LIMIT", 1)
+    monkeypatch.setattr(
+        embeddings,
+        "_resolve_embedding_provider",
+        lambda _session, *, tenant_id: (FakeEmbeddingProvider(), "embedding-test"),
+    )
+    monkeypatch.setattr(
+        embeddings,
+        "find_similar_embeddings",
+        lambda *_args, **_kwargs: [
+            {"entity_id": stale_match_id, "score": 0.97, "model_name": "embedding-test"}
+        ],
+    )
+
+    result = search_content_knowledge(
+        session,
+        tenant_id=TENANT,
+        query="bridge reconstruction",
+        channel_ids=[CHANNEL],
+        limit=5,
+    )
+
+    returned_ids = {item["content_item_id"] for item in result["items"]}
+    assert stale_match_id in returned_ids
+    assert result["items"][0]["content_item_id"] == stale_match_id
+    assert result["items"][0]["semantic_score"] == 0.97
+    session.close()
+
+
 def test_extract_news_facts_returns_structured_source_facts():
     result = extract_news_facts(
         {
