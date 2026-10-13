@@ -199,13 +199,6 @@ async function mockAdapterContractApi(page, calls = []) {
   })
 }
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    window.localStorage.clear()
-    window.sessionStorage.clear()
-  })
-})
-
 test('returns an OAuth provider login to the server-side consent endpoint', async ({ page }) => {
   const returnTo = '/oauth/authorize?response_type=code&client_id=mcp-test&state=state-1'
   await page.route(`**${returnTo}`, async (route) => {
@@ -253,6 +246,9 @@ test('does not redirect OAuth hash logins to a stale MCP return_to', async ({ pa
   await expect
     .poll(() => page.evaluate(() => window.sessionStorage.getItem('postbridge.auth_return_to')))
     .toBeNull()
+  await page.evaluate(() => {
+    window.sessionStorage.setItem('postbridge.oauth_callback_expected', String(Date.now()))
+  })
   await page.goto('/dashboard#token=oauth-session-token')
 
   await expect(page).toHaveURL(/\/workspaces\/ws-1\/content$/)
