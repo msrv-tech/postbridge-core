@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import inspect  # noqa: E402
+from sqlalchemy import inspect, select  # noqa: E402
 
 from postbridge.db import Base, ENGINE, BatchImportFetchedPostOrm, SESSION_LOCAL, BatchImportRunOrm, init_db  # noqa: E402
 from postbridge.domain.errors import ExternalApiError, ValidationError  # noqa: E402
