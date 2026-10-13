@@ -1,6 +1,6 @@
 """add media_urls_json to batch_import_fetched_posts
 
-Revision ID: 20260822_batch_import_fetched_media_urls
+Revision ID: 20260822_batch_import_media_urls
 Revises: 20260520_rss_feed_id_length
 """
 
@@ -11,7 +11,7 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "20260822_batch_import_fetched_media_urls"
+revision: str = "20260822_batch_import_media_urls"
 down_revision: Union[str, None] = "20260520_rss_feed_id_length"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
