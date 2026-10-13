@@ -98,6 +98,19 @@ def ingest_live_sync_publication(
         raise
 
 
+def abort_live_sync_after_enqueue_failure(
+    session: Session,
+    *,
+    source_channel: str,
+    source_post_id: str,
+    target_channel: str,
+) -> None:
+    """Release dedup claim when Celery enqueue fails after ingest commit."""
+    job_store = BatchImportRunStore(session)
+    job_store.release_claim(source_channel, source_post_id, target_channel)
+    session.commit()
+
+
 def live_sync_executor_task_kwargs(
     *,
     source_channel: str,

@@ -90,6 +90,48 @@ def test_deliver_publish_to_core_returns_failed_on_exception(monkeypatch: pytest
     assert out == {"status": "failed", "source_post_id": "post-1"}
 
 
+def test_deliver_publish_to_core_releases_claim_when_enqueue_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _Session()
+    released: list[tuple[str, str, str]] = []
+
+    monkeypatch.setattr(live_sync_queue, "SESSION_LOCAL", lambda: _Session())
+    monkeypatch.setattr(
+        "postbridge.services.live_sync_publish_service.ingest_live_sync_publication",
+        lambda *args, **kwargs: SimpleNamespace(
+            skipped=False, target_id="target-1", source_post_id="post-1"
+        ),
+    )
+    monkeypatch.setattr(
+        "postbridge.services.live_sync_publish_service.live_sync_executor_task_kwargs",
+        lambda **kwargs: {"kw": kwargs},
+    )
+    monkeypatch.setattr(
+        "postbridge.workers.tasks.process_publication_target_task",
+        SimpleNamespace(delay=lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("queue down"))),
+    )
+    monkeypatch.setattr(
+        "postbridge.services.live_sync_publish_service.abort_live_sync_after_enqueue_failure",
+        lambda _session, **kwargs: released.append(
+            (kwargs["source_channel"], kwargs["source_post_id"], kwargs["target_channel"])
+        ),
+    )
+
+    out = live_sync_queue.deliver_publish_to_core(
+        source_channel="source",
+        target_channel="target",
+        post={"source_post_id": "post-1"},
+        saas_workspace_id="workspace",
+        tenant_id="tenant",
+        target_core_channel_id="target-core",
+        persist_failure=False,
+    )
+
+    assert out == {"status": "failed", "source_post_id": "post-1"}
+    assert released == [("source", "post-1", "target")]
+
+
 def test_deliver_edit_to_core_posts_payload_and_headers(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setattr(live_sync_queue, "_core_base_url", lambda: "http://core.test")
