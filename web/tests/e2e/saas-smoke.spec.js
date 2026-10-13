@@ -217,6 +217,7 @@ test('returns an OAuth provider login to the server-side consent endpoint', asyn
   })
   await page.addInitScript((value) => {
     window.sessionStorage.setItem('postbridge.auth_return_to', value)
+    window.sessionStorage.setItem('postbridge.oauth_callback_expected', String(Date.now()))
   }, returnTo)
 
   await page.goto('/#token=oauth-session-token')
@@ -238,6 +239,9 @@ test('renders the configured Yandex login provider', async ({ page }) => {
 test('accepts a legacy OAuth callback token on the dashboard route', async ({ page }) => {
   const calls = []
   await mockSaasBff(page, calls)
+  await page.addInitScript(() => {
+    window.sessionStorage.setItem('postbridge.oauth_callback_expected', String(Date.now()))
+  })
 
   await page.goto('/dashboard#token=oauth-session-token')
 
@@ -251,6 +255,17 @@ test('accepts a legacy OAuth callback token on the dashboard route', async ({ pa
       expect.objectContaining({ path: '/me', method: 'GET', authorization: 'Bearer oauth-session-token' }),
     ]),
   )
+})
+
+test('ignores crafted OAuth callback tokens without a pending provider login', async ({ page }) => {
+  await mockSaasBff(page)
+
+  await page.goto('/dashboard#token=oauth-session-token')
+
+  await expect(page).toHaveURL('/dashboard')
+  await expect
+    .poll(() => page.evaluate(() => window.localStorage.getItem('postbridge_token')))
+    .toBeNull()
 })
 
 test('keeps SaaS public marketing surfaces at root', async ({ page }) => {

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { listAuthProviders, requestMagicLink, reviewLogin, verifyMagicLink } from '../adapters/authFlows'
 import { setToken } from '../adapters/sessionToken'
-import { normalizeAuthReturnTo, rememberAuthReturnTo } from '../adapters/authReturnTo'
+import { markOAuthCallbackExpected, normalizeAuthReturnTo, rememberAuthReturnTo } from '../adapters/authReturnTo'
 import PublicLayout from '../components/PublicLayout'
 import TelegramDeepLinkField from '../components/TelegramDeepLinkField'
 import { fetchTelegramWebLinkStatus, startTelegramWebLinkSession } from '../telegramWebLinkFlow'
@@ -95,6 +95,11 @@ export default function Landing() {
       return DEFAULT_AUTH_PROVIDERS.includes(providerId)
     }
     return authProviders.some((provider) => provider?.id === providerId)
+  }
+
+  const beginOAuthProvider = (method) => {
+    markOAuthCallbackExpected()
+    reachMetrikaGoal('auth_started', { method })
   }
 
   const beginTelegramLogin = async () => {
@@ -311,7 +316,7 @@ export default function Landing() {
               <a
                 href="/auth/google/start"
                 className="btn btn-outline btn-block auth-provider-button auth-provider-button-spaced"
-                onClick={() => reachMetrikaGoal('auth_started', { method: 'google' })}
+                onClick={() => beginOAuthProvider('google')}
               >
                 <AuthProviderLogo provider="google" />
                 {t('login.google')}
@@ -321,7 +326,7 @@ export default function Landing() {
               <a
                 href="/auth/linkedin/start"
                 className="btn btn-outline btn-block auth-provider-button auth-provider-button-spaced"
-                onClick={() => reachMetrikaGoal('auth_started', { method: 'linkedin' })}
+                onClick={() => beginOAuthProvider('linkedin')}
               >
                 <AuthProviderLogo provider="linkedin" />
                 {t('login.linkedin')}
@@ -331,7 +336,7 @@ export default function Landing() {
               <a
                 href="/auth/vk/start"
                 className="btn btn-outline btn-block auth-provider-button"
-                onClick={() => reachMetrikaGoal('auth_started', { method: 'vk' })}
+                onClick={() => beginOAuthProvider('vk')}
               >
                 <AuthProviderLogo provider="vk" />
                 {t('login.vk')}
@@ -341,7 +346,7 @@ export default function Landing() {
               <a
                 href="/auth/yandex/start"
                 className="btn btn-outline btn-block auth-provider-button auth-provider-button-spaced"
-                onClick={() => reachMetrikaGoal('auth_started', { method: 'yandex' })}
+                onClick={() => beginOAuthProvider('yandex')}
               >
                 <AuthProviderLogo provider="yandex" />
                 {t('login.yandex')}
