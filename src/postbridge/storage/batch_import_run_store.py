@@ -416,6 +416,7 @@ class BatchImportRunStore:
         )
         published_source_ids: set[str] = set()
         skipped_source_ids: set[str] = set()
+        inflight_source_ids: set[str] = set()
         for row in enqueued_rows:
             if row.publication_target_id is None:
                 skipped_source_ids.add(row.source_post_id)
@@ -423,6 +424,8 @@ class BatchImportRunStore:
             target = self.session.get(PublicationTargetOrm, row.publication_target_id)
             if target is not None and target.status == "published":
                 published_source_ids.add(row.source_post_id)
+            elif target is not None and target.status in ("pending", "publishing"):
+                inflight_source_ids.add(row.source_post_id)
 
         fetched = list(
             self.session.scalars(
@@ -433,7 +436,11 @@ class BatchImportRunStore:
         )
         for fetched_post in fetched:
             source_post_id = fetched_post.source_post_id
-            if source_post_id in published_source_ids or source_post_id in skipped_source_ids:
+            if (
+                source_post_id in published_source_ids
+                or source_post_id in skipped_source_ids
+                or source_post_id in inflight_source_ids
+            ):
                 continue
             if self.get_published_post(
                 run.source_channel, source_post_id, run.target_channel
