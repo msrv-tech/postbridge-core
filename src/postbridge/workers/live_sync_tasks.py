@@ -11,7 +11,7 @@ from postbridge.services.live_sync_queue import (
     queue_live_sync_publish as enqueue_publish,
 )
 from postbridge.workers.celery_app import celery_app
-from postbridge.workers.media_group_buffer import pop_media_group
+from postbridge.workers.media_group_buffer import get_media_group_generation, pop_media_group
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,20 @@ def publish_live_sync_media_group(
     core_tenant_id: str,
     target_core_channel_id: str,
     producer: str | None = None,
+    buffer_generation: int | None = None,
 ) -> dict[str, str]:
+    if buffer_generation is not None:
+        current_generation = get_media_group_generation(source_channel, media_group_id)
+        if current_generation != buffer_generation:
+            logger.info(
+                "media_group superseded: chat=%s mg=%s expected=%s current=%s",
+                source_channel,
+                media_group_id,
+                buffer_generation,
+                current_generation,
+            )
+            return {"status": "skipped", "reason": "superseded"}
+
     items = pop_media_group(source_channel, media_group_id)
     if not items:
         logger.info("media_group empty or expired: chat=%s mg=%s", source_channel, media_group_id)

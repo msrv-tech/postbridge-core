@@ -6,7 +6,7 @@ from postbridge.workers import live_sync_tasks, media_group_buffer
 class _Redis:
     def __init__(self) -> None:
         self.lists: dict[str, list[str]] = {}
-        self.values: set[str] = set()
+        self.counters: dict[str, int] = {}
         self.deleted: list[str] = []
 
     def rpush(self, key: str, item: str) -> None:
@@ -15,14 +15,13 @@ class _Redis:
     def expire(self, key: str, ttl: int) -> None:
         assert ttl == media_group_buffer.MG_BUFFER_TTL
 
-    def set(self, key: str, value: str, *, nx: bool, ex: int) -> bool:
-        assert value == "1"
-        assert nx is True
-        assert ex == media_group_buffer.MG_SCHEDULED_TTL
-        if key in self.values:
-            return False
-        self.values.add(key)
-        return True
+    def incr(self, key: str) -> int:
+        self.counters[key] = self.counters.get(key, 0) + 1
+        return self.counters[key]
+
+    def get(self, key: str) -> str | None:
+        value = self.counters.get(key)
+        return str(value) if value is not None else None
 
     def lrange(self, key: str, start: int, end: int) -> list[str]:
         assert (start, end) == (0, -1)
@@ -31,15 +30,16 @@ class _Redis:
     def delete(self, key: str) -> None:
         self.deleted.append(key)
         self.lists.pop(key, None)
-        self.values.discard(key)
+        self.counters.pop(key, None)
 
 
-def test_media_group_buffer_adds_once_and_pops_items(monkeypatch) -> None:
+def test_media_group_buffer_adds_items_and_tracks_generation(monkeypatch) -> None:
     redis = _Redis()
     monkeypatch.setattr(media_group_buffer, "_get_redis", lambda: redis)
 
-    assert media_group_buffer.add_to_media_group("-100", "album", 1, "caption", "https://cdn.test/a.png") is True
-    assert media_group_buffer.add_to_media_group("-100", "album", 2, "", None) is False
+    assert media_group_buffer.add_to_media_group("-100", "album", 1, "caption", "https://cdn.test/a.png") == 1
+    assert media_group_buffer.add_to_media_group("-100", "album", 2, "", None) == 2
+    assert media_group_buffer.get_media_group_generation("-100", "album") == 2
 
     assert media_group_buffer.pop_media_group("-100", "album") == [
         {"msg_id": 1, "text": "caption", "media_url": "https://cdn.test/a.png"},
@@ -48,10 +48,30 @@ def test_media_group_buffer_adds_once_and_pops_items(monkeypatch) -> None:
     assert media_group_buffer.pop_media_group("-100", "album") is None
 
 
+def test_media_group_generation_debounce_skips_stale_publish(monkeypatch) -> None:
+    redis = _Redis()
+    monkeypatch.setattr(media_group_buffer, "_get_redis", lambda: redis)
+
+    assert media_group_buffer.add_to_media_group("-100", "album", 1, "caption", "https://cdn.test/a.png") == 1
+    assert media_group_buffer.add_to_media_group("-100", "album", 2, "", "https://cdn.test/b.png") == 2
+
+    out = live_sync_tasks.publish_live_sync_media_group.run(
+        "-100",
+        "target",
+        "workspace",
+        "album",
+        core_tenant_id="tenant",
+        target_core_channel_id="target-core",
+        buffer_generation=1,
+    )
+    assert out == {"status": "skipped", "reason": "superseded"}
+    assert media_group_buffer.pop_media_group("-100", "album") is not None
+
+
 def test_media_group_buffer_handles_redis_failures(monkeypatch) -> None:
     monkeypatch.setattr(media_group_buffer, "_get_redis", lambda: (_ for _ in ()).throw(RuntimeError("down")))
 
-    assert media_group_buffer.add_to_media_group("-100", "album", 1, "caption", None) is False
+    assert media_group_buffer.add_to_media_group("-100", "album", 1, "caption", None) is None
     assert media_group_buffer.pop_media_group("-100", "album") is None
 
 
