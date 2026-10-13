@@ -347,3 +347,29 @@ def test_celery_task_invokes_batch(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert process_scheduled_postbridge_publishes_task() == 1
     assert len(queued) == 1
+
+
+def test_process_due_rolls_back_when_live_sync_queue_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    _tenant_id, post_id, _src, _tgt = _seed_scheduled_draft()
+
+    def fail_queue(**kwargs):
+        _ = kwargs
+        raise RuntimeError("queue unavailable")
+
+    monkeypatch.setattr(sched_mod, "queue_live_sync_publish", fail_queue)
+    session = SESSION_LOCAL()
+    try:
+        assert process_due_scheduled_postbridge_publishes(session, batch_size=10) == 0
+    finally:
+        session.close()
+
+    session = SESSION_LOCAL()
+    try:
+        row = session.get(ContentItemOrm, post_id)
+        assert row is not None
+        assert row.status == "draft"
+        ex = _load_extra(row.body_structured_json)
+        assert ex.get("scheduled_publish_at")
+        assert "published_at" not in ex
+    finally:
+        session.close()
