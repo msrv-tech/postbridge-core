@@ -8,7 +8,7 @@ import { useI18n } from '../i18n'
 const ioDocuments = {
   '/privacy': {
     title: 'Privacy Policy',
-    updated: 'August 5, 2026',
+    updated: 'October 16, 2026',
     intro:
       'Postbridge helps users connect content channels, prepare posts, run publishing workflows, and manage workspace subscriptions.',
     sections: [
@@ -33,6 +33,7 @@ const ioDocuments = {
         body: [
           'Postbridge may exchange data with providers selected by the user, including Google, Meta, Telegram, X, storage, email, payment, monitoring, and AI infrastructure providers.',
           'Provider access is limited to the scopes and actions required for the workflow configured by the user.',
+          'For card payments, we share your billing email and purchase details with Lava. You enter card details on the payment provider checkout page.',
         ],
       },
       {
@@ -53,7 +54,7 @@ const ioDocuments = {
   },
   '/terms': {
     title: 'Terms of Service',
-    updated: 'August 5, 2026',
+    updated: 'October 16, 2026',
     intro:
       'These terms govern access to and use of Postbridge. By using the service, you agree to use it responsibly and only for lawful content workflows.',
     sections: [
@@ -76,7 +77,9 @@ const ioDocuments = {
         title: 'Billing',
         body: [
           'Paid plans and one-time services are charged through the payment methods shown in the product.',
-          'For Telegram Stars subscriptions, payment and renewal behavior follows the Telegram Stars flow presented to the user before payment.',
+          'Card subscriptions use Lava in USD and renew every 30 days until cancelled. The price, renewal period and recurring payment consent are shown before checkout.',
+          'Cancelling Lava auto-renewal preserves access until the paid period ends. Changing a paid plan requires a new payment after that date. Telegram Stars subscriptions continue through their displayed payment flow.',
+          'Contact billing support for refund requests and include your workspace and payment reference. Refund eligibility is reviewed for the affected purchase; requests do not themselves cancel auto-renewal. A completed migration cannot be undone by deleting imported posts.',
           'You can cancel or downgrade a workspace plan from workspace settings when available.',
         ],
       },
@@ -95,7 +98,7 @@ const ioDocuments = {
   },
   '/data-deletion': {
     title: 'Data Deletion Instructions',
-    updated: 'August 5, 2026',
+    updated: 'October 16, 2026',
     intro:
       'You can request deletion of your Postbridge account, workspace data, connected channel data, and imported or drafted content.',
     sections: [

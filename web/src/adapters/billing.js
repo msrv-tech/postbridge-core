@@ -26,7 +26,7 @@ export function verifyBillingEmail(payload) {
 export function createSubscription(workspaceId, payload) {
   return api(`/workspaces/${workspaceId}/billing/subscription/create`, {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, idempotency_key: payload.idempotency_key || (payload.provider === 'lava' ? crypto.randomUUID() : undefined) }),
   })
 }
 
@@ -44,5 +44,18 @@ export function initMigrationPayment(workspaceId, { provider, bridgeId }) {
   })
   return api(`/workspaces/${workspaceId}/billing/migration/init-payment?${q}`, {
     method: 'POST',
+    headers: provider === 'lava' ? { 'Idempotency-Key': crypto.randomUUID() } : undefined,
   })
+}
+
+export function getBillingCatalog() {
+  return api('/billing/catalog')
+}
+
+export function getBillingCheckout(workspaceId, checkoutId, refresh = false) {
+  return api(`/workspaces/${workspaceId}/billing/checkouts/${encodeURIComponent(checkoutId)}?refresh=${refresh}`)
+}
+
+export function getBillingHistory(workspaceId) {
+  return api(`/workspaces/${workspaceId}/billing/history`)
 }

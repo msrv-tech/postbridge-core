@@ -1,9 +1,11 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import PublicLayout from '../components/PublicLayout'
 import { useAuth } from '../useAuth'
 import { reachMetrikaGoal } from '../metrika'
 import { useI18n } from '../i18n'
+import { getBillingCatalog } from '../adapters/billing'
+import { getPublicMarket } from '../branding'
 
 function getPlans(t) {
   return [
@@ -75,25 +77,17 @@ function getOneTimeProducts(t) {
 }
 
 function getPricingRegion() {
-  if (typeof window === 'undefined') return false
-  const host = window.location.hostname.toLowerCase()
-  if (host === 'postbridge.io' || host === 'www.postbridge.io') return 'io'
-  return 'ru'
-}
-
-function formatStarsPrice(stars) {
-  return `${stars} ⭐`
+  return getPublicMarket()
 }
 
 function formatPlanPrice(plan, pricingRegion) {
   if (pricingRegion !== 'io') return plan.price
-  if (plan.priceStars != null) return formatStarsPrice(plan.priceStars)
-  return 'Free'
+  return plan.priceUsd
 }
 
 function renderPlanSecondaryPrice(t, plan, pricingRegion) {
   if (pricingRegion === 'io') {
-    return plan.priceUsd ? t('pricing.usdFuture', { usd: plan.priceUsd }) : null
+    return plan.priceStars != null ? t('pricing.starsAlternative', { stars: plan.priceStars }) : null
   }
   if (plan.priceStars != null) {
     return t('pricing.starsAlternative', { stars: plan.priceStars })
@@ -103,7 +97,7 @@ function renderPlanSecondaryPrice(t, plan, pricingRegion) {
 
 function renderOneTimeSecondaryPrice(t, product, pricingRegion) {
   if (pricingRegion === 'io') {
-    return t('pricing.usdFutureOneTime', { usd: product.priceUsd })
+    return `${product.priceStars} ⭐`
   }
   return `/ ${product.priceStars} ⭐`
 }
@@ -124,9 +118,12 @@ export default function Pricing() {
   const { t } = useI18n()
   const { user } = useAuth()
   const workspaceId = user?.workspaces?.[0]?.id || ''
-  const pricingRegion = getPricingRegion()
-  const plans = getPlans(t)
-  const oneTimeProducts = getOneTimeProducts(t)
+  const [catalog, setCatalog] = useState(null)
+  const pricingRegion = catalog?.market || getPricingRegion()
+  useEffect(() => { let active = true; getBillingCatalog().then((value) => { if (active) setCatalog(value) }).catch(() => {}); return () => { active = false } }, [])
+  const prices = new Map((catalog?.items || []).map((item) => [item.code, item]))
+  const plans = getPlans(t).map((plan) => ({ ...plan, priceUsd: prices.has(plan.code) ? `$${prices.get(plan.code).price_usd_minor / 100}` : plan.priceUsd }))
+  const oneTimeProducts = getOneTimeProducts(t).map((product) => ({ ...product, priceUsd: prices.has('migration_one_channel') ? `$${prices.get('migration_one_channel').price_usd_minor / 100}` : product.priceUsd }))
   const comparisonRows = getComparisonRows(t)
   useEffect(() => {
     reachMetrikaGoal('pricing_view')
@@ -168,7 +165,7 @@ export default function Pricing() {
                   {renderPlanSecondaryPrice(t, plan, pricingRegion) && (
                     <span className="pricing-stars">{renderPlanSecondaryPrice(t, plan, pricingRegion)}</span>
                   )}
-                  <span>{plan.period}</span>
+                  <span>{pricingRegion === 'io' && plan.code !== 'free' ? t('billing.lava.period') : plan.period}</span>
                 </div>
                 <ul className="check-list">
                   {plan.features.map((feature) => (
@@ -212,7 +209,7 @@ export default function Pricing() {
                     <p className="one-time-desc">{product.description}</p>
                   </div>
                   <div className="one-time-price">
-                    <strong>{pricingRegion === 'io' ? formatStarsPrice(product.priceStars) : `${product.priceRub} ₽`}</strong>
+                    <strong>{pricingRegion === 'io' ? product.priceUsd : `${product.priceRub} ₽`}</strong>
                     <span className="muted">{renderOneTimeSecondaryPrice(t, product, pricingRegion)}</span>
                     <span className="one-time-period">{t('pricing.oneTime.import.period')}</span>
                   </div>

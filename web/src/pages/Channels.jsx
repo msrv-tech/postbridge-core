@@ -4,6 +4,7 @@ import { clearToken } from '../adapters/sessionToken'
 import { useAuth } from '../useAuth'
 import AppShell from '../components/AppShell'
 import { BILLING_SUPPORT_EMAIL, formatSubscriptionPeriod } from '../billingSupport'
+import { BillingPlanOptions, LavaPlanDialog } from '../components/LavaBilling'
 import {
   cancelSubscription,
   createSubscription,
@@ -577,18 +578,21 @@ export default function Channels() {
     }
   };
 
+  const [lavaPlan, setLavaPlan] = useState(null);
+
   const handleHistoryPaymentTbank = async () => {
     if (!billingEnabled) return;
     setHistoryError('');
     setHistoryLoading(true);
     try {
-      const init = await initMigrationPayment(workspaceId, { provider: 'tbank', bridgeId: historyModal.id });
+      const init = await initMigrationPayment(workspaceId, { provider: summary?.migration_product?.price_usd_minor != null ? 'lava' : 'tbank', bridgeId: historyModal.id });
       if (init.payment_url) {
         window.open(init.payment_url, '_blank', 'noopener,noreferrer');
       }
       setHistoryPaymentUrl(init.payment_url);
       setHistoryInvoiceUrl(null);
     } catch (payErr) {
+      if (payErr.details?.checkout_id) { window.location.assign(`/workspaces/${workspaceId}/settings?billing=lava_return&checkout=${encodeURIComponent(payErr.details.checkout_id)}`); return; }
       setHistoryError(payErr.message || t('channels.history.tbankFailed'));
     } finally {
       setHistoryLoading(false);
@@ -682,6 +686,7 @@ export default function Channels() {
   };
 
   const handlePlanSelect = (p, provider) => {
+    if (provider === 'lava') { setTariffModal(false); setLavaPlan(p); return }
     if (!billingEnabled) return;
     setTariffError('');
     const currentCode = summary?.billing?.plan_code || '';
@@ -1456,9 +1461,9 @@ export default function Channels() {
                     type="button"
                     className="btn"
                     onClick={() => openBillingEmailModalThen(handleHistoryPaymentTbank)}
-                    disabled={historyLoading}
+                    disabled={historyLoading || (summary?.migration_product?.price_usd_minor != null && !summary?.migration_product?.lava_available)}
                   >
-                    {t('channels.history.payRub', { price: summary?.migration_product?.price_rub ?? 500 })}
+                    {summary?.migration_product?.price_usd_minor != null ? t('billing.lava.payMigration', { price: (summary.migration_product.price_usd_minor / 100).toFixed(2) }) : t('channels.history.payRub', { price: summary?.migration_product?.price_rub ?? 500 })}
                   </button>
                   <button type="button" className="btn btn-secondary" onClick={handleHistoryPaymentStars} disabled={historyLoading}>
                     {t('channels.history.payStars', { price: summary?.migration_product?.price_stars ?? 280 })}
@@ -1473,7 +1478,7 @@ export default function Channels() {
                       target="_blank"
                       rel="noopener noreferrer"
                     >
-                      {t('channels.history.openTbank')}
+                      {t('billing.lava.openPayment')}
                     </a>
                   )}
                   {historyInvoiceUrl && (
@@ -1575,73 +1580,7 @@ export default function Channels() {
             {tariffLoading && !tariffStarsWaiting && <p className="muted">{t('channels.tariff.loadingPlans')}</p>}
             {tariffError && <p className="error">{tariffError}</p>}
             {!tariffLoading && plans.length > 0 && (
-              <div className="plan-list">
-                {plans.map((p) => {
-                  const isCurrent = summary?.billing?.plan_code === p.code;
-                  const hasBothPrices = p.price_rub && p.price_stars;
-                  return (
-                    <div key={p.code} className="plan-item">
-                      <div className="plan-item-top">
-                        <div className="plan-info">
-                          <strong>{p.display_name || p.code}</strong>
-                          <span className="plan-price">
-                            {p.price_rub && p.price_stars
-                              ? `${p.price_rub}₽ ${t('common.or')} ${p.price_stars}⭐`
-                              : p.price_rub
-                                ? `${p.price_rub}₽`
-                                : p.price_stars
-                                  ? `${p.price_stars}⭐`
-                                  : t('common.free')}
-                            {p.period && p.period !== 'month' ? ` / ${p.period}` : t('channels.tariff.priceMonthly')}
-                          </span>
-                        </div>
-                        {!isCurrent && (
-                          <div className="plan-actions">
-                            {hasBothPrices ? (
-                              <>
-                                <button
-                                  type="button"
-                                  className="btn btn-small"
-                                  onClick={() => handlePlanSelect(p, 'tbank')}
-                                  disabled={tariffLoading || tariffStarsWaiting}
-                                >
-                                  {p.price_rub}₽
-                                </button>
-                                <button
-                                  type="button"
-                                  className="btn btn-small btn-secondary"
-                                  onClick={() => handlePlanSelect(p, 'stars')}
-                                  disabled={tariffLoading || tariffStarsWaiting}
-                                >
-                                  {p.price_stars}⭐
-                                </button>
-                              </>
-                            ) : p.price_rub ? (
-                              <button
-                                type="button"
-                                className="btn btn-small"
-                                onClick={() => handlePlanSelect(p, 'tbank')}
-                                disabled={tariffLoading || tariffStarsWaiting}
-                              >
-                                {t('common.choose')}
-                              </button>
-                            ) : p.price_stars ? (
-                              <button
-                                type="button"
-                                className="btn btn-small"
-                                onClick={() => handlePlanSelect(p, 'stars')}
-                                disabled={tariffLoading || tariffStarsWaiting}
-                              >
-                                {t('common.choose')}
-                              </button>
-                            ) : null}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <BillingPlanOptions plans={plans} billing={summary?.billing} onSelect={handlePlanSelect} busy={tariffLoading || tariffStarsWaiting} />
             )}
             <div className="inline-actions" style={{ marginTop: '1rem' }}>
               <button
@@ -1659,6 +1598,8 @@ export default function Channels() {
           </div>
         </div>
       )}
+
+      {billingEnabled && lavaPlan && <LavaPlanDialog plan={lavaPlan} workspaceId={workspaceId} workspaceName={user?.workspaces?.find((workspace) => workspace.id === workspaceId)?.name} billing={summary?.billing} onClose={() => setLavaPlan(null)} onUpdated={() => window.location.reload()} withBillingEmail={(action) => { if (user?.billing_email_required) setLavaPlan(null); openBillingEmailModalThen(action) }} />}
 
       {billingEnabled && tbankSubscriptionConsentModal && (
         <div

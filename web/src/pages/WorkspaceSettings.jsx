@@ -23,6 +23,7 @@ import { getStoredTheme, setStoredTheme, THEMES } from '../adapters/theme'
 import { useAuth } from '../useAuth'
 import AppShell from '../components/AppShell'
 import { BILLING_SUPPORT_EMAIL, formatSubscriptionPeriod } from '../billingSupport'
+import { BillingPlanOptions, LavaPlanDialog, LavaPaymentStatus, LavaBillingDetails } from '../components/LavaBilling'
 import {
   cancelSubscription,
   createSubscription,
@@ -159,6 +160,8 @@ export default function WorkspaceSettings() {
   const [tariffError, setTariffError] = useState('')
   const [tariffStarsWaiting, setTariffStarsWaiting] = useState(null)
   const [tbankSubscriptionWaiting, setTbankSubscriptionWaiting] = useState(null)
+  const [lavaPlan, setLavaPlan] = useState(null)
+  const lavaCheckoutId = new URLSearchParams(location.search).get('checkout')
   const [billingEmailModal, setBillingEmailModal] = useState(null)
   const [tbankSubscriptionConsentModal, setTbankSubscriptionConsentModal] = useState(null)
   const [tbankSubscriptionConsentChecked, setTbankSubscriptionConsentChecked] = useState(false)
@@ -270,6 +273,7 @@ export default function WorkspaceSettings() {
       .then((r) => setBillingSummary(r))
       .catch(() => {})
   }, [workspaceId])
+  const onLavaPaid = useCallback(() => { loadBillingSummary() }, [loadBillingSummary])
 
   useEffect(() => {
     loadBillingSummary()
@@ -713,6 +717,7 @@ export default function WorkspaceSettings() {
   }
 
   const handlePlanSelect = (plan, provider) => {
+    if (provider === 'lava') { setTariffModal(false); setLavaPlan(plan); return }
     if (!billingEnabled) return
     setTariffError('')
     reachMetrikaGoal('plan_selected', {
@@ -1475,6 +1480,9 @@ export default function WorkspaceSettings() {
         </div>
       )}
 
+      {billingEnabled && <LavaPaymentStatus workspaceId={workspaceId} checkoutId={lavaCheckoutId} onPaid={onLavaPaid} />}
+      {billingEnabled && <LavaBillingDetails workspaceId={workspaceId} billing={billingSummary?.billing} canManage={user.is_platform_admin || ['owner', 'admin'].includes(user.workspaces?.find((workspace) => workspace.id === workspaceId)?.role)} onUpdated={loadBillingSummary} />}
+
       {billingEnabled && tariffModal && (
         <div
           className="modal-overlay"
@@ -1495,83 +1503,7 @@ export default function WorkspaceSettings() {
             {tariffLoading && !tariffStarsWaiting && <p className="muted">{t('channels.tariff.loadingPlans')}</p>}
             {tariffError && <p className="error">{tariffError}</p>}
             {!tariffLoading && plans.length > 0 && (
-              <div className="plan-list">
-                {plans.map((plan) => {
-                  const isCurrent = billingSummary?.billing?.plan_code === plan.code
-                  const isRequested = tariffInitialPlanCode === plan.code
-                  const hasBothPrices = plan.price_rub && plan.price_stars
-                  return (
-                    <div
-                      key={plan.code}
-                      className={isRequested ? 'plan-item plan-item-requested' : 'plan-item'}
-                    >
-                      <div className="plan-item-top">
-                        <div className="plan-info">
-                          <strong>
-                            {plan.display_name || plan.code}
-                            {isCurrent && <span className="plan-requested-badge current">{t('settings.plan.current')}</span>}
-                            {!isCurrent && isRequested && (
-                              <span className="plan-requested-badge">{t('settings.plan.requested')}</span>
-                            )}
-                          </strong>
-                          <span className="plan-price">
-                            {plan.price_rub && plan.price_stars
-                              ? `${plan.price_rub}₽ ${t('common.or')} ${plan.price_stars}⭐`
-                              : plan.price_rub
-                                ? `${plan.price_rub}₽`
-                                : plan.price_stars
-                                  ? `${plan.price_stars}⭐`
-                                  : t('common.free')}
-                            {plan.period && plan.period !== 'month' ? ` / ${plan.period}` : t('channels.tariff.priceMonthly')}
-                          </span>
-                        </div>
-                        {!isCurrent && (
-                          <div className="plan-actions">
-                            {hasBothPrices ? (
-                              <>
-                                <button
-                                  type="button"
-                                  className="btn btn-small"
-                                  onClick={() => handlePlanSelect(plan, 'tbank')}
-                                  disabled={tariffLoading || tariffStarsWaiting}
-                                >
-                                  {plan.price_rub}₽
-                                </button>
-                                <button
-                                  type="button"
-                                  className="btn btn-small btn-secondary"
-                                  onClick={() => handlePlanSelect(plan, 'stars')}
-                                  disabled={tariffLoading || tariffStarsWaiting}
-                                >
-                                  {plan.price_stars}⭐
-                                </button>
-                              </>
-                            ) : plan.price_rub ? (
-                              <button
-                                type="button"
-                                className="btn btn-small"
-                                onClick={() => handlePlanSelect(plan, 'tbank')}
-                                disabled={tariffLoading || tariffStarsWaiting}
-                              >
-                                {t('common.choose')}
-                              </button>
-                            ) : plan.price_stars ? (
-                              <button
-                                type="button"
-                                className="btn btn-small"
-                                onClick={() => handlePlanSelect(plan, 'stars')}
-                                disabled={tariffLoading || tariffStarsWaiting}
-                              >
-                                {t('common.choose')}
-                              </button>
-                            ) : null}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+              <BillingPlanOptions plans={plans} billing={billingSummary?.billing} onSelect={handlePlanSelect} busy={tariffLoading || tariffStarsWaiting} requestedCode={tariffInitialPlanCode} />
             )}
             <div className="inline-actions" style={{ marginTop: '1rem' }}>
               <button
@@ -1590,6 +1522,8 @@ export default function WorkspaceSettings() {
           </div>
         </div>
       )}
+
+      {billingEnabled && lavaPlan && <LavaPlanDialog plan={lavaPlan} workspaceId={workspaceId} workspaceName={user?.workspaces?.find((workspace) => workspace.id === workspaceId)?.name} billing={billingSummary?.billing} onClose={() => setLavaPlan(null)} onUpdated={loadBillingSummary} withBillingEmail={(action) => { if (user?.billing_email_required) setLavaPlan(null); openBillingEmailModalThen(action) }} />}
 
       {billingEnabled && tbankSubscriptionConsentModal && (
         <div
