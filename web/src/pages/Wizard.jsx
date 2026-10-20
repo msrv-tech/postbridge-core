@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { createChannelRegistryItem, createConnection, listChannelRegistry } from '../adapters/channels'
+import VideoBridgeSettings, { defaultVideoBridgeSettings } from '../components/VideoBridgeSettings'
 import AppShell from '../components/AppShell'
 import { useI18n } from '../i18n'
 
 function platformLabel(platform, t) {
-  const labels = { telegram: 'TG', max: 'MAX', vk: 'VK', zen: 'RSS', rss: 'RSS', postbridge: 'Postbridge' }
+  const labels = { telegram: 'TG', max: 'MAX', vk: 'VK', zen: 'RSS', rss: 'RSS', postbridge: 'Postbridge', youtube: 'YouTube', instagram: 'Instagram' }
   return labels[platform] || platform
 }
 
@@ -19,6 +20,8 @@ export default function Wizard() {
   const [error, setError] = useState('')
   const [sourceChannelId, setSourceChannelId] = useState('')
   const [targetValue, setTargetValue] = useState('')
+  const [videoEnabled, setVideoEnabled] = useState(false)
+  const [videoSettings, setVideoSettings] = useState(null)
   const [creating, setCreating] = useState(false)
   const [creatingRssTarget, setCreatingRssTarget] = useState(false)
 
@@ -53,6 +56,8 @@ export default function Wizard() {
     }
   }, [channels, sourceChannelId, sourceChannels, targetChannels, targetValue])
 
+  const videoMode = targetChannel?.platform === 'youtube' || (sourceChannel?.platform === 'postbridge' && videoEnabled)
+  useEffect(() => { setVideoSettings(defaultVideoBridgeSettings(targetChannel?.platform)); setVideoEnabled(false) }, [targetChannel?.id])
   const handleCreate = async () => {
     if (!sourceChannel) return
     if (!targetChannel) return
@@ -67,6 +72,7 @@ export default function Wizard() {
         target_channel_id: targetChannel.platform_channel_id,
         target_display: targetChannel.title || targetChannel.platform_channel_id,
         requested_limit: 0,
+        ...(videoMode ? { video_delivery: videoSettings } : {}),
       }
       if (sourceChannel.credentials_ref && sourceChannel.credentials_ref !== 'env') {
         body.source_credentials_id = sourceChannel.credentials_ref
@@ -104,7 +110,7 @@ export default function Wizard() {
     }
   }
 
-  const canCreate = sourceChannel && targetChannel
+  const canCreate = sourceChannel && targetChannel && (!videoMode || (sourceChannel.platform === 'postbridge' && (targetChannel.platform !== 'youtube' || videoSettings?.made_for_kids != null)))
 
   if (loading) {
     return (
@@ -250,6 +256,8 @@ export default function Wizard() {
             )}
           </div>
 
+          {sourceChannel?.platform === 'postbridge' && ['instagram', 'telegram'].includes(targetChannel?.platform) && <label><input type="checkbox" checked={videoEnabled} onChange={event => setVideoEnabled(event.target.checked)} />{t('videoBridge.videoOnly')}</label>}
+          {videoMode && (sourceChannel?.platform === 'postbridge' ? <VideoBridgeSettings platform={targetChannel.platform} value={videoSettings} onChange={setVideoSettings} busy={creating} /> : <p className="error">{t('videoBridge.sourceRequired')}</p>)}
           {error && <p className="error">{error}</p>}
 
           <div className="inline-actions" style={{ marginTop: '1rem' }}>

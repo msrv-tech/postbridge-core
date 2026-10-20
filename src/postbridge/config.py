@@ -141,6 +141,12 @@ class Settings:
     agent_trace_max_entries: int
     agent_trace_compaction_mode: str
     agent_review_body_retention_days: int
+    video_studio_enabled: bool = False
+    video_publication_enabled: bool = False
+    video_ai_enabled: bool = False
+    video_ai_selfhost_budget_units: int = 0
+    video_speech_enabled: bool = False
+    video_speech_model: str = "gemini-2.5-flash-tts"
 
 
 def _to_bool(value: str | None, default: bool = False) -> bool:
@@ -293,6 +299,12 @@ def get_settings() -> Settings:
         web_app_base_url=_strip_optional_env(os.getenv("WEB_APP_BASE_URL")),
         magic_link_base_url=_strip_optional_env(os.getenv("MAGIC_LINK_BASE_URL")),
         telegram_bot_username=(os.getenv("TELEGRAM_BOT_USERNAME") or "").strip().lstrip("@"),
+        video_studio_enabled=_to_bool(os.getenv("VIDEO_STUDIO_ENABLED")),
+        video_publication_enabled=_to_bool(os.getenv("VIDEO_PUBLICATION_ENABLED")),
+        video_ai_enabled=_to_bool(os.getenv("VIDEO_AI_ENABLED")),
+        video_ai_selfhost_budget_units=int(os.getenv("VIDEO_AI_SELFHOST_BUDGET_UNITS", "0")),
+        video_speech_enabled=_to_bool(os.getenv("VIDEO_SPEECH_ENABLED")),
+        video_speech_model=os.getenv("VIDEO_SPEECH_MODEL", "gemini-2.5-flash-tts").strip(),
         core_service_token=_strip_optional_env(os.getenv("CORE_SERVICE_TOKEN")),
         status_event_outbox_batch_size=int(
             os.getenv("STATUS_EVENT_OUTBOX_BATCH_SIZE", "100")

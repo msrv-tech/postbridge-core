@@ -95,6 +95,8 @@ class TelegramPublisher:
         text = payload.text or ""
 
         try:
+            if payload.media_type == "video":
+                return self._send_video(token, chat_id, payload.media_url or "", text)
             if payload.media_url and _is_image_url(payload.media_url):
                 return self._send_photo(token, chat_id, payload.media_url, text)
             if payload.media_url:
@@ -124,6 +126,20 @@ class TelegramPublisher:
                 retryable=True,
                 details={"target_channel": target_channel, "reason": str(exc)},
             ) from exc
+
+    def _send_video(self, token: str, chat_id: str, video_url: str, caption: str) -> str:
+        # One attempt only. A timeout after POST may mean the video was already sent.
+        with httpx.Client(timeout=httpx.Timeout(self._BOT_API_TIMEOUT),
+                          proxy=httpx_proxy_arg(self.settings.telegram_proxy_url)) as client:
+            response = client.post(f"{TG_BOT_API}{token}/sendVideo", json={
+                "chat_id": chat_id, "video": video_url, "caption": caption, "supports_streaming": True})
+            response.raise_for_status()
+            data = response.json()
+        result = data.get("result") if isinstance(data, dict) else None
+        if not isinstance(result, dict) or not result.get("message_id"):
+            raise ExternalApiError(code="EXTERNAL_API_TELEGRAM_UNKNOWN_RESULT", message="Telegram returned no message identifier",
+                source="telegram", retryable=True, details={"target_channel": chat_id})
+        return str(result["message_id"])
 
     def _send_message(self, token: str, chat_id: str, text: str) -> str | None:
         url = f"{TG_BOT_API}{token}/sendMessage"

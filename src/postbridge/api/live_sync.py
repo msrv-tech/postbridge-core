@@ -164,6 +164,9 @@ def edit_single(
 ) -> dict[str, str]:
     """Редактирует пост в MAX по source_post_id (требует сохранённый max_message_id)."""
     check_sync_publish_auth(request)
+    from postbridge.services.video_publication import reject_unapproved_route
+    reject_unapproved_route(session, payload.tenant_id, content_id=payload.post.get("source_post_id"),
+        urls=[payload.post.get("media_url"), *(payload.post.get("media_urls") or [])])
     post_data = payload.post
     source_post_id = post_data.get("source_post_id") or str(post_data.get("message_id", ""))
     text = post_data.get("text") or post_data.get("caption") or ""

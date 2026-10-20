@@ -7,6 +7,7 @@ import {
   createVkCommunityCredential,
   getLinkedinAuthorizeUrl,
   getMetaAuthorizeUrl,
+  getYouTubeAuthorizeUrl,
   getXAuthorizeUrl,
   listLinkedinOrganizations,
   requestMaxChannelVerification,
@@ -43,6 +44,7 @@ const ALL_PLATFORMS = [
   { id: 'linkedin', label: 'LinkedIn' },
   { id: 'facebook', label: 'Facebook' },
   { id: 'instagram', label: 'Instagram' },
+  ...(!isSelfhostMode() ? [{ id: 'youtube', label: 'YouTube' }] : []),
   { id: 'x', label: 'X' },
   { id: 'bluesky', label: 'Bluesky' },
   { id: 'mastodon', label: 'Mastodon' },
@@ -95,6 +97,7 @@ export default function AddChannel() {
   const [validatedDisplay, setValidatedDisplay] = useState(null)
   const [loading, setLoading] = useState(false)
   const [validating, setValidating] = useState(false)
+  const [youtubePolicyAccepted, setYoutubePolicyAccepted] = useState(false)
   const [error, setError] = useState('')
   // MAX: verification with a unique code.
   const [maxCode, setMaxCode] = useState(null)
@@ -539,6 +542,24 @@ export default function AddChannel() {
               ))}
             </select>
           </div>
+          {platform === 'youtube' ? <div>
+            <p>{t('youtube.connectHint')}</p>
+            <label className="checkbox-label">
+              <input type="checkbox" checked={youtubePolicyAccepted} onChange={(event) => setYoutubePolicyAccepted(event.target.checked)} />
+              <span>{t('youtube.policyAccept')}{' '}
+                <a href="/terms" target="_blank" rel="noopener noreferrer">{t('youtube.postbridgeTerms')}</a>,{' '}
+                <a href="/privacy" target="_blank" rel="noopener noreferrer">{t('youtube.privacy')}</a>,{' '}
+                <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer">{t('youtube.youtubeTerms')}</a>.
+              </span>
+            </label>
+            <button type="button" className="btn" disabled={validating || !youtubePolicyAccepted} onClick={async () => {
+              setValidating(true); setError('')
+              try { const result = await getYouTubeAuthorizeUrl(workspaceId, youtubePolicyAccepted); window.location.href = result.authorize_url }
+              catch (failure) { setError(failure.message) }
+              finally { setValidating(false) }
+            }}>{t('youtube.connect')}</button>
+            {error && <p className="error">{error}</p>}
+          </div> : <>
           {platform === 'telegram' && (
             <p className="section-copy">
               {t('addChannel.botAdminPrefix')}{' '}
@@ -1075,6 +1096,7 @@ export default function AddChannel() {
               {loading ? t('addChannel.adding') : t('addChannel.title')}
             </button>
           </div>
+          </>}
         </form>
       </div>
     </AppShell>

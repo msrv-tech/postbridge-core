@@ -3,12 +3,49 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 from urllib.parse import quote, urljoin
 
 from postbridge.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def copy_media_object_to_file(object_key: str, destination: Path) -> None:
+    """Stream a managed object to a worker's private temporary directory."""
+    settings = get_settings()
+    if settings.media_storage_type == "local":
+        root = Path(settings.media_storage_path or "/var/postbridge/media").resolve()
+        source = (root / object_key).resolve()
+        source.relative_to(root)
+        shutil.copyfile(source, destination)
+    elif settings.media_storage_type == "s3":
+        _s3_client(settings).download_file(settings.s3_bucket, object_key, str(destination))
+    else:
+        raise RuntimeError("Media storage is not configured")
+
+
+def upload_media_file(object_key: str, source: Path, content_type: str) -> None:
+    """Upload a rendered file without loading it into application memory."""
+    settings = get_settings()
+    if settings.media_storage_type == "local":
+        root = Path(settings.media_storage_path or "/var/postbridge/media").resolve()
+        destination = (root / object_key).resolve()
+        destination.relative_to(root)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+    elif settings.media_storage_type == "s3":
+        _s3_client(settings).upload_file(str(source), settings.s3_bucket, object_key, ExtraArgs={"ContentType": content_type})
+    else:
+        raise RuntimeError("Media storage is not configured")
+
+
+def managed_media_url(asset_id: str, object_key: str) -> str:
+    """Stable public URL using the existing Core proxy for private S3 objects."""
+    settings = get_settings()
+    base = (settings.media_base_url or f"{settings.core_base_url.rstrip('/')}/media").rstrip("/")
+    return f"{base}/{asset_id}" if settings.media_storage_type == "s3" else f"{base}/{quote(object_key)}"
 
 
 def upload_media_object(object_key: str, data: bytes, content_type: str) -> str:

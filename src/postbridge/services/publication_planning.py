@@ -58,6 +58,8 @@ def create_content_with_plan_and_targets(
     Все строки получают один и тот же tenant_id; каналы должны существовать и принадлежать tenant.
     """
     ids = list(channel_ids)
+    from postbridge.services.video_publication import reject_unapproved_route
+    reject_unapproved_route(session, tenant_id, urls=[media_url, *(media_urls or [])])
     if not ids:
         raise ValueError("channel_ids must not be empty")
 
@@ -162,10 +164,15 @@ def create_plan_and_targets_for_content_item(
     plan_status: str = "scheduled",
     target_status: str = "pending",
     scheduled_at: datetime | None = None,
+    video_approval: bool = False,
 ) -> PublicationChainResult:
     """Create a publication plan and targets for an existing content item."""
     if content_item.tenant_id != tenant_id:
         raise ValueError("content item belongs to another tenant")
+    if not video_approval:
+        from postbridge.services.video_publication import reject_unapproved_route
+        reject_unapproved_route(session, tenant_id, content_id=content_item.id,
+            urls=[content_item.media_url, *(content_item.media_urls or [])])
 
     ids = list(channel_ids)
     if not ids:

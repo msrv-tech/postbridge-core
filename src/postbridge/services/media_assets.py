@@ -15,7 +15,8 @@ from postbridge.infrastructure.media_storage import (
     delete_media_object,
     upload_media_object,
 )
-from postbridge.models.domain import ContentItemOrm, MediaAssetOrm, TenantOrm
+from postbridge.models.domain import (ContentItemOrm, MediaAssetOrm, TenantOrm, VideoRevisionOrm,
+    VideoProductionJobOrm, AgentTaskOrm, AgentRunOrm, VideoAgentExecutionOrm)
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,7 @@ def _media_asset_referenced_by_content(
 
 
 def delete_media_asset(session: Session, *, tenant_id: str, media_asset_id: str) -> None:
+    session.scalar(select(TenantOrm).where(TenantOrm.id == tenant_id).with_for_update())
     row = session.get(MediaAssetOrm, media_asset_id)
     if row is None or row.tenant_id != tenant_id:
         raise ValidationError(
@@ -129,6 +131,21 @@ def delete_media_asset(session: Session, *, tenant_id: str, media_asset_id: str)
             message_key="error.validation.media_asset_not_found",
             details={"media_asset_id": media_asset_id},
         )
+    video_reference = session.scalar(select(VideoRevisionOrm.id).where(
+        VideoRevisionOrm.tenant_id == tenant_id, cast(VideoRevisionOrm.scenes, String).contains(media_asset_id)
+    ).limit(1))
+    video_output = session.scalar(select(VideoProductionJobOrm.id).where(
+        VideoProductionJobOrm.tenant_id == tenant_id, or_(VideoProductionJobOrm.output_asset_id == media_asset_id, cast(VideoProductionJobOrm.progress_json, String).contains(media_asset_id))
+    ).limit(1))
+    video_template = session.scalar(select(AgentTaskOrm.id).where(AgentTaskOrm.tenant_id == tenant_id,
+        AgentTaskOrm.mode == "video_autopilot", AgentTaskOrm.status != "archived",
+        AgentTaskOrm.task_config_json.contains(media_asset_id)).limit(1))
+    video_intent = session.scalar(select(VideoAgentExecutionOrm.id).join(AgentRunOrm,
+        AgentRunOrm.id == VideoAgentExecutionOrm.id).where(VideoAgentExecutionOrm.tenant_id == tenant_id,
+        AgentRunOrm.status.in_(["queued", "running"]),
+        cast(VideoAgentExecutionOrm.input_snapshot, String).contains(media_asset_id)).limit(1))
+    if video_reference or video_output or video_template or video_intent:
+        raise ValidationError(code="VALIDATION_MEDIA_ASSET_IN_USE", message="media asset is used by a video project", details={})
     if _media_asset_referenced_by_content(
         session,
         tenant_id=tenant_id,

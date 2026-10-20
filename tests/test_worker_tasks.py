@@ -288,6 +288,7 @@ def test_due_agent_and_cleanup_task_wrappers(monkeypatch: pytest.MonkeyPatch):
         def __init__(self, id: str, tenant_id: str) -> None:
             self.id = id
             self.tenant_id = tenant_id
+            self.mode = "topic_scout"
 
     def fake_list_due(_session):
         return [Row("task-1", "tenant-1"), Row("task-2", "tenant-2")]

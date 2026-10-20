@@ -40,6 +40,9 @@ def ingest_live_sync_publication(
     При ошибке до commit — release_claim и rollback.
     """
     post_data = post
+    from postbridge.services.video_publication import reject_unapproved_route
+    reject_unapproved_route(session, tenant_id, content_id=post_data.get("source_post_id"),
+        urls=[post_data.get("media_url"), *(post_data.get("media_urls") or [])])
     source_post_id = post_data.get("source_post_id") or str(post_data.get("message_id", ""))
     text = post_data.get("text") or post_data.get("caption") or ""
     media_url = post_data.get("media_url")

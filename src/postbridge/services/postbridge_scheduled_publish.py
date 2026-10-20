@@ -145,6 +145,10 @@ def try_publish_scheduled_postbridge_item(
     if row is None:
         return False, []
 
+    from postbridge.services.video_publication import is_video_post
+    if is_video_post(session, row.id):
+        return False, []
+
     extra = _load_extra(row.body_structured_json)
     raw_sched = extra.get("scheduled_publish_at")
     if not isinstance(raw_sched, str) or not raw_sched.strip():

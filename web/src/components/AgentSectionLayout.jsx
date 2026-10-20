@@ -1,5 +1,7 @@
 import { NavLink } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import { useI18n } from '../i18n'
+import { getVideoCapabilities } from '../adapters/video'
 
 export default function AgentSectionLayout({
   workspaceId,
@@ -8,9 +10,16 @@ export default function AgentSectionLayout({
   sidebarFooter = null,
 }) {
   const { t } = useI18n()
+  const [videoEnabled, setVideoEnabled] = useState(activeItem === 'videos')
+  useEffect(() => {
+    let active = true
+    getVideoCapabilities(workspaceId).then((caps) => { if (active) setVideoEnabled(caps.supports_schedules || activeItem === 'videos') }).catch(() => {})
+    return () => { active = false }
+  }, [workspaceId, activeItem])
   const links = [
     { key: 'topic-scout', label: t('agents.nav.topicScout'), to: `/workspaces/${workspaceId}/agents/topic-scout` },
     { key: 'editor', label: t('agents.nav.editor'), to: `/workspaces/${workspaceId}/agents/editor` },
+    ...(videoEnabled ? [{ key: 'videos', label: t('videoSchedule.title'), to: `/workspaces/${workspaceId}/agents/videos` }] : []),
     { key: 'candidates', label: t('agents.nav.candidates'), to: `/workspaces/${workspaceId}/agents/candidates` },
     { key: 'faq', label: t('common.faq'), to: `/workspaces/${workspaceId}/agents/help` },
   ]

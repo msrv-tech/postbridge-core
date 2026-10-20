@@ -18,6 +18,7 @@ _CAP = PlatformCapabilities(
     historical_migration_target_supported=True,
     ai_adapt_supported=True,
     fetch_credentials_required=True,
+    video_formats=("video",),
 )
 
 

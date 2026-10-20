@@ -1784,6 +1784,27 @@ select {
 }
 
 /* Post Editor layout */
+.post-editor-video-origin video {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  margin: 0 auto 1rem;
+  border-radius: .75rem;
+  background: #121820;
+}
+
+.video-publication-card { padding: 1rem; margin-bottom: 1.5rem; border: 1px solid var(--border, #64748b); border-radius: .75rem; }
+.video-publication-card label { display: flex; align-items: center; gap: .5rem; margin: .7rem 0; overflow-wrap: anywhere; }
+.video-publication-card fieldset { min-width: 0; margin: 1rem 0; border: 1px solid var(--border, #64748b); border-radius: .5rem; }
+.video-publication-text { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; padding: .8rem; background: var(--surface, #162033); border-radius: .5rem; }
+.video-publication-card li { margin: .7rem 0; overflow-wrap: anywhere; }
+.video-provider-options label:not(:has(input[type=checkbox])) { display: grid; gap: .5rem; }
+.video-provider-options select, .video-provider-options input:not([type=checkbox]) { box-sizing: border-box; width: 100%; min-width: 0; padding: .7rem; font: inherit; border: 1px solid var(--border, #64748b); border-radius: .5rem; color: inherit; background: var(--surface, #162033); }
+.video-delivery-time label:not(:has(input[type=checkbox])) { display: grid; gap: .5rem; }
+.video-delivery-time select, .video-delivery-time input[type=datetime-local] { box-sizing: border-box; width: 100%; min-width: 0; padding: .7rem; font: inherit; border: 1px solid var(--border, #64748b); border-radius: .5rem; color: inherit; background: var(--surface, #162033); }
+.post-editor-fields { display: contents; }
+.video-publication-preview { display: block; max-width: 100%; max-height: 260px; margin: 1rem auto; border-radius: .5rem; }
+
 .post-editor-card {
   max-width: 1200px;
 }
@@ -3666,6 +3687,8 @@ textarea:focus {
   margin-top: 0.2rem;
 }
 
+.assistant-content-result { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow-y: auto; }
+
 .support-assistant-widget {
   position: fixed;
   right: 1rem;
@@ -4671,3 +4694,8 @@ textarea:focus {
   .cookie-banner { flex-direction: column; align-items: stretch; gap: 16px; padding: 16px; }
   .cookie-banner-actions .btn { flex: 1; }
 }
+
+.video-bridge-settings { padding: .75rem; border: 1px solid var(--border); border-radius: .5rem; margin-bottom: 1rem; min-width: 0; }
+.video-bridge-settings fieldset, .wizard-layout .video-provider-options { min-width: 0; border: 1px solid var(--border); border-radius: .5rem; margin: 1rem 0; }
+.video-provider-options label { margin: .7rem 0; }
+.video-provider-options label:has(input[type=checkbox]) { display: flex; align-items: flex-start; gap: .5rem; }

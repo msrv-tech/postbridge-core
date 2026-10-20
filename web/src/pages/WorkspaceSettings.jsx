@@ -22,6 +22,7 @@ import { getWorkspaceSettings, updateWorkspaceSettings } from '../adapters/works
 import { getStoredTheme, setStoredTheme, THEMES } from '../adapters/theme'
 import { useAuth } from '../useAuth'
 import AppShell from '../components/AppShell'
+import AssistantExpenses from '../components/AssistantExpenses'
 import { BILLING_SUPPORT_EMAIL, formatSubscriptionPeriod } from '../billingSupport'
 import { BillingPlanOptions, LavaPlanDialog, LavaPaymentStatus, LavaBillingDetails } from '../components/LavaBilling'
 import {
@@ -861,6 +862,7 @@ export default function WorkspaceSettings() {
               <span className="toggle-hint">{t('settings.assistant.toggleHint')}</span>
             </span>
           </label>
+          {user?.is_platform_admin && <AssistantExpenses workspaceId={workspaceId} />}
         </div>
       )}
 

@@ -35,6 +35,21 @@ services:
       TELEGRAM_PROXY_FALLBACK_DIRECT: "true"
       SAAS_BASE_URL: http://host.docker.internal:8001
 
+  video-beat:
+    extends:
+      service: worker
+    profiles: [video]
+    command: celery -A postbridge.workers.celery_app:celery_app beat -l info
+
+  video-worker:
+    extends:
+      service: worker
+    profiles: [video]
+    mem_limit: 2g
+    cpus: 2
+    pids_limit: 256
+    command: celery -A postbridge.workers.celery_app:celery_app worker -Q video --concurrency=1 --prefetch-multiplier=1 -l info
+
   redis:
     image: redis:7
     ports:

@@ -70,6 +70,8 @@ export function getMetaAuthorizeUrl(workspaceId) {
   return api(`/workspaces/${workspaceId}/credentials/meta/authorize-url`)
 }
 
+export const getYouTubeAuthorizeUrl = (workspaceId, acceptedPolicy = false) => api(`/workspaces/${workspaceId}/credentials/youtube/authorize-url?accepted_policy=${acceptedPolicy ? 'true' : 'false'}`)
+
 export function listLinkedinOrganizations(workspaceId, payload) {
   return api(`/workspaces/${workspaceId}/credentials/linkedin/organizations`, {
     method: 'POST',

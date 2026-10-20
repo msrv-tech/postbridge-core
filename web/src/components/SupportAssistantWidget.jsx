@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
-import { askSupportAssistant } from '../adapters/supportAssistant'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { askSupportAssistant, applyAssistantVideoAction } from '../adapters/supportAssistant'
 import {
   isSupportAssistantHidden,
   setSupportAssistantHidden,
@@ -30,6 +30,7 @@ function isSafeWorkspaceRoute(workspaceId, route) {
 }
 
 function pageFromPath(pathname) {
+  if (pathname.includes('/content/videos') || pathname.includes('/agents/videos')) return 'video'
   if (pathname.includes('/channels')) return 'channels'
   if (pathname.includes('/content')) return 'content'
   if (pathname.includes('/agents/')) return 'agents'
@@ -40,6 +41,7 @@ function pageFromPath(pathname) {
 function assistantActionLabel(t, action) {
   if (action === 'add_channel') return t('assistant.action.addChannel')
   if (action === 'create_bridge') return t('assistant.action.createBridge')
+  if (action === 'open_video') return t('video.open')
   if (action === 'open_editor') return t('assistant.action.openEditor')
   if (action === 'open_import') return t('assistant.action.openImport')
   if (action === 'open_billing') return t('assistant.action.openBilling')
@@ -82,10 +84,16 @@ function clampPosition(position, node) {
 
 export default function SupportAssistantWidget({ workspaceId }) {
   const location = useLocation()
+  const navigate = useNavigate()
   const { locale, t } = useI18n()
+  const videoProjectId = location.pathname.match(/\/content\/videos\/([0-9a-f-]{36})$/i)?.[1] || ''
+  const contextKey = `${workspaceId}/${location.pathname}`
+  const contextRef = useRef(contextKey)
+  contextRef.current = contextKey
   const widgetRef = useRef(null)
+  const requestRef = useRef(null)
   const [hidden, setHidden] = useState(() => isSupportAssistantHidden(workspaceId))
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => location.pathname.includes('/videos'))
   const [position, setPosition] = useState(() => readPosition(workspaceId))
   const [drag, setDrag] = useState(null)
   const [question, setQuestion] = useState('')
@@ -103,16 +111,24 @@ export default function SupportAssistantWidget({ workspaceId }) {
     setError('')
     setConversationId('')
     setLoading(false)
-  }, [workspaceId])
+    setCollapsed(page === 'video')
+  }, [workspaceId, videoProjectId, page])
 
   useEffect(() => {
     const handleVisibility = (event) => {
       if (event.detail?.workspaceId && event.detail.workspaceId !== workspaceId) return
       setHidden(isSupportAssistantHidden(workspaceId))
     }
+    const collapseForEditor = (event) => {
+      if (event.detail?.workspaceId === workspaceId && event.detail?.route === location.pathname) setCollapsed(true)
+    }
     window.addEventListener(supportAssistantVisibilityEvent, handleVisibility)
-    return () => window.removeEventListener(supportAssistantVisibilityEvent, handleVisibility)
-  }, [workspaceId])
+    window.addEventListener('postbridge-assistant-collapse', collapseForEditor)
+    return () => {
+      window.removeEventListener(supportAssistantVisibilityEvent, handleVisibility)
+      window.removeEventListener('postbridge-assistant-collapse', collapseForEditor)
+    }
+  }, [workspaceId, location.pathname])
 
   useEffect(() => {
     if (!drag) return undefined
@@ -141,25 +157,39 @@ export default function SupportAssistantWidget({ workspaceId }) {
     }
   }, [drag, workspaceId])
 
-  if (!workspaceId || isSelfhostMode() || hidden) return null
-
   const askAssistant = async (rawQuestion) => {
     const text = String(rawQuestion || '').trim() || t('assistant.defaultQuestion')
     if (loading) return
+    const requestContext = contextKey
     setCollapsed(false)
     setLoading(true)
     setError('')
     try {
+      const videoContext = { workspaceId, projectId: videoProjectId, hasUnsavedChanges: false }
+      window.dispatchEvent(new CustomEvent('postbridge-video-draft-context', { detail: videoContext }))
+      const fingerprint = JSON.stringify({ text, workspaceId, contextKey, videoContext })
+      if (requestRef.current?.fingerprint !== fingerprint) requestRef.current = { fingerprint, key: crypto.randomUUID() }
       const response = await askSupportAssistant(workspaceId, {
+        request_key: requestRef.current.key,
         page,
         question: text,
         conversation_id: conversationId || undefined,
         client_context: {
           route: `${location.pathname}${location.search}`,
           locale,
+          video_project_id: videoProjectId || undefined,
+          video_has_unsaved_changes: videoContext.hasUnsavedChanges || undefined,
+          video_selected_version: videoContext.selectedVersion || undefined,
+          video_material_ids: videoContext.materialIds || undefined,
+          video_draft_brief: videoContext.brief || undefined,
         },
       })
+      if (contextRef.current !== requestContext) return
+      requestRef.current = null
       setAnswer(response)
+      if (response.video_update?.project_id === videoProjectId) {
+        window.dispatchEvent(new CustomEvent('postbridge-video-updated', { detail: { workspaceId, ...response.video_update } }))
+      }
       setConversationId(response.conversation_id || conversationId)
       reachMetrikaGoal('support_assistant_answered', {
         workspace_id: workspaceId,
@@ -167,10 +197,37 @@ export default function SupportAssistantWidget({ workspaceId }) {
         next_action: response.next_action || 'none',
       })
     } catch (e) {
-      setError(e.message || t('assistant.failed'))
+      if (contextRef.current === requestContext) setError(e.message || t('assistant.failed'))
     } finally {
-      setLoading(false)
+      if (contextRef.current === requestContext) setLoading(false)
     }
+  }
+
+  useEffect(() => {
+    const handleAsk = (event) => {
+      if (event.detail?.workspaceId !== workspaceId) return
+      if (event.detail?.projectId && event.detail.projectId !== videoProjectId) return
+      setSupportAssistantHidden(workspaceId, false)
+      setHidden(false)
+      setQuestion(event.detail.question || '')
+      void askAssistant(event.detail.question)
+    }
+    window.addEventListener('postbridge-assistant-ask', handleAsk)
+    return () => window.removeEventListener('postbridge-assistant-ask', handleAsk)
+  }, [workspaceId, location.pathname, locale, conversationId, loading])
+
+  const applyVideoCard = async () => {
+    if (loading || !answer?.video_action) return
+    const requestContext = contextKey
+    setLoading(true); setError('')
+    try {
+      const result = await applyAssistantVideoAction(workspaceId, answer.video_action.id)
+      if (contextRef.current !== requestContext) return
+      setAnswer((old) => ({ ...old, content_result: result.content_result, video_action: { ...old.video_action, status: 'applied' } }))
+      if (result.video_update) window.dispatchEvent(new CustomEvent('postbridge-video-updated', { detail: { workspaceId, ...result.video_update } }))
+      if (isSafeWorkspaceRoute(workspaceId, result.route)) navigate(result.route)
+    } catch (e) { if (contextRef.current === requestContext) setError(e.message) }
+    finally { if (contextRef.current === requestContext) setLoading(false) }
   }
 
   const submitQuestion = (event) => {
@@ -192,6 +249,8 @@ export default function SupportAssistantWidget({ workspaceId }) {
       originY: rect.top,
     })
   }
+
+  if (!workspaceId || isSelfhostMode() || hidden) return null
 
   if (collapsed) {
     return (
@@ -244,9 +303,42 @@ export default function SupportAssistantWidget({ workspaceId }) {
           ) : (
             <p className="section-copy">{t('assistant.empty')}</p>
           )}
+          {answer?.video_update && answer.video_update.project_id !== videoProjectId && <Link className="btn btn-secondary" to={`/workspaces/${workspaceId}/content/videos/${answer.video_update.project_id}`}>{t('video.open')}</Link>}
+          {answer?.video_action && <div className="support-assistant-video-card">
+            <strong>{t(`videoAssistant.card.${answer.video_action.kind}`)}</strong>
+            <p>{answer.video_action.summary.brief}</p>
+            {answer.video_action.summary.version && <p>{t('video.version', { version: answer.video_action.summary.version })}</p>}
+            {answer.video_action.kind === 'schedule' ? <>
+              <p>{t(`topicScout.schedule.${answer.video_action.summary.frequency}`)} · {answer.video_action.summary.time} · {answer.video_action.summary.timezone}</p>
+              {answer.video_action.summary.frequency === 'weekly' && <p>{t(`weekday.${['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][answer.video_action.summary.weekday % 7]}`)}</p>}
+              <p>{t('videoSchedule.runBudget')}: {answer.video_action.summary.max_units_per_run || t('videoSchedule.planBudget')}<br />{t('videoSchedule.monthlyBudget')}: {answer.video_action.summary.max_units_per_month || t('videoSchedule.planBudget')}</p>
+              <p>{t(`videoAssistant.mode.${answer.video_action.summary.mode || 'autopilot'}`)}</p>
+              <p>{t('videoSchedule.draftOnly')}</p>
+            </> : answer.video_action.kind === 'schedule_control' ? <p>{t(`videoAssistant.control.${answer.video_action.summary.action}`)} · {answer.video_action.summary.timezone}</p>
+              : ['video_generation', 'content_generation'].includes(answer.video_action.kind) ? <>
+                {answer.video_action.summary.task && <p>{t(`assistant.content.${answer.video_action.summary.task}`)}</p>}
+                {answer.video_action.summary.operation && <p>{t(`assistant.video.${answer.video_action.summary.operation}`)}</p>}
+                <p>{t('assistant.content.language')}: {answer.video_action.summary.language}</p>
+                {answer.video_action.summary.voice && <p>{answer.video_action.summary.voice}</p>}
+                {answer.video_action.summary.scenes?.length > 0 && <details><summary>{t('assistant.video.scenes')}</summary>
+                  {answer.video_action.summary.scenes.map((scene, index) => <p key={scene.scene_id || index} className="assistant-content-result">
+                    {index + 1}. {scene.caption}{scene.image_prompt ? `\n${scene.image_prompt}` : ''}{scene.narration_text ? `\n${scene.narration_text}` : ''}
+                  </p>)}
+                </details>}
+                {answer.video_action.summary.source && <details><summary>{t('assistant.content.source')}</summary><p className="assistant-content-result">{answer.video_action.summary.source}</p></details>}
+                <p>{t('assistant.reserve', { units: answer.video_action.summary.reserve_units })}</p>
+                <p className="muted">{t('assistant.reserveHint')}</p>
+              </> : <><p>{answer.video_action.summary.caption}</p><p>{t('videoAssistant.draftHint')}</p></>}
+            <button type="button" className="btn" disabled={loading || answer.video_action.status === 'applied'} onClick={applyVideoCard}>{t(answer.video_action.status === 'applied' ? 'videoAssistant.applied' : `videoAssistant.apply.${answer.video_action.kind}`)}</button>
+          </div>}
+          {answer?.content_result && <div className="assistant-content-result" aria-live="polite">
+            <p>{answer.content_result.text}</p>
+            <p className="muted">{answer.content_result.billing_pending ? t('assistant.billingPending') : t('video.usage', { units: answer.content_result.charged_units })}</p>
+          </div>}
           {error && <p className="error">{error}</p>}
         </div>
         <form className="support-assistant-form" onSubmit={submitQuestion}>
+          <p className="muted section-copy">{t('assistant.billingHint')}</p>
           <input
             type="text"
             value={question}

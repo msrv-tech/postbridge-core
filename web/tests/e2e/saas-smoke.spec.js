@@ -151,9 +151,497 @@ async function mockSaasBff(page, calls = []) {
       })
     }
 
+    // Unspecified background API reads must not reach the running dev backend,
+    // whose real 401 response would clear this test's synthetic login.
+    if (['fetch', 'xhr'].includes(request.resourceType()) && (path.startsWith('/workspaces/') || path.startsWith('/api/app/'))) {
+      return json({ code: 'TEST_ENDPOINT_NOT_MOCKED', message: 'No fixture for this endpoint.' }, 404)
+    }
+
     return route.continue()
   })
 }
+
+test('video studio keeps creation simple and sends selected materials to the BFF', async ({ page }, testInfo) => {
+  await mockSaasBff(page)
+  const projectId = '00000000-0000-4000-8000-000000000071'
+  const assetId = '00000000-0000-4000-8000-000000000072'
+  let created
+  let project
+  let assistantContext
+  await page.route('**/workspaces/ws-1/assistant/help', async (route) => {
+    assistantContext = route.request().postDataJSON()
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      conversation_id: 'video-conversation', message: 'Your video is queued.', next_action: 'open_video',
+      route: `/workspaces/ws-1/content/videos/${projectId}`,
+    }) })
+  })
+  await page.route('**/workspaces/ws-1/videos**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    const reply = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
+    if (path.endsWith('/capabilities')) return reply({ enabled: true, max_upload_bytes: 67108864, max_scenes: 8 })
+    if (path.endsWith('/media/upload')) return reply({ media_asset_id: assetId, url: '/sample.png', kind: 'image' }, 201)
+    if (route.request().method() === 'POST' && path.endsWith('/videos')) {
+      created = route.request().postDataJSON()
+      const current = { id: 'revision-1', version: 1, status: 'queued', stage: 'queued', scenes: created.scenes }
+      project = { id: projectId, brief: created.brief, current_version: 1, current, revisions: [current] }
+      return reply(project, 201)
+    }
+    if (path.endsWith(`/${projectId}`)) return reply(project)
+    return reply({ items: [], has_more: false })
+  })
+  await page.addInitScript(() => {
+    window.localStorage.setItem('postbridge_token', 'saas-token')
+    window.localStorage.setItem('postbridge.locale', 'en')
+  })
+  await page.goto('/workspaces/ws-1/content/videos')
+  await page.getByRole('link', { name: 'Create video', exact: true }).click()
+  await page.getByLabel('What is your video about?').fill('Show our product')
+  await expect(page.getByRole('button', { name: 'Save idea', exact: true })).toBeVisible()
+  await page.locator('input[type=file]').setInputFiles({ name: 'screen.png', mimeType: 'image/png', buffer: Buffer.from('test image') })
+  await expect(page.getByText('screen.png', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Assemble video', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/videos/${projectId}$`))
+  await expect(page.getByRole('heading', { name: 'Show our product', exact: true })).toBeVisible()
+  await expect(page.getByText('Waiting for assembly · Queued')).toBeVisible()
+  expect(created.brief).toBe('Show our product')
+  expect(created.scenes).toEqual([{ asset_id: assetId, duration_seconds: 5, caption: '' }])
+  expect(created.request_key).toMatch(/^[0-9a-f-]{36}$/)
+  await expect(page.locator('.video-scenes > details').first()).not.toHaveAttribute('open')
+  await page.getByRole('button', { name: 'Assistant', exact: true }).click()
+  await expect(page.getByText('Your video is queued.', { exact: true })).toBeVisible()
+  expect(assistantContext.client_context.video_project_id).toBe(projectId)
+  expect(assistantContext.page).toBe('video')
+  await page.screenshot({ path: testInfo.outputPath('video-studio-desktop.png'), fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('video-studio-mobile.png'), fullPage: true })
+})
+
+test('Google narration adds a language, retries without another key and preserves the original version', async ({ page }, testInfo) => {
+  await mockSaasBff(page)
+  const projectId = '00000000-0000-4000-8000-000000000091'
+  const assetId = '00000000-0000-4000-8000-000000000092'
+  let created = false
+  const requests = []
+  let prepared
+  const russian = { id: 'ru-1', version: 1, language: 'ru', voice: 'Kore', status: 'succeeded', stage: 'ready',
+    output_url: '/russian-test.mp4', usage: { tokens_charged: 11 }, scenes: [{ asset_id: assetId, duration_seconds: 3,
+      caption: 'Публикуйте быстрее', narration_text: 'Попробуйте Postbridge.', speech_asset_id: assetId, speech_url: '/speech-test.wav' }] }
+  const english = { ...russian, id: 'en-2', version: 2, language: 'en', output_url: '/english-test.mp4',
+    scenes: [{ ...russian.scenes[0], caption: 'Publish faster', narration_text: 'Try Postbridge today.' }] }
+  const project = () => ({ id: projectId, brief: 'Product demo', current_version: created ? 2 : 1,
+    current: created ? english : russian, revisions: created ? [english, russian] : [russian] })
+  await page.route('**/workspaces/ws-1/videos**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    const reply = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
+    if (path.endsWith('/capabilities')) return reply({ enabled: true, speech_enabled: true,
+      speech_languages: ['ru', 'en'], speech_voices: ['Kore', 'Charon', 'Puck'], max_scenes: 8 })
+    if (path.endsWith('/voice-variants')) {
+      requests.push(route.request().postDataJSON()); created = true
+      if (requests.length === 1) return route.abort('failed')
+      return reply({ ...project(), requested_revision: english }, 201)
+    }
+    if (path.endsWith('/post-draft')) {
+      prepared = route.request().postDataJSON()
+      return reply({ project_id: projectId, version: 1, status: 'deleted' })
+    }
+    return reply(project())
+  })
+  await page.addInitScript(() => {
+    window.localStorage.setItem('postbridge_token', 'saas-token')
+    window.localStorage.setItem('postbridge.locale', 'en')
+  })
+  await page.goto(`/workspaces/ws-1/content/videos/${projectId}`)
+  await page.getByRole('button', { name: 'Add language', exact: true }).click()
+  await expect(page.getByRole('combobox', { name: 'Narration language', exact: true })).toHaveValue('en')
+  await page.getByRole('button', { name: 'Create narrated version', exact: true }).click()
+  await expect(page.getByRole('alert')).toBeVisible()
+  await page.getByRole('button', { name: 'Create narrated version', exact: true }).click()
+  await expect(page.getByRole('combobox', { name: 'Language and version', exact: true })).toHaveValue('2')
+  expect(requests).toHaveLength(2)
+  expect(requests[0]).toEqual(requests[1])
+  expect(requests[0].source_version).toBe(1)
+  expect(requests[0].language).toBe('en')
+  await expect(page.locator('video').first()).toHaveAttribute('src', '/english-test.mp4')
+  await page.getByRole('combobox', { name: 'Language and version', exact: true }).selectOption('1')
+  await expect(page.locator('video').first()).toHaveAttribute('src', '/russian-test.mp4')
+  await page.getByText('Scenes and settings', { exact: true }).click()
+  await expect(page.getByRole('textbox', { name: 'Narration text', exact: true })).toHaveValue('Попробуйте Postbridge.')
+  await page.getByRole('textbox', { name: 'Narration text', exact: true }).fill('Новая реплика.')
+  await expect(page.getByRole('button', { name: 'Add language', exact: true })).toBeDisabled()
+  await page.getByRole('textbox', { name: 'Narration text', exact: true }).fill('Попробуйте Postbridge.')
+  // Reverting an edited transcript still requires reassembly to attach verified audio.
+  await expect(page.getByRole('button', { name: 'Add language', exact: true })).toBeDisabled()
+  await page.reload()
+  await page.getByRole('combobox', { name: 'Language and version', exact: true }).selectOption('1')
+  await page.getByRole('button', { name: 'Prepare post', exact: true }).click()
+  await page.getByRole('button', { name: 'Create draft and open editor', exact: true }).click()
+  await expect.poll(() => prepared).toEqual({ expected_version: 2, source_version: 1, caption: '' })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByText('Scenes and settings', { exact: true }).click()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('video-language-versions-mobile.png'), fullPage: true })
+})
+
+test('video autopilot accepts a task without files and exposes generated scenes for editing', async ({ page }, testInfo) => {
+  await mockSaasBff(page)
+  const projectId = '00000000-0000-4000-8000-000000000081'
+  let created
+  let reads = 0
+  let edited = false
+  let assistantRequest
+  const scenes = [1, 2].map((number) => ({ asset_id: `00000000-0000-4000-8000-00000000008${number + 1}`,
+    duration_seconds: 10, caption: `Generated scene ${number}`, kind: 'image' }))
+  const project = (status) => {
+    const current = { id: 'auto-revision', version: edited ? 2 : 1, mode: edited ? 'manual' : 'autopilot', status,
+      stage: status === 'running' ? 'storyboard' : 'ready', scenes: status === 'running' ? [] : scenes,
+      output_url: status === 'succeeded' ? '/video-test.mp4' : null, usage: { tokens_charged: status === 'succeeded' ? 50 : 0 } }
+    return { id: projectId, brief: 'Show how publishing saves time', current_version: edited ? 2 : 1, current, revisions: [current] }
+  }
+  await page.route('**/workspaces/ws-1/assistant/help', async (route) => {
+    assistantRequest = route.request().postDataJSON()
+    if (assistantRequest.client_context.video_has_unsaved_changes) {
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ conversation_id: 'video-edit',
+        message: 'Save your manual edits first.', next_action: 'no_action' }) })
+    }
+    edited = true
+    scenes[1].duration_seconds = 3
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ conversation_id: 'video-edit',
+      message: 'Scene two is now three seconds.', next_action: 'open_video',
+      route: `/workspaces/ws-1/content/videos/${projectId}`,
+      video_update: { project_id: projectId, version: 2, status: 'succeeded' },
+    }) })
+  })
+  await page.route('**/workspaces/ws-1/videos**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    const reply = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
+    if (path.endsWith('/capabilities')) return reply({ enabled: true, autopilot_enabled: true,
+      generated_media: true, max_upload_bytes: 67108864, max_scenes: 8 })
+    if (route.request().method() === 'POST' && path.endsWith('/videos')) {
+      created = route.request().postDataJSON()
+      return reply(project('running'), 201)
+    }
+    if (path.endsWith(`/${projectId}`)) return reply(project(++reads > 1 ? 'succeeded' : 'running'))
+    return reply({ items: [], has_more: false })
+  })
+  await page.addInitScript(() => {
+    window.localStorage.setItem('postbridge_token', 'saas-token')
+    window.localStorage.setItem('postbridge.locale', 'en')
+  })
+  await page.goto('/workspaces/ws-1/content/videos/new')
+  await page.getByLabel('What is your video about?').fill('Show how publishing saves time')
+  await expect(page.getByText('Materials are optional.', { exact: false })).toBeVisible()
+  await expect(page.getByText('Video duration', { exact: true })).not.toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('video-autopilot-create.png'), fullPage: true })
+  await page.getByRole('button', { name: 'Create video', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/videos/${projectId}$`))
+  await expect(page.getByText('Assembling · Preparing the storyboard')).toBeVisible()
+  expect(created.mode).toBe('autopilot')
+  expect(created.language).toBe('en')
+  expect(created.scenes).toEqual([])
+  await expect(page.getByRole('link', { name: 'Download', exact: true })).toBeVisible()
+  await expect(page.getByText('AI units used: 50', { exact: true })).toBeVisible()
+  await page.getByText('Scenes and settings', { exact: true }).click()
+  await expect(page.getByLabel('On-screen text').first()).toHaveValue('Generated scene 1')
+  await expect(page.getByLabel('On-screen text')).toHaveCount(2)
+  await page.getByLabel('On-screen text').first().fill('A better opening')
+  await expect(page.getByRole('button', { name: 'Assemble video', exact: true })).toBeEnabled()
+  await page.getByLabel('What would you like to change?').fill('Make scene two three seconds long')
+  await expect(page.getByRole('button', { name: 'Edit with the assistant', exact: true })).toBeDisabled()
+  await page.getByRole('button', { name: 'Assistant', exact: true }).click()
+  await expect(page.getByText('Save your manual edits first.', { exact: true })).toBeVisible()
+  expect(assistantRequest.client_context.video_has_unsaved_changes).toBe(true)
+  await expect(page.getByLabel('On-screen text').first()).toHaveValue('A better opening')
+  await page.getByLabel('On-screen text').first().fill('Generated scene 1')
+  await page.getByRole('button', { name: 'Edit with the assistant', exact: true }).click()
+  await expect(page.getByText('Scene two is now three seconds.', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('Duration, seconds').nth(1)).toHaveValue('3')
+  expect(assistantRequest.question).toBe('Make scene two three seconds long')
+  expect(assistantRequest.client_context.video_project_id).toBe(projectId)
+  await page.screenshot({ path: testInfo.outputPath('video-autopilot-edited.png'), fullPage: true })
+})
+
+test('completed video prepares one editable post and recovers a lost response', async ({ page }, testInfo) => {
+  await mockSaasBff(page)
+  const projectId = '00000000-0000-4000-8000-000000000061'
+  const postId = '00000000-0000-4000-8000-000000000062'
+  const assetId = '00000000-0000-4000-8000-000000000063'
+  const outputUrl = '/video-handoff.mp4'
+  let receipt = null
+  const preparations = []
+  const postWrites = []
+  const reply = (route, body) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+  await page.route('**/video-handoff.mp4', (route) => route.fulfill({ contentType: 'video/mp4', body: '' }))
+  await page.route(`**/workspaces/ws-1/posts/${postId}`, (route) => {
+    if (route.request().method() !== 'GET') postWrites.push(route.request().postDataJSON())
+    return reply(route, { id: postId, content_md: 'Try our demo', status: 'draft', media_url: outputUrl,
+      created_at: '2026-10-19T00:00:00Z', updated_at: '2026-10-19T00:00:00Z',
+      video_origin: { project_id: projectId, version: 1, output_asset_id: assetId, output_url: outputUrl } })
+  })
+  await page.route('**/workspaces/ws-1/videos**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/capabilities')) return reply(route, { enabled: true, max_scenes: 8 })
+    if (path.endsWith('/post-draft')) {
+      preparations.push(route.request().postDataJSON())
+      receipt = { content_item_id: postId, status: 'draft' }
+      if (preparations.length === 1) return route.abort('failed')
+      return reply(route, { ...receipt, project_id: projectId, version: 1 })
+    }
+    const current = { id: 'revision', version: 1, status: 'succeeded', scenes: [
+      { asset_id: assetId, duration_seconds: 5, caption: 'On-screen caption', kind: 'image' },
+    ], output_url: outputUrl, usage: {}, post_draft: receipt }
+    return reply(route, { id: projectId, brief: 'Private production instructions', current_version: 1, current, revisions: [current] })
+  })
+  await page.addInitScript(() => {
+    localStorage.setItem('postbridge_token', 'saas-token')
+    localStorage.setItem('postbridge.locale', 'en')
+  })
+  await page.goto(`/workspaces/ws-1/content/videos/${projectId}`)
+  await page.getByText('Scenes and settings', { exact: true }).click()
+  await page.getByLabel('On-screen text').fill('Unsaved change')
+  await expect(page.getByRole('button', { name: 'Prepare post', exact: true })).toBeDisabled()
+  await page.getByLabel('On-screen text').fill('On-screen caption')
+  await page.getByRole('button', { name: 'Prepare post', exact: true }).click()
+  await expect(page.getByLabel('Post text (optional)')).toHaveValue('')
+  await page.getByLabel('Post text (optional)').fill('Try our demo')
+  await page.screenshot({ path: testInfo.outputPath('video-post-draft-desktop.png'), fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('video-post-draft-mobile.png'), fullPage: true })
+  const prepare = page.getByRole('button', { name: 'Create draft and open editor', exact: true })
+  await prepare.click()
+  await expect(page.getByRole('alert')).toBeVisible()
+  await prepare.click()
+  await expect(page).toHaveURL(new RegExp(`/content/${postId}$`))
+  await expect(page.getByRole('link', { name: 'Source video · version 1', exact: true })).toBeVisible()
+  await expect(page.getByLabel('Video preview')).toBeVisible()
+  await expect(page.getByLabel('Media URL', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Generate', exact: true })).toHaveCount(0)
+  expect(preparations).toEqual([{ expected_version: 1, caption: 'Try our demo' }, { expected_version: 1, caption: 'Try our demo' }])
+  expect(postWrites).toEqual([])
+  await page.getByRole('link', { name: 'Source video · version 1', exact: true }).click()
+  await expect(page.getByRole('link', { name: 'Open post', exact: true })).toHaveAttribute('href', `/workspaces/ws-1/content/${postId}`)
+  await expect(page.getByRole('button', { name: 'Prepare post', exact: true })).toHaveCount(0)
+})
+
+test('video delivery requires a fresh review and shows each destination result', async ({ page }, testInfo) => {
+  await mockSaasBff(page)
+  const postId = '00000000-0000-4000-8000-000000000051'
+  const projectId = '00000000-0000-4000-8000-000000000052'
+  let approved = false
+  let retried = false
+  let approvalBody
+  let saved = 0
+  const post = { id: postId, content_md: 'Exact caption', title: 'A video', status: 'draft', media_url: '/approval-video.mp4',
+    video_origin: { project_id: projectId, version: 1, output_asset_id: 'asset', output_url: '/approval-video.mp4' },
+    created_at: '2026-10-19T00:00:00Z', updated_at: '2026-10-19T00:00:00Z' }
+  const view = () => ({ enabled: true, snapshot_hash: 'a'.repeat(64), approval_id: approved ? 'approval' : null,
+    snapshot: { text: `${post.title}\n\n${post.content_md}`, version: 1, output_url: post.media_url },
+    destinations: [{ id: 'first', title: 'First channel' }, { id: 'second', title: 'Second channel' }],
+    targets: approved ? [{ id: 'target-first', title: 'First channel', status: 'published', external_url: 'https://t.me/demo/7' },
+      { id: 'target-second', title: 'Second channel', status: retried ? 'unknown' : 'failed', error_code: 'EXTERNAL_API_TELEGRAM_PUBLISH_ERROR' }] : [] })
+  const reply = (route, body) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+  await page.route('**/approval-video.mp4', (route) => route.fulfill({ contentType: 'video/mp4', body: '' }))
+  await page.route(`**/workspaces/ws-1/posts/${postId}`, (route) => {
+    if (route.request().method() === 'PATCH') { saved++; Object.assign(post, route.request().postDataJSON()) }
+    return reply(route, post)
+  })
+  await page.route('**/workspaces/ws-1/videos/posts/**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/approve')) { approved = true; approvalBody = route.request().postDataJSON() }
+    if (path.endsWith('/retry')) { expect(path).toContain('/target-second/retry'); retried = true }
+    return reply(route, view())
+  })
+  await page.addInitScript(() => {
+    localStorage.setItem('postbridge_token', 'saas-token')
+    localStorage.setItem('postbridge.locale', 'en')
+  })
+  await page.goto(`/workspaces/ws-1/content/${postId}`)
+  const card = page.getByRole('region', { name: 'Video delivery', exact: true })
+  await expect(page.locator('.support-assistant-widget')).toHaveClass(/is-collapsed/)
+  await expect(page.getByRole('button', { name: 'Publish', exact: true })).toHaveCount(0)
+  await expect(page.getByLabel('Schedule publication')).toHaveCount(0)
+  await card.getByRole('button', { name: 'Save and review delivery', exact: true }).click()
+  await expect(card.locator('pre')).toHaveText('A video\n\nExact caption')
+  await card.getByLabel('First channel · Telegram').check()
+  await card.getByLabel('Second channel · Telegram').check()
+  await page.locator('#title').fill('A revised title')
+  await expect(card.getByRole('button', { name: 'Confirm and send', exact: true })).toBeDisabled()
+  await card.getByRole('button', { name: 'Save and review delivery', exact: true }).click()
+  await expect(card.locator('pre')).toHaveText('A revised title\n\nExact caption')
+  await card.screenshot({ path: testInfo.outputPath('video-publication-desktop.png') })
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await card.screenshot({ path: testInfo.outputPath('video-publication-mobile.png') })
+  await card.getByRole('button', { name: 'Confirm and send', exact: true }).click()
+  expect(approvalBody).toEqual({ expected_snapshot: 'a'.repeat(64), channel_ids: ['first', 'second'], options: { first: { format: 'video' }, second: { format: 'video' } } })
+  expect(saved).toBe(2)
+  await expect(page.locator('#title')).toBeDisabled()
+  await expect(card.getByRole('link', { name: 'Open publication', exact: true })).toHaveAttribute('href', 'https://t.me/demo/7')
+  await card.getByRole('button', { name: 'Retry rejected delivery', exact: true }).click()
+  await expect(card.getByText('Check delivery result', { exact: false })).toBeVisible()
+  await expect(card.getByRole('button', { name: 'Retry rejected delivery', exact: true })).toHaveCount(0)
+})
+
+test('approved video supports local delivery time and an idempotent reschedule', async ({ page }, testInfo) => {
+  await mockSaasBff(page)
+  const postId = '00000000-0000-4000-8000-000000000041'
+  const projectId = '00000000-0000-4000-8000-000000000042'
+  const day = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10)
+  let approved = false
+  let missed = false
+  let cancelled = false
+  let approvalBody
+  let delivery
+  const moves = []
+  const post = { id: postId, content_md: 'A scheduled video', status: 'draft', media_url: '/scheduled-video.mp4',
+    video_origin: { project_id: projectId, version: 1, output_asset_id: 'asset', output_url: '/scheduled-video.mp4' },
+    created_at: '2026-10-19T00:00:00Z', updated_at: '2026-10-19T00:00:00Z' }
+  const view = () => ({ enabled: true, snapshot_hash: 'a'.repeat(64), approval_id: approved ? 'approval' : null,
+    snapshot: { text: post.content_md, version: 1, output_url: post.media_url }, delivery,
+    destinations: [{ id: 'target-channel', title: 'Video channel' }],
+    targets: approved ? [{ id: 'target', title: 'Video channel', status: cancelled ? 'cancelled' : missed ? 'expired' : 'pending', error_code: missed ? 'VIDEO_DELIVERY_MISSED' : null }] : [] })
+  const reply = (route, body) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+  await page.route('**/scheduled-video.mp4', (route) => route.fulfill({ contentType: 'video/mp4', body: '' }))
+  await page.route(`**/workspaces/ws-1/posts/${postId}`, (route) => reply(route, post))
+  await page.route('**/workspaces/ws-1/videos/posts/**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/approve')) {
+      approvalBody = route.request().postDataJSON(); approved = true
+      delivery = { version: 1, publish_at: approvalBody.publish_at, timezone: approvalBody.timezone,
+        deadline_at: new Date(new Date(approvalBody.publish_at).getTime() + 900000).toISOString(),
+        history: [{ version: 1, publish_at: approvalBody.publish_at, timezone: approvalBody.timezone }] }
+    }
+    if (path.endsWith('/reschedule')) {
+      const body = route.request().postDataJSON(); moves.push(body)
+      if (moves.length === 1) {
+        delivery = { ...delivery, version: 2, publish_at: body.publish_at,
+          deadline_at: new Date(new Date(body.publish_at).getTime() + 900000).toISOString(),
+          history: [...delivery.history, { version: 2, publish_at: body.publish_at, timezone: body.timezone }] }
+        missed = false
+        return route.abort('failed')
+      }
+    }
+    if (path.endsWith('/cancel')) cancelled = true
+    return reply(route, view())
+  })
+  await page.addInitScript(() => {
+    localStorage.setItem('postbridge_token', 'saas-token')
+    localStorage.setItem('postbridge.locale', 'en')
+  })
+  await page.goto(`/workspaces/ws-1/content/${postId}`)
+  const card = page.getByRole('region', { name: 'Video delivery', exact: true })
+  await card.getByRole('button', { name: 'Save and review delivery', exact: true }).click()
+  await expect(card.getByLabel('Delivery date and time')).toHaveCount(0)
+  await card.getByLabel('Video channel · Telegram').check()
+  await card.getByLabel('Send later', { exact: true }).check()
+  await expect(card.getByRole('button', { name: 'Confirm and schedule', exact: true })).toBeDisabled()
+  await card.getByLabel('Delivery timezone').selectOption('Asia/Novosibirsk')
+  await card.getByLabel('Delivery date and time').fill(`${day}T09:15`)
+  await card.screenshot({ path: testInfo.outputPath('video-delivery-time-desktop.png') })
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await card.screenshot({ path: testInfo.outputPath('video-delivery-time-mobile.png') })
+  await card.getByRole('button', { name: 'Confirm and schedule', exact: true }).click()
+  expect(approvalBody).toEqual({ expected_snapshot: 'a'.repeat(64), channel_ids: ['target-channel'], options: { 'target-channel': { format: 'video' } },
+    publish_at: new Date(`${day}T09:15:00+07:00`).toISOString(), timezone: 'Asia/Novosibirsk' })
+  missed = true
+  await page.reload()
+  await expect(card.getByText('Delivery window missed', { exact: false })).toBeVisible()
+  await card.getByRole('button', { name: 'Change delivery time', exact: true }).click()
+  await card.getByLabel('Delivery date and time').fill(`${day}T10:15`)
+  const confirm = card.getByRole('button', { name: 'Confirm new time', exact: true })
+  await confirm.click()
+  await expect(card.getByRole('alert')).toBeVisible()
+  await confirm.click()
+  await expect(confirm).toHaveCount(0)
+  expect(moves).toEqual([{ expected_schedule_version: 1, publish_at: new Date(`${day}T10:15:00+07:00`).toISOString(), timezone: 'Asia/Novosibirsk' },
+    { expected_schedule_version: 1, publish_at: new Date(`${day}T10:15:00+07:00`).toISOString(), timezone: 'Asia/Novosibirsk' }])
+  await card.getByRole('button', { name: 'Cancel deliveries still queued', exact: true }).click()
+  await expect(card.getByText('Cancelled', { exact: false })).toBeVisible()
+})
+
+test('video schedules use existing agent tasks and link each prepared draft', async ({ page }, testInfo) => {
+  await mockSaasBff(page)
+  const taskId = '00000000-0000-4000-8000-000000000091'
+  const projectId = '00000000-0000-4000-8000-000000000092'
+  const runId = '00000000-0000-4000-8000-000000000093'
+  let task
+  let run
+  let createBody
+  let runKey
+  const reply = (route, body) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+  await page.route('**/workspaces/ws-1/channel-registry', (route) => reply(route, { items: [
+    { id: 'editorial-context', title: 'Editorial context', platform: 'postbridge' },
+  ] }))
+  await page.route('**/workspaces/ws-1/videos**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/capabilities')) return reply(route, { enabled: true, autopilot_enabled: true,
+      supports_schedules: true, max_upload_bytes: 67108864, max_scenes: 8 })
+    const current = { id: 'revision', version: 1, status: 'succeeded', scenes: [], usage: {} }
+    return reply(route, { id: projectId, brief: 'A weekly product video', current_version: 1, current,
+      revisions: [current], origin: { agent_task_id: taskId, agent_run_id: runId } })
+  })
+  await page.route('**/workspaces/ws-1/agent/**', (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    if (path.endsWith('/tasks') && request.method() === 'POST') {
+      createBody = request.postDataJSON()
+      task = { ...createBody, id: taskId, status: 'active', next_run_at: '2026-10-20T02:30:00Z' }
+      return reply(route, task)
+    }
+    if (path.endsWith('/tasks')) return reply(route, { items: task ? [task] : [] })
+    if (path.endsWith('/runs')) return reply(route, { items: run ? [run] : [] })
+    if (path.endsWith('/pause') || path.endsWith('/resume')) {
+      task.status = path.endsWith('/pause') ? 'paused' : 'active'
+      return reply(route, task)
+    }
+    if (path.endsWith('/run')) {
+      runKey = request.headers()['idempotency-key']
+      run = { id: runId, agent_task_id: taskId, graph_name: 'video_autopilot', status: 'awaiting_review',
+        created_at: '2026-10-19T02:30:00Z', video_execution: { project_id: projectId } }
+      return reply(route, run)
+    }
+    return reply(route, { items: [] })
+  })
+  await page.addInitScript(() => {
+    window.localStorage.setItem('postbridge_token', 'saas-token')
+    window.localStorage.setItem('postbridge.locale', 'en')
+  })
+  await page.goto('/workspaces/ws-1/agents/videos')
+  await page.getByLabel('What is your video about?').fill('A weekly product video')
+  await page.getByLabel('How often to create a video').selectOption('daily')
+  await expect(page.getByLabel('Day of the week')).not.toBeVisible()
+  await page.getByLabel('Start creating at').fill('09:30')
+  await page.getByLabel('Timezone', { exact: true }).selectOption('Asia/Novosibirsk')
+  await expect(page.getByLabel('AI unit limit per month')).not.toBeVisible()
+  await page.getByText('Settings', { exact: true }).last().click()
+  await page.getByLabel('AI unit limit per month').fill('1000')
+  await page.getByLabel('Assemble materials without AI').check()
+  await expect(page.getByLabel('AI unit limit per month')).not.toBeVisible()
+  await page.getByLabel('Assemble materials without AI').uncheck()
+  await page.screenshot({ path: testInfo.outputPath('video-schedule-create.png'), fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('video-schedule-mobile.png'), fullPage: true })
+  await page.getByRole('button', { name: 'Save schedule', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'A weekly product video', exact: true })).toBeVisible()
+  expect(createBody.mode).toBe('video_autopilot')
+  expect(createBody.schedule_cron).toBe('30 9 * * *')
+  expect(createBody.timezone).toBe('Asia/Novosibirsk')
+  expect(createBody.task_config.video.scenes).toEqual([])
+  expect(createBody.task_config.max_units_per_month).toBe(1000)
+  expect(createBody.autonomy_mode).toBe('draft_approval')
+  await page.getByRole('button', { name: 'Pause', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Resume', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Resume', exact: true }).click()
+  await page.getByRole('button', { name: 'Prepare now', exact: true }).click()
+  await expect(page.getByText('Ready to review', { exact: false })).toBeVisible()
+  expect(runKey).toMatch(/^[0-9a-f-]{36}$/)
+  await page.getByRole('link', { name: 'Open project', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/content/videos/${projectId}$`))
+  await expect(page.getByRole('link', { name: 'Open schedule', exact: true })).toHaveAttribute('href', `/workspaces/ws-1/agents/videos?task=${taskId}`)
+})
 
 async function mockAdapterContractApi(page, calls = []) {
   await page.route('**/*', async (route) => {
@@ -572,4 +1060,237 @@ test('keeps SaaS adapter contracts on BFF paths', async ({ page }) => {
     )
   )
   expect(missingCalls).toEqual([])
+})
+
+test('storyboard changes only the selected illustration and preserves scene settings', async ({ page }) => {
+  await mockSaasBff(page)
+  const projectId = '00000000-0000-4000-8000-000000000091'
+  const aid = '00000000-0000-4000-8000-000000000092'
+  let assembled
+  const scenes = [{ asset_id: aid, duration_seconds: 5, caption: 'Opening', kind: 'image', scene_id: 'opening', motion: 'none', image_prompt: 'An office' },
+    { asset_id: aid, duration_seconds: 5, caption: 'Try it', kind: 'image', scene_id: 'ending', purpose: 'cta' }]
+  let current = { version: 1, status: 'succeeded', mode: 'manual', stage: 'ready', language: 'en', scenes }
+  const project = () => ({ id: projectId, brief: 'Story demo', current_version: current.version, current, revisions: [current] })
+  await page.route('**/workspaces/ws-1/videos**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    const reply = (body) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+    if (path.endsWith('/capabilities')) return reply({ enabled: true, generated_media: true, max_scenes: 8, max_upload_bytes: 67108864 })
+    if (path.endsWith('/materials')) return reply({ items: [], folders: [], has_more: false })
+    if (path.endsWith('/revisions')) { assembled = route.request().postDataJSON(); current = { ...current, version: 2, scenes: assembled.scenes, status: 'queued' } }
+    return reply(project())
+  })
+  await page.addInitScript(() => { localStorage.setItem('postbridge_token', 'saas-token'); localStorage.setItem('postbridge.locale', 'en') })
+  await page.goto(`/workspaces/ws-1/content/videos/${projectId}`)
+  await expect(page.getByRole('combobox', { name: 'Image motion', exact: true }).first()).not.toBeVisible()
+  await page.locator('.video-scenes > .video-library > summary').click()
+  await page.getByRole('searchbox', { name: 'Find material' }).fill('office')
+  await page.getByRole('searchbox', { name: 'Find material' }).press('Enter')
+  expect(assembled).toBeUndefined()
+  await page.locator('.video-scenes > .video-library > summary').click()
+  await page.getByText('Scenes and settings', { exact: true }).click()
+  await page.getByText('Scene editing and replacement', { exact: true }).first().click()
+  await page.getByRole('combobox', { name: 'Image motion', exact: true }).first().selectOption('zoom_in')
+  await page.getByRole('combobox', { name: 'Transition', exact: true }).first().selectOption('fade')
+  await page.getByLabel('Generate a new AI illustration', { exact: true }).first().check()
+  await page.getByRole('textbox', { name: 'Image description', exact: true }).fill('A calm blue office illustration')
+  await page.getByRole('button', { name: 'Assemble video', exact: true }).click()
+  await expect.poll(() => assembled?.scenes[0]?.regenerate_image).toBe(true)
+  expect(assembled.scenes[0]).toMatchObject({ motion: 'zoom_in', transition: 'fade', scene_id: 'opening' })
+  expect(assembled.scenes[1]).toMatchObject({ asset_id: aid, caption: 'Try it', scene_id: 'ending' })
+  expect(assembled.scenes[1].regenerate_image).toBeUndefined()
+})
+
+test('assistant schedule card waits for explicit apply', async ({ page }) => {
+  await mockSaasBff(page)
+  const projectId = '00000000-0000-4000-8000-000000000093'
+  let applied = 0
+  let asked
+  const current = { version: 1, status: 'succeeded', mode: 'manual', stage: 'ready', scenes: [], language: 'en' }
+  await page.route('**/workspaces/ws-1/videos**', (route) => {
+    const body = new URL(route.request().url()).pathname.endsWith('/capabilities') ? { enabled: true, max_scenes: 8 } : { id: projectId, brief: 'Weekly demo', current_version: 1, current, revisions: [current] }
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+  })
+  await page.route('**/workspaces/ws-1/assistant/help', (route) => {
+    asked = route.request().postDataJSON()
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ conversation_id: 'schedule-card', message: 'Review this schedule.',
+      video_action: { id: '42', kind: 'schedule', status: 'proposed', summary: { brief: 'Weekly demo', version: 1, frequency: 'daily', time: '09:00', timezone: 'Asia/Novosibirsk', max_units_per_run: 5000, max_units_per_month: 50000 } } }) })
+  })
+  await page.route('**/workspaces/ws-1/assistant/actions/42/apply', (route) => {
+    applied++; return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ route: `/workspaces/ws-1/content/videos/${projectId}` }) })
+  })
+  await page.addInitScript(() => { localStorage.setItem('postbridge_token', 'saas-token'); localStorage.setItem('postbridge.locale', 'en') })
+  await page.goto(`/workspaces/ws-1/content/videos/${projectId}`)
+  await page.getByRole('button', { name: 'Assistant', exact: true }).click()
+  await expect(page.getByText('Proposed schedule', { exact: true })).toBeVisible()
+  await expect(page.getByText('Every day · 09:00 · Asia/Novosibirsk', { exact: true })).toBeVisible()
+  expect(applied).toBe(0); expect(asked.request_key).toBeTruthy()
+  await page.getByRole('button', { name: 'Enable schedule', exact: true }).click()
+  await expect.poll(() => applied).toBe(1)
+  await expect(page.getByRole('button', { name: 'Applied', exact: true })).toBeDisabled()
+})
+
+for (const kind of ['video_generation', 'content_generation']) {
+  test(`assistant ${kind} shows the workspace reserve before any paid action`, async ({ page }) => {
+    await mockSaasBff(page)
+    const projectId = '00000000-0000-4000-8000-000000000094'
+    let applied = 0
+    const current = { version: 1, status: 'succeeded', mode: 'manual', stage: 'ready', scenes: [], language: 'en' }
+    await page.route('**/workspaces/ws-1/videos**', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(
+      new URL(route.request().url()).pathname.endsWith('/capabilities') ? { enabled: true } : { id: projectId, brief: 'Product demo', current_version: 1, current, revisions: [current] }) }))
+    await page.route('**/workspaces/ws-1/assistant/help', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      conversation_id: 'paid-card', message: 'Review the reserve.', video_action: { id: '44', kind, status: 'proposed',
+        summary: { brief: 'Create a product demo', language: 'en', reserve_units: 10000, ...(kind === 'content_generation' ? { task: 'script' } : {}) } } }) }))
+    await page.route('**/workspaces/ws-1/assistant/actions/44/apply', (route) => {
+      applied++
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify(kind === 'content_generation'
+        ? { content_result: { text: 'Hook: show the finished video.', charged_units: 155, billing_pending: false } }
+        : { route: `/workspaces/ws-1/content/videos/${projectId}`, video_update: { project_id: projectId, version: 2, status: 'queued' } }) })
+    })
+    await page.addInitScript(() => { localStorage.setItem('postbridge_token', 'saas-token'); localStorage.setItem('postbridge.locale', 'en') })
+    await page.goto(`/workspaces/ws-1/content/videos/${projectId}`)
+    await page.getByRole('button', { name: 'Assistant', exact: true }).click()
+    await expect(page.getByText('Generation reserve: 10000 AI units', { exact: true })).toBeVisible()
+    await expect(page.getByText('Language: en', { exact: true })).toBeVisible()
+    await expect(page.getByText('This is a preliminary reserve, not an exact price.', { exact: false })).toBeVisible()
+    expect(applied).toBe(0)
+    await page.getByRole('button', { name: 'Generate', exact: true }).click()
+    await expect.poll(() => applied).toBe(1)
+    await expect(page.getByRole('button', { name: 'Applied', exact: true })).toBeDisabled()
+    if (kind === 'content_generation') await expect(page.getByText('Hook: show the finished video.', { exact: true })).toBeVisible()
+  })
+}
+
+test('video delivery reveals YouTube metadata on selection and reconciles the saved upload', async ({ page }, testInfo) => {
+  await mockSaasBff(page)
+  const postId = '00000000-0000-4000-8000-000000000091'
+  let approved = false
+  let reconciled = false
+  let body
+  const post = { id: postId, title: 'Clip', content_md: 'Exact description', status: 'draft', media_url: '/short.mp4', video_origin: { project_id: 'project', version: 1, output_url: '/short.mp4' } }
+  const view = () => ({ enabled: true, snapshot_hash: 'a'.repeat(64), approval_id: approved ? 'approval' : null,
+    snapshot: { version: 1, output_url: '/short.mp4', text: 'Clip\n\nExact description' },
+    destinations: [{ id: 'youtube-channel', title: 'My channel', platform: 'youtube', format: 'short' }, { id: 'instagram-channel', title: 'My Instagram', platform: 'instagram', format: 'reel' }],
+    targets: approved ? [{ id: 'target', title: 'My channel', platform: 'youtube', format: 'short', status: reconciled ? 'processing' : 'unknown' }] : [] })
+  const reply = (route, value) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(value) })
+  await page.route('**/short.mp4', route => route.fulfill({ contentType: 'video/mp4', body: '' }))
+  await page.route(`**/workspaces/ws-1/posts/${postId}`, route => reply(route, post))
+  await page.route('**/workspaces/ws-1/videos/posts/**', route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/approve')) { approved = true; body = route.request().postDataJSON() }
+    if (path.endsWith('/reconcile')) reconciled = true
+    return reply(route, view())
+  })
+  await page.addInitScript(() => { localStorage.setItem('postbridge_token', 'saas-token'); localStorage.setItem('postbridge.locale', 'en') })
+  await page.goto(`/workspaces/ws-1/content/${postId}`)
+  const card = page.getByRole('region', { name: 'Video delivery', exact: true })
+  await card.getByRole('button', { name: 'Save and review delivery', exact: true }).click()
+  await expect(card.getByLabel('Video title', { exact: true })).toHaveCount(0)
+  await card.getByLabel('My channel · YouTube · Short', { exact: true }).check()
+  await expect(card.getByLabel('Visibility', { exact: true })).toHaveValue('private')
+  const confirm = card.getByRole('button', { name: 'Confirm and send', exact: true })
+  await expect(confirm).toBeDisabled()
+  await card.getByLabel('Video title', { exact: true }).fill('Approved YouTube title')
+  await expect(confirm).toBeDisabled()
+  await card.getByLabel('Video audience', { exact: true }).selectOption('false')
+  await card.getByLabel('My Instagram · Instagram · Reel', { exact: true }).check()
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await card.screenshot({ path: testInfo.outputPath('youtube-video-options-mobile.png') })
+  await confirm.click()
+  expect(body.options).toEqual({ 'youtube-channel': { format: 'short', title: 'Approved YouTube title', visibility: 'private', made_for_kids: false, contains_synthetic_media: true }, 'instagram-channel': { format: 'reel' } })
+  await card.getByRole('button', { name: 'Check existing upload', exact: true }).click()
+  await expect(card.getByText('Platform is processing the video', { exact: false })).toBeVisible()
+  await expect(card.getByRole('button', { name: 'Check existing upload', exact: true })).toHaveCount(0)
+})
+
+test('YouTube connection requires policy acceptance before OAuth', async ({ page }, testInfo) => {
+  await mockSaasBff(page)
+  await page.addInitScript(() => { localStorage.setItem('postbridge_token', 'saas-token'); localStorage.setItem('postbridge.locale', 'en') })
+  await page.goto('/workspaces/ws-1/channels/add')
+  await page.getByLabel('Platform', { exact: true }).selectOption('youtube')
+  const connect = page.getByRole('button', { name: 'Connect YouTube with Google', exact: true })
+  await expect(connect).toBeDisabled()
+  await expect(page.getByRole('link', { name: 'YouTube Terms', exact: true })).toHaveAttribute('href', 'https://www.youtube.com/t/terms')
+  await page.getByRole('checkbox').check()
+  await expect(connect).toBeEnabled()
+  await page.getByRole('checkbox').uncheck()
+  await expect(connect).toBeDisabled()
+  await expect(page.getByLabel('Access token', { exact: true })).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('youtube-consent.png'), fullPage: true })
+})
+
+test('YouTube bridge configures the receiving side and can be edited from bridge settings', async ({ page }, testInfo) => {
+  await mockSaasBff(page)
+  let created
+  let patched
+  const registry = [
+    { id: 'source', platform: 'postbridge', platform_channel_id: 'pb/ws-1', title: 'Editorial', can_read: true, can_write: false, live_sync_source_supported: true },
+    { id: 'target', platform: 'youtube', platform_channel_id: 'UCtest', title: 'My YouTube', can_read: false, can_write: true, credentials_ref: 'core-youtube' },
+  ]
+  let bridge = { id: 'video-bridge', source_channel_id: 'source', target_channel_id: 'target', status: 'active', mode: 'live_sync', settings_json: {} }
+  const reply = (route, data) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(data) })
+  await page.route('**/workspaces/ws-1/channel-registry', route => reply(route, { items: registry }))
+  await page.route('**/workspaces/ws-1/dashboard/jobs', route => reply(route, { items: [] }))
+  await page.route('**/workspaces/ws-1/onboarding/state', route => reply(route, null))
+  await page.route('**/workspaces/ws-1/bridges', route => reply(route, { items: created ? [bridge] : [] }))
+  await page.route('**/workspaces/ws-1/bridges/video-bridge', route => {
+    patched = route.request().postDataJSON()
+    bridge = { ...bridge, settings_json: { ...bridge.settings_json, video_delivery: patched.video_delivery } }
+    return reply(route, bridge)
+  })
+  await page.route('**/workspaces/ws-1/connections/create', route => {
+    created = route.request().postDataJSON()
+    bridge.settings_json = { video_delivery: created.video_delivery }
+    return reply(route, { bridge_id: bridge.id, job_id: null })
+  })
+  await page.addInitScript(() => { localStorage.setItem('postbridge_token', 'saas-token'); localStorage.setItem('postbridge.locale', 'en') })
+  await page.goto('/workspaces/ws-1/migrate')
+  await expect(page.locator('#target-channel-id')).toHaveValue('target')
+  const create = page.getByRole('button', { name: 'Create bridge', exact: true })
+  await expect(create).toBeDisabled()
+  await expect(page.getByLabel('Visibility', { exact: true })).toHaveValue('private')
+  await page.getByLabel('Video audience', { exact: true }).selectOption('false')
+  await create.click()
+  expect(created).toMatchObject({ source_platform: 'postbridge', target_platform: 'youtube', requested_limit: 0, target_credentials_id: 'core-youtube', video_delivery: { format: 'short', made_for_kids: false, visibility: 'private' } })
+  await page.getByText('Bridge settings', { exact: true }).click()
+  await expect(page.locator('.bridge-adaptation-settings')).toHaveCount(0)
+  await expect(page.locator('.bridge-link-back-settings')).toHaveCount(0)
+  await page.getByLabel('Visibility', { exact: true }).selectOption('unlisted')
+  await page.getByRole('button', { name: 'Save video settings', exact: true }).click()
+  expect(patched.video_delivery.visibility).toBe('unlisted')
+  await expect(page.getByLabel('Visibility', { exact: true })).toHaveValue('unlisted')
+  await page.screenshot({ path: testInfo.outputPath('youtube-bridge-settings.png'), fullPage: true })
+})
+
+test('studio delivery selects bridges and reviews receiving side settings without overriding them', async ({ page }) => {
+  await mockSaasBff(page)
+  const postId = '00000000-0000-4000-8000-000000000092'
+  let body
+  let approved = false
+  const post = { id: postId, title: 'Clip title', content_md: 'Exact description', status: 'draft', media_url: '/short.mp4', video_origin: { project_id: 'project', version: 1, output_url: '/short.mp4' } }
+  const view = () => ({ enabled: true, approval_id: approved ? 'approval' : null, snapshot_hash: 'a'.repeat(64),
+    snapshot: { version: 1, output_url: '/short.mp4', text: 'Clip title\n\nExact description' },
+    bridges: [{ id: 'bridge-youtube', title: 'My channel', platform: 'youtube', format: 'short', settings_hash: 'b'.repeat(64), options: { format: 'short', title: 'Clip title', visibility: 'private', made_for_kids: false } }],
+    destinations: [{ id: 'unbridged', title: 'Must not be selectable', platform: 'youtube' }], targets: approved ? [{ id: 'paused-target', title: 'My channel', platform: 'youtube', format: 'short', status: 'failed', error_code: 'VIDEO_BRIDGE_UNAVAILABLE' }] : [] })
+  const reply = (route, data) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(data) })
+  await page.route('**/short.mp4', route => route.fulfill({ contentType: 'video/mp4', body: '' }))
+  await page.route(`**/workspaces/ws-1/posts/${postId}`, route => reply(route, post))
+  await page.route('**/workspaces/ws-1/videos/posts/**', route => {
+    if (new URL(route.request().url()).pathname.endsWith('/approve')) { body = route.request().postDataJSON(); approved = true }
+    return reply(route, view())
+  })
+  await page.addInitScript(() => { localStorage.setItem('postbridge_token', 'saas-token'); localStorage.setItem('postbridge.locale', 'en') })
+  await page.goto(`/workspaces/ws-1/content/${postId}`)
+  const card = page.getByRole('region', { name: 'Video delivery', exact: true })
+  await card.getByRole('button', { name: 'Save and review delivery', exact: true }).click()
+  await expect(card.getByText('Send through bridges', { exact: true })).toBeVisible()
+  await expect(card.getByText('Must not be selectable')).toHaveCount(0)
+  await card.getByLabel('My channel · YouTube · Short', { exact: true }).check()
+  await expect(card.getByRole('combobox')).toHaveCount(0)
+  await expect(card.getByText('Private', { exact: false })).toBeVisible()
+  await card.getByRole('button', { name: 'Confirm and send', exact: true }).click()
+  expect(body).toEqual({ expected_snapshot: 'a'.repeat(64), bridge_ids: ['bridge-youtube'], expected_bridges: { 'bridge-youtube': 'b'.repeat(64) } })
+  await expect(card.getByText('The bridge is paused, deleted or unavailable in this workspace.', { exact: true })).toBeVisible()
+  await expect(card.getByRole('button', { name: 'Check existing upload', exact: true })).toHaveCount(0)
+  await expect(card.getByRole('link', { name: 'Manage bridges', exact: true })).toBeVisible()
 })

@@ -487,9 +487,28 @@ def delete_service_channel(
             message_key="error.validation.channel_not_found",
             details={"channel_id": channel_id},
         )
-    session.delete(ch)
+    if ch.platform == "youtube":
+        from postbridge.services.youtube_data import purge_channel_data
+        purge_channel_data(session, ch)
+    else:
+        session.delete(ch)
     session.commit()
     return Response(status_code=204)
+
+
+@router.post("/internal/service/channels/{channel_id}/youtube-maintenance", include_in_schema=False)
+def maintain_youtube_channel(channel_id: str, tenant_id: str = Depends(require_service_tenant),
+        session: Session = Depends(get_db_session)) -> dict:
+    from postbridge.services.youtube_data import maintain_connection
+    channel = session.scalar(select(ChannelOrm).where(ChannelOrm.id == channel_id,
+        ChannelOrm.tenant_id == tenant_id).with_for_update())
+    if channel is None:
+        return {"status": "disconnected"}
+    if channel.platform != "youtube":
+        raise ValidationError(code="VALIDATION_PLATFORM_UNSUPPORTED", message="Expected a YouTube channel", details={})
+    result = maintain_connection(session, channel)
+    session.commit()
+    return result
 
 
 class ServicePublicationCreate(BaseModel):
@@ -1719,6 +1738,9 @@ def service_create_bridge(
     _assert_core_channels_in_tenant(
         session, tenant_id, body.source_channel_id, body.target_channel_id
     )
+    from postbridge.services.video_bridges import normalize_bridge_settings
+    settings = normalize_bridge_settings(body.settings_json, session.get(ChannelOrm, body.source_channel_id),
+        session.get(ChannelOrm, body.target_channel_id), body.mode)
     now = datetime.now(UTC)
     bridge_id = uuid4().hex
     row = BridgeOrm(
@@ -1729,7 +1751,7 @@ def service_create_bridge(
         target_channel_id=body.target_channel_id,
         mode=body.mode,
         status=body.status,
-        settings_json=body.settings_json,
+        settings_json=settings,
         created_at=now,
         updated_at=now,
     )
@@ -1790,7 +1812,7 @@ def service_list_live_sync_targets_by_source(
     out: list[ServiceLiveSyncTargetOut] = []
     for b in bridges:
         tgt = session.get(ChannelOrm, b.target_channel_id)
-        if tgt is None or tgt.tenant_id != tenant_id:
+        if tgt is None or tgt.tenant_id != tenant_id or tgt.platform == "youtube" or (b.settings_json or {}).get("video_delivery") is not None:
             continue
         out.append(
             ServiceLiveSyncTargetOut(
@@ -1916,7 +1938,9 @@ def service_patch_bridge(
     if body.status is not None:
         row.status = body.status
     if "settings_json" in body.model_fields_set:
-        row.settings_json = body.settings_json
+        from postbridge.services.video_bridges import normalize_bridge_settings
+        row.settings_json = normalize_bridge_settings(body.settings_json, session.get(ChannelOrm, row.source_channel_id),
+            session.get(ChannelOrm, row.target_channel_id), row.mode)
     row.updated_at = datetime.now(UTC)
     session.commit()
     session.refresh(row)

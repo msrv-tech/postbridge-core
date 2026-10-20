@@ -1,3 +1,4 @@
+from postbridge.api.video_studio import router as video_router, selfhost_router as video_selfhost_router
 from postbridge.api.agent_internal import router as agent_internal_router
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -52,6 +53,8 @@ app.include_router(live_sync_router)
 app.include_router(publication_internal_router)
 app.include_router(service_internal_router)
 app.include_router(agent_internal_router)
+app.include_router(video_router)
+app.include_router(video_selfhost_router)
 
 
 def _media_storage_dir() -> Path:
@@ -62,7 +65,7 @@ def _media_storage_dir() -> Path:
 
 
 @app.get("/media/{path:path}", include_in_schema=False)
-def serve_media(path: str) -> Response:
+def serve_media(path: str, download: bool = False) -> Response:
     """Serve local media or proxy a managed S3 asset through Core."""
     settings = get_settings()
     if settings.media_storage_type == "s3":
@@ -83,18 +86,21 @@ def serve_media(path: str) -> Response:
             raise HTTPException(status_code=404, detail="error.http.not_found") from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail="error.http.media_unavailable") from exc
+        headers = {"Cache-Control": "public, max-age=31536000, immutable"}
+        if download:
+            headers["Content-Disposition"] = 'attachment; filename="postbridge-video.mp4"' if content_type == "video/mp4" else 'attachment; filename="postbridge-media"'
         return Response(
             content=content,
             media_type=content_type,
-            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+            headers=headers,
         )
     media_root = _media_storage_dir()
     full = (media_root / path).resolve()
-    if not str(full).startswith(str(media_root.resolve())):
+    if not full.is_relative_to(media_root.resolve()):
         raise HTTPException(status_code=403, detail="error.http.invalid_path")
     if not full.is_file():
         raise HTTPException(status_code=404, detail="error.http.not_found")
-    return FileResponse(full)
+    return FileResponse(full, filename="postbridge-video.mp4" if download and full.suffix == ".mp4" else full.name if download else None)
 
 
 def _rss_item_media_urls(item: RssFeedItemOrm) -> list[str]:

@@ -1,7 +1,9 @@
 import { api } from './apiClient'
 
+const listResponse = (value) => Array.isArray(value) ? { items: value } : value
+
 export function listAgentReviewQueue(workspaceId) {
-  return api(`/workspaces/${workspaceId}/agent/review-queue`)
+  return api(`/workspaces/${workspaceId}/agent/review-queue`).then(listResponse)
 }
 
 export function getAgentReviewItem(workspaceId, reviewItemId) {
@@ -16,7 +18,7 @@ export function resolveAgentReviewItem(workspaceId, reviewItemId, payload) {
 }
 
 export function listAgentRuns(workspaceId) {
-  return api(`/workspaces/${workspaceId}/agent/runs`)
+  return api(`/workspaces/${workspaceId}/agent/runs`).then(listResponse)
 }
 
 export function getAgentRun(workspaceId, runId) {
@@ -24,7 +26,7 @@ export function getAgentRun(workspaceId, runId) {
 }
 
 export function listAgentRunSteps(workspaceId, runId) {
-  return api(`/workspaces/${workspaceId}/agent/runs/${runId}/steps`)
+  return api(`/workspaces/${workspaceId}/agent/runs/${runId}/steps`).then(listResponse)
 }
 
 export function createAgentRun(workspaceId, payload, options = {}) {
@@ -60,7 +62,7 @@ export function getAgentCandidate(workspaceId, candidateId) {
 }
 
 export function listAgentTasks(workspaceId) {
-  return api(`/workspaces/${workspaceId}/agent/tasks`)
+  return api(`/workspaces/${workspaceId}/agent/tasks`).then(listResponse)
 }
 
 export function createAgentTask(workspaceId, payload) {
@@ -90,10 +92,11 @@ export function deleteAgentTask(workspaceId, taskId) {
   })
 }
 
-export function runAgentTask(workspaceId, taskId) {
+export function runAgentTask(workspaceId, taskId, { requestKey } = {}) {
   return api(`/workspaces/${workspaceId}/agent/tasks/${taskId}/run`, {
     method: 'POST',
     body: JSON.stringify({}),
+    ...(requestKey ? { headers: { 'Idempotency-Key': requestKey } } : {}),
   })
 }
 

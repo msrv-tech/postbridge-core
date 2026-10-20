@@ -202,3 +202,14 @@ export function getTimezoneSelectOptions(t, market = 'ru') {
   rows.sort((a, b) => a.offsetUtc - b.offsetUtc)
   return rows.map(({ value, label }) => ({ value, label }))
 }
+
+export function getAllTimezoneSelectOptions(t, selectedZone = 'UTC') {
+  const curated = [...getTimezoneSelectOptions(t, 'io'), ...getTimezoneSelectOptions(t, 'ru')]
+  const options = new Map(curated.map((zone) => [zone.value, zone]))
+  let available = []
+  try { available = Intl.supportedValuesOf?.('timeZone') || [] } catch { /* Use the curated fallback. */ }
+  for (const value of [...available, selectedZone]) {
+    if (!options.has(value)) options.set(value, { value, label: value.replaceAll('_', ' ') })
+  }
+  return [...options.values()]
+}

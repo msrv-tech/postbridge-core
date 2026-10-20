@@ -41,6 +41,15 @@ class LinkedInCredentials(BaseModel):
     expires_at: int | None = None
 
 
+class YouTubeCredentials(BaseModel):
+    access_token: str = ""
+    channel_id: str
+    refresh_token: str | None = None
+    client_id: str | None = None
+    client_secret: str | None = None
+    expires_at: int | None = None
+
+
 class FacebookCredentials(BaseModel):
     """Credentials for Facebook Pages publishing."""
 

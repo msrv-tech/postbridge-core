@@ -22,6 +22,12 @@ class PostPayload:
     text: str
     media_url: str | None = None
     media_urls: list[str] | None = None  # для альбомов (media_group)
+    media_type: str | None = None
+    publication_format: str | None = None
+    video_title: str | None = None
+    visibility: str | None = None
+    made_for_kids: bool | None = None
+    contains_synthetic_media: bool | None = None
 
 
 @dataclass(slots=True)

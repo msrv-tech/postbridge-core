@@ -27,6 +27,7 @@ class PlatformCapabilities:
     ai_adapt_supported: bool
     fetch_credentials_required: bool
     rule_post_text_limit: int | None = None
+    video_formats: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

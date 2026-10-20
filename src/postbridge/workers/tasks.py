@@ -310,6 +310,12 @@ def run_agent_task_task(task_id: str, tenant_id: str) -> dict:
     session = SESSION_LOCAL()
     try:
         task = get_agent_task(session, tenant_id=tenant_id, task_id=task_id)
+        if task.mode == "video_autopilot":
+            # Legacy broker messages also enter the durable occurrence path.
+            from postbridge.services.video_schedules import enqueue_video_agent_run
+            run = enqueue_video_agent_run(session, tenant_id=tenant_id, task_id=task_id, scheduled=True)
+            session.commit()
+            return {"agent_run_id": run.id} if run else {}
         orchestrator = AgentOrchestrator(session)
         task_config = orchestrator.parse_task_config(task.task_config_json)
         result = orchestrator.run_once(
@@ -385,11 +391,20 @@ def process_due_agent_tasks_task() -> int:
     session = SESSION_LOCAL()
     try:
         due = list_due_agent_tasks(session)
-        task_refs = [(row.id, row.tenant_id) for row in due]
+        from postbridge.services.video_schedules import enqueue_video_agent_run
+        task_refs = []
+        video_count = 0
+        for row in due:
+            if row.mode == "video_autopilot":
+                enqueue_video_agent_run(session, tenant_id=row.tenant_id, task_id=row.id, scheduled=True)
+                video_count += 1
+            else:
+                task_refs.append((row.id, row.tenant_id))
+        session.commit()
         session.close()
         for task_id, tenant_id in task_refs:
             run_agent_task_task.delay(task_id, tenant_id)
-        return len(task_refs)
+        return len(task_refs) + video_count
     finally:
         try:
             session.close()

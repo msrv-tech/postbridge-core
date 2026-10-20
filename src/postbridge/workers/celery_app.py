@@ -24,12 +24,17 @@ def create_celery_app() -> Celery:
             "postbridge.workers.tasks",
             "postbridge.workers.live_sync_tasks",
             "postbridge.workers.media_generation_tasks",
+            "postbridge.workers.video_tasks",
+            "postbridge.workers.video_schedule_tasks",
+            "postbridge.workers.video_publication_tasks",
         ],
     )
     app.conf.update(
         task_always_eager=settings.celery_task_always_eager,
         task_eager_propagates=True,
         beat_schedule={
+            "dispatch-video-production-jobs": {"task": "postbridge.video.dispatch", "schedule": 30.0},
+            "dispatch-video-publications": {"task": "postbridge.video.dispatch_publications", "schedule": 30.0},
             "recover-stuck-sync-jobs": {
                 "task": "postbridge.sync.recover_stuck_jobs",
                 "schedule": 60.0,

@@ -38,6 +38,8 @@ COPY src /app/src
 COPY alembic /app/alembic
 COPY --from=web-build /web/dist /app/web/dist
 
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core tzdata && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir .
 
 EXPOSE 8000

@@ -43,6 +43,74 @@ class InstagramPublisher:
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or get_settings()
 
+    def publish_video(self, target_channel, payload, credentials, delivery):
+        from postbridge.services.video_delivery_state import DeliveryPending, VideoDeliveryReceipt, check_response, unknown
+        creds = credentials or self._credentials_from_env()
+        user_id = _instagram_user_id(target_channel, creds)
+        if user_id != target_channel.removeprefix("instagram/"):
+            raise ConfigurationError("Connect publishing credentials for this Instagram account")
+        if not creds.access_token or payload.publication_format != "reel" or len(payload.text) > INSTAGRAM_CAPTION_LIMIT:
+            raise ConfigurationError("Review this Instagram Reel and connect its publishing credentials")
+        version = creds.graph_api_version or self.settings.meta_graph_api_version
+        base = f"{INSTAGRAM_GRAPH_BASE}/{version}"
+        try:
+            with httpx.Client(timeout=httpx.Timeout(90, connect=15), follow_redirects=False,
+                    headers={"Authorization": f"Bearer {creds.access_token}"}) as client:
+                state = delivery.state
+                if not state or state.get("phase") == "rejected":
+                    delivery.save(phase="creating")
+                    create = client.post(f"{base}/{user_id}/media", data={"media_type": "REELS",
+                        "video_url": payload.media_url, "caption": payload.text, "share_to_feed": "true"})
+                    if 400 <= create.status_code < 500 and create.status_code not in {408, 409, 425}:
+                        delivery.save(phase="rejected")
+                    check_response(create, "instagram")
+                    container_id = create.json().get("id")
+                    if not isinstance(container_id, str) or not container_id.isdigit():
+                        raise unknown("instagram")
+                    delivery.save(phase="processing", container_id=container_id)
+                state = delivery.state
+                if state.get("phase") == "creating":
+                    raise unknown("instagram", "The container response was lost; no automatic recreation is allowed")
+                if state.get("external_id"):
+                    return self._video_receipt(client, base, creds.access_token, delivery)
+                result = client.get(f"{base}/{state['container_id']}", params={"fields": "status_code"})
+                check_response(result, "instagram")
+                status = str(result.json().get("status_code") or "").upper()
+                if status in {"ERROR", "EXPIRED"}:
+                    raise ExternalApiError(code="EXTERNAL_API_INSTAGRAM_CONTAINER_ERROR", message="Instagram could not process the Reel",
+                        source="instagram", retryable=False, details={})
+                if state.get("phase") == "publishing" or status == "PUBLISHED":
+                    raise unknown("instagram", "Instagram may have published this Reel; verify the destination before any resend")
+                if status != "FINISHED":
+                    raise DeliveryPending()
+                delivery.save(phase="publishing")
+                publish = client.post(f"{base}/{user_id}/media_publish", data={"creation_id": state["container_id"]})
+                if 400 <= publish.status_code < 500 and publish.status_code not in {408, 409, 425}:
+                    delivery.save(phase="processing")  # Explicit rejection: same container can be checked again.
+                check_response(publish, "instagram")
+                media_id = publish.json().get("id")
+                if not isinstance(media_id, str) or not media_id.isdigit():
+                    raise unknown("instagram")
+                delivery.save(phase="published", external_id=media_id)
+                return self._video_receipt(client, base, creds.access_token, delivery)
+        except httpx.RequestError:
+            raise unknown("instagram") from None
+
+    def _video_receipt(self, client, base, token, delivery):
+        from postbridge.services.video_delivery_state import VideoDeliveryReceipt
+        from urllib.parse import urlparse
+        state = delivery.state
+        if not state.get("external_url"):
+            try:
+                response = client.get(f"{base}/{state['external_id']}", params={"fields": "permalink"}, headers={"Authorization": f"Bearer {token}"})
+                url = response.json().get("permalink") if response.is_success else None
+                parsed = urlparse(url or "")
+                if parsed.scheme == "https" and parsed.hostname in {"www.instagram.com", "instagram.com"} and not parsed.username and not parsed.password:
+                    delivery.save(external_url=url)
+            except (httpx.RequestError, ValueError):
+                pass  # The published media ID is already authoritative; never resend for a missing link.
+        return VideoDeliveryReceipt(state["external_id"], state.get("external_url"))
+
     def publish_post(
         self,
         target_channel: str,
@@ -113,6 +181,7 @@ class InstagramPublisher:
                 data={
                     "caption": caption,
                     "access_token": token,
+                    **({"media_type": "REELS"} if _is_video_url(urls[0]) else {}),
                     ("video_url" if _is_video_url(urls[0]) else "image_url"): urls[0],
                 },
                 target_channel=target_channel,

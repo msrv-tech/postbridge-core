@@ -285,6 +285,13 @@ class PublicationTargetOrm(Base):
     )
 
 
+class VideoDeliveryStateOrm(Base):
+    __tablename__ = "video_delivery_states"
+    target_id: Mapped[str] = mapped_column(String(36), ForeignKey("publication_targets.id", ondelete="CASCADE"), primary_key=True)
+    encrypted_state: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
+
+
 class MediaAssetOrm(Base):
     __tablename__ = "media_assets"
     __table_args__ = (
@@ -462,7 +469,7 @@ class RssFeedOrm(Base):
 class AgentTaskOrm(Base):
     __tablename__ = "agent_tasks"
     __table_args__ = (
-        CheckConstraint("mode IN ('post_copilot', 'topic_scout')", name="ck_agent_tasks_mode"),
+        CheckConstraint("mode IN ('post_copilot', 'topic_scout', 'video_autopilot')", name="ck_agent_tasks_mode"),
         CheckConstraint("status IN ('active', 'paused', 'archived')", name="ck_agent_tasks_status"),
         Index("ix_agent_tasks_tenant_id", "tenant_id"),
         Index("ix_agent_tasks_channel_id", "channel_id"),
@@ -751,3 +758,123 @@ class ReviewQueueItemOrm(Base):
     decision_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
+
+
+class VideoMaterialOrm(Base):
+    __tablename__ = "video_materials"
+    asset_id: Mapped[str] = mapped_column(String(36), ForeignKey("media_assets.id", ondelete="CASCADE"), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False)
+    folder: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
+
+
+class VideoProjectOrm(Base):
+    """Tenant-owned video workspace; outputs belong to immutable input revisions."""
+    __tablename__ = "video_projects"
+    __table_args__ = (UniqueConstraint("tenant_id", "request_key", name="uq_video_project_request"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    brief: Mapped[str] = mapped_column(Text)
+    request_key: Mapped[str] = mapped_column(String(64))
+    current_version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class VideoRevisionOrm(Base):
+    __tablename__ = "video_revisions"
+    __table_args__ = (
+        UniqueConstraint("project_id", "version", name="uq_video_revision_version"),
+        UniqueConstraint("project_id", "request_key", name="uq_video_revision_request"),
+        Index("uq_video_tenant_request", "tenant_id", "request_key", unique=True),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("video_projects.id", ondelete="CASCADE"))
+    version: Mapped[int] = mapped_column(Integer)
+    production_options: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    request_key: Mapped[str] = mapped_column(String(64))
+    scenes: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class VideoProductionJobOrm(Base):
+    __tablename__ = "video_production_jobs"
+    __table_args__ = (
+        UniqueConstraint("revision_id", name="uq_video_job_revision"),
+        CheckConstraint("status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')", name="ck_video_job_status"),
+        Index("ix_video_jobs_dispatch", "status", "lease_until"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    revision_id: Mapped[str] = mapped_column(String(36), ForeignKey("video_revisions.id", ondelete="CASCADE"))
+    progress_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    stage: Mapped[str] = mapped_column(String(32), default="queued")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    output_asset_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("media_assets.id"), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class VideoSpeechAssetOrm(Base):
+    """Verified generated PCM assets reusable within one tenant."""
+    __tablename__ = "video_speech_assets"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "cache_key", name="uq_video_speech_cache"),
+        CheckConstraint("sample_count > 0 AND sample_count <= 360000", name="ck_video_speech_samples"),
+    )
+    asset_id: Mapped[str] = mapped_column(String(36), ForeignKey("media_assets.id", ondelete="CASCADE"), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    cache_key: Mapped[str] = mapped_column(String(64))
+    text_hash: Mapped[str] = mapped_column(String(64))
+    sample_count: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class VideoPostDraftOrm(Base):
+    """One editable Postbridge post prepared from a specific completed video revision."""
+    __tablename__ = "video_post_drafts"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    revision_id: Mapped[str] = mapped_column(String(36), ForeignKey("video_revisions.id", ondelete="CASCADE"), unique=True)
+    content_item_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("content_items.id", ondelete="SET NULL"), unique=True)
+    caption: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class VideoPublicationApprovalOrm(Base):
+    """Immutable publication grant, bound to one prepared post and one delivery plan."""
+    __tablename__ = "video_publication_approvals"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    post_draft_id: Mapped[str] = mapped_column(String(36), ForeignKey("video_post_drafts.id", ondelete="RESTRICT"), unique=True)
+    publication_plan_id: Mapped[str] = mapped_column(String(36), ForeignKey("publication_plans.id", ondelete="RESTRICT"), unique=True)
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    initial_timing: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    schedule_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    schedule_history: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class VideoAgentExecutionOrm(Base):
+    """A durable video-production intent belonging to an existing agent run."""
+    __tablename__ = "video_agent_executions"
+    __table_args__ = (UniqueConstraint("task_id", "occurrence_key", name="uq_video_agent_occurrence"),)
+    id: Mapped[str] = mapped_column(String(36), ForeignKey("agent_runs.id", ondelete="CASCADE"), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    task_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agent_tasks.id", ondelete="SET NULL"), index=True)
+    occurrence_key: Mapped[str] = mapped_column(String(80))
+    input_snapshot: Mapped[dict] = mapped_column(JSON)
+    project_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("video_projects.id", ondelete="SET NULL"), unique=True)
+    lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    notification_acknowledged: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

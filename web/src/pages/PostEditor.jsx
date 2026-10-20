@@ -14,6 +14,7 @@ import { getMediaGenerationJob, startMediaGenerationJob, uploadWorkspaceMedia } 
 import { clearToken } from '../adapters/sessionToken'
 import { useAuth } from '../useAuth'
 import AppShell from '../components/AppShell'
+import VideoPublicationCard from '../components/VideoPublicationCard'
 import { isBillingEnabled } from '../adapters/billing'
 import { mdEditorCommandsFilter } from '../mdEditorRu'
 import { useI18n } from '../i18n'
@@ -454,6 +455,14 @@ export default function PostEditor() {
   const [coverImageUrl, setCoverImageUrl] = useState('')
   const [status, setStatus] = useState('draft')
   const [mediaUrl, setMediaUrl] = useState('')
+  const [videoOrigin, setVideoOrigin] = useState(null)
+  const [videoApproved, setVideoApproved] = useState(false)
+  useEffect(() => { setVideoApproved(false) }, [workspaceId, postId])
+  useEffect(() => {
+    if (videoOrigin?.project_id) window.dispatchEvent(new CustomEvent('postbridge-assistant-collapse', {
+      detail: { workspaceId, route: `/workspaces/${workspaceId}/content/${postId}` },
+    }))
+  }, [workspaceId, postId, videoOrigin?.project_id])
   const [scheduleLocal, setScheduleLocal] = useState('')
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
@@ -517,6 +526,7 @@ export default function PostEditor() {
     setCoverImageUrl(snapshot.coverImageUrl)
     setStatus(snapshot.status)
     setMediaUrl(snapshot.mediaUrl)
+    setVideoOrigin(post.video_origin || null)
     setScheduleLocal(snapshot.scheduleLocal)
     if (markSynced) {
       syncedPostSnapshotRef.current = snapshot
@@ -651,7 +661,7 @@ export default function PostEditor() {
   }
 
   useEffect(() => {
-    if (!workspaceId) {
+    if (!workspaceId || videoOrigin) {
       setPlatformPreviews([])
       setPlatformPreviewsError('')
       setPlatformPreviewsErrorCode('')
@@ -676,7 +686,7 @@ export default function PostEditor() {
       window.clearTimeout(timeoutId)
       abortController.abort()
     }
-  }, [workspaceId, contentMd, title, summary, linkUrl, cta, t])
+  }, [workspaceId, contentMd, title, summary, linkUrl, cta, t, videoOrigin])
 
   useEffect(() => {
     if (!workspaceId || !postId) {
@@ -1246,14 +1256,22 @@ export default function PostEditor() {
       }
     >
       <div className="card post-editor-card">
+        {videoOrigin && <VideoPublicationCard key={`${workspaceId}/${postId}`} workspaceId={workspaceId} postId={postId}
+          dirty={!arePostSnapshotsEqual(currentFormSnapshot(), syncedPostSnapshotRef.current)} onLocked={setVideoApproved}
+          saveDraft={() => savePost('draft', { redirect: false, allowEmptyDraft: true })} />}
         <form
           className="post-editor-form"
           onSubmit={(e) => {
             e.preventDefault()
-            handleSubmit(status)
+            handleSubmit(videoOrigin ? 'draft' : status)
           }}
         >
+          <fieldset disabled={videoApproved} className="post-editor-fields">
           <div className="post-editor-main">
+            {videoOrigin && <div className="post-editor-video-origin">
+              <p><Link to={`/workspaces/${workspaceId}/content/videos/${videoOrigin.project_id}`}>{t('videoPost.source', { version: videoOrigin.version })}</Link></p>
+              {mediaUrl.trim() === videoOrigin.output_url && <video src={mediaUrl.trim()} controls playsInline preload="metadata" aria-label={t('video.preview')} />}
+            </div>}
             <div className="form-group">
               <label htmlFor="title">{t('postEditor.field.title')}</label>
               <input
@@ -1795,7 +1813,7 @@ export default function PostEditor() {
           </div>
 
           <div className="post-editor-sidebar">
-            <div className="post-editor-section">
+            {!videoOrigin && <div className="post-editor-section">
               <h4 className="post-editor-section-title">{t('postEditor.publication.title')}</h4>
               <div className="form-group">
                 <label htmlFor="status">{t('common.status')}</label>
@@ -1822,7 +1840,7 @@ export default function PostEditor() {
                   {t('postEditor.schedule.hint', { settings: t('settings.title') })}
                 </p>
               </div>
-            </div>
+            </div>}
 
             <div className="post-editor-section">
               <h4 className="post-editor-section-title">{t('postEditor.previewLinks.title')}</h4>
@@ -1887,7 +1905,7 @@ export default function PostEditor() {
               </div>
             </div>
 
-            <div className="post-editor-section">
+            {!videoOrigin && <div className="post-editor-section">
               <h4 className="post-editor-section-title">{t('postEditor.media.title')}</h4>
               <div className="form-group">
                 <label htmlFor="cover-image-url">{t('postEditor.cover')}</label>
@@ -1996,9 +2014,9 @@ export default function PostEditor() {
               <p className="muted post-editor-media-upload-hint">
                 {t('postEditor.media.uploadHint')}
               </p>
-            </div>
+            </div>}
 
-            <div className="post-editor-section">
+            {!videoOrigin && <div className="post-editor-section">
               <h4 className="post-editor-section-title">{t('postEditor.bridgePreview.title')}</h4>
               {manualAiPreviewItems.length > 0 && (
                 <div className="post-editor-platform-preview-actions">
@@ -2079,7 +2097,7 @@ export default function PostEditor() {
                   </div>
                 )
               })}
-            </div>
+            </div>}
           </div>
 
           {error && <p className="error post-editor-full-width">{error}</p>}
@@ -2099,19 +2117,19 @@ export default function PostEditor() {
               type="button"
               className="btn btn-secondary"
               onClick={() => handleSubmit('draft')}
-              disabled={saving}
+              disabled={saving || videoApproved}
             >
               {saving ? t('common.saving') : t('postEditor.saveDraft')}
             </button>
-            <button
+            {!videoOrigin && <button
               type="button"
               className="btn btn-secondary"
               onClick={handleScheduleClick}
               disabled={saving}
             >
               {saving ? t('common.saving') : t('postEditor.schedule')}
-            </button>
-            {!hasScheduledTime && (
+            </button>}
+            {!videoOrigin && !hasScheduledTime && (
               <button
                 type="button"
                 className="btn"
@@ -2129,6 +2147,7 @@ export default function PostEditor() {
               {t('common.cancel')}
             </Link>
           </div>
+          </fieldset>
         </form>
         {billingEnabled && imageGenerationUpgradeOpen && (
           <div className="modal-overlay" onClick={() => setImageGenerationUpgradeOpen(false)}>

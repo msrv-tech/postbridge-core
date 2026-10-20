@@ -33,6 +33,7 @@ function mapSelfhostPath(path) {
   const rest = workspaceMatch[2] || '';
 
   const mappings = [
+    [/^\/videos(.*)$/, '/videos$1'],
     [/^\/dashboard\/summary(\?.*)?$/, '/dashboard/summary$1'],
     [/^\/dashboard\/jobs(\?.*)?$/, '/dashboard/jobs$1'],
     [/^\/settings(\?.*)?$/, '/settings$1'],

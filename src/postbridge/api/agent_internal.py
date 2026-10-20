@@ -93,7 +93,7 @@ def _load_json_object(raw: str | None, default: Any) -> Any:
         return default
 
 
-def _agent_run_public_dict(row) -> dict[str, Any]:
+def _agent_run_public_dict(row, session=None) -> dict[str, Any]:
     trace = _load_json_object(getattr(row, "trace_json", None), {})
     result_raw = getattr(row, "result_json", None)
     result = _load_json_object(result_raw, {})
@@ -104,7 +104,12 @@ def _agent_run_public_dict(row) -> dict[str, Any]:
     duration_ms = None
     if row.started_at and row.completed_at:
         duration_ms = int((row.completed_at - row.started_at).total_seconds() * 1000)
+    extra = {}
+    if row.graph_name == "video_autopilot" and session is not None:
+        from postbridge.services.video_schedules import video_execution_payload
+        extra["video_execution"] = video_execution_payload(session, row)
     return {
+        **extra,
         "id": row.id,
         "tenant_id": row.tenant_id,
         "channel_id": row.channel_id,
@@ -230,7 +235,7 @@ class AgentTaskCreateBody(BaseModel):
         max_length=36,
         description="Редакционный контекст Postbridge, в котором агент хранит стиль, память и review flow.",
     )
-    mode: str = Field(pattern="^(post_copilot|topic_scout)$")
+    mode: str = Field(pattern="^(post_copilot|topic_scout|video_autopilot)$")
     goal_text: str = Field(min_length=1, max_length=20_000)
     editorial_instructions: str | None = Field(default=None, max_length=20_000)
     schedule_cron: str | None = Field(default=None, max_length=128)
@@ -389,12 +394,12 @@ def create_service_agent_task(
     tenant_id: str = Depends(require_service_tenant),
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
-    task_config = {
+    task_config = dict(body.task_config) if body.mode == "video_autopilot" else {
         **body.task_config,
         "seed_urls": body.seed_urls,
         "require_source_approval": body.require_source_approval,
     }
-    if body.search_image_mode is not None:
+    if body.search_image_mode is not None and body.mode != "video_autopilot":
         task_config["search_image_mode"] = body.search_image_mode
     row = create_agent_task(
         session,
@@ -421,7 +426,8 @@ def create_service_agent_task(
         "status": row.status,
         "goal_text": row.goal_text,
         "editorial_instructions": row.editorial_instructions,
-        "task_config": task_config,
+        "task_config": AgentOrchestrator.parse_task_config(row.task_config_json),
+        "next_run_at": row.next_run_at, "last_run_at": row.last_run_at,
         "schedule_cron": row.schedule_cron,
         "timezone": row.timezone,
         "autonomy_mode": row.autonomy_mode,
@@ -444,6 +450,7 @@ def list_service_agent_tasks(
             "goal_text": row.goal_text,
             "editorial_instructions": row.editorial_instructions,
             "task_config": AgentOrchestrator.parse_task_config(row.task_config_json),
+            "next_run_at": row.next_run_at, "last_run_at": row.last_run_at,
             "schedule_cron": row.schedule_cron,
             "timezone": row.timezone,
             "autonomy_mode": row.autonomy_mode,
@@ -469,6 +476,7 @@ def pause_service_agent_task(
         "goal_text": row.goal_text,
         "editorial_instructions": row.editorial_instructions,
         "task_config": AgentOrchestrator.parse_task_config(row.task_config_json),
+        "next_run_at": row.next_run_at, "last_run_at": row.last_run_at,
         "schedule_cron": row.schedule_cron,
         "timezone": row.timezone,
         "autonomy_mode": row.autonomy_mode,
@@ -492,6 +500,7 @@ def resume_service_agent_task(
         "goal_text": row.goal_text,
         "editorial_instructions": row.editorial_instructions,
         "task_config": AgentOrchestrator.parse_task_config(row.task_config_json),
+        "next_run_at": row.next_run_at, "last_run_at": row.last_run_at,
         "schedule_cron": row.schedule_cron,
         "timezone": row.timezone,
         "autonomy_mode": row.autonomy_mode,
@@ -515,6 +524,7 @@ def delete_service_agent_task(
         "goal_text": row.goal_text,
         "editorial_instructions": row.editorial_instructions,
         "task_config": AgentOrchestrator.parse_task_config(row.task_config_json),
+        "next_run_at": row.next_run_at, "last_run_at": row.last_run_at,
         "schedule_cron": row.schedule_cron,
         "timezone": row.timezone,
         "autonomy_mode": row.autonomy_mode,
@@ -527,7 +537,7 @@ def list_service_agent_runs(
     tenant_id: str = Depends(require_service_tenant),
     session: Session = Depends(get_db_session),
 ) -> list[dict[str, Any]]:
-    return [_agent_run_public_dict(row) for row in list_agent_runs(session, tenant_id=tenant_id)]
+    return [_agent_run_public_dict(row, session=session) for row in list_agent_runs(session, tenant_id=tenant_id)]
 
 
 @router.get("/internal/service/agent/runs/{run_id}", include_in_schema=False)
@@ -536,7 +546,7 @@ def get_service_agent_run(
     tenant_id: str = Depends(require_service_tenant),
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
-    return _agent_run_public_dict(get_agent_run(session, tenant_id=tenant_id, run_id=run_id))
+    return _agent_run_public_dict(get_agent_run(session, tenant_id=tenant_id, run_id=run_id), session=session)
 
 
 @router.get("/internal/service/agent/runs/{run_id}/steps", include_in_schema=False)
@@ -637,6 +647,12 @@ def run_service_agent_task(
 ) -> dict[str, Any]:
     _ = request
     task = get_agent_task(session, tenant_id=tenant_id, task_id=task_id)
+    if task.mode == "video_autopilot":
+        from postbridge.services.video_schedules import enqueue_video_agent_run
+        run = enqueue_video_agent_run(session, tenant_id=tenant_id, task_id=task_id,
+            occurrence_key=request.headers.get("Idempotency-Key"))
+        session.commit()
+        return {"task_id": task.id, "run": _agent_run_public_dict(run, session=session)}
     if task.mode == "post_copilot" and task.content_item_id:
         require_content_item_for_tenant(
             session,

@@ -28,11 +28,13 @@ function agentModeLabel(value, t) {
   const labels = {
     post_copilot: t('agents.nav.editor'),
     topic_scout: t('agents.nav.topicScout'),
+    video_autopilot: t('videoSchedule.title'),
   }
   return labels[value] || value || t('agentRun.title')
 }
 
 function agentNavKey(value) {
+  if (value === 'video_autopilot') return 'videos'
   if (value === 'post_copilot') return 'editor'
   if (value === 'topic_scout') return 'topic-scout'
   return 'topic-scout'
@@ -285,6 +287,7 @@ export default function AgentRunDetail() {
                 <p style={{ margin: 0 }}>{run.user_request}</p>
               </div>
             )}
+            {run.video_execution?.project_id && <p><Link className="btn" to={`/workspaces/${workspaceId}/content/videos/${run.video_execution.project_id}`}>{t('video.open')}</Link></p>}
 
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
               <span className="muted">{t('agentRun.model')}: {run.model || '—'}</span>

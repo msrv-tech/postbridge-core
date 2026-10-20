@@ -29,12 +29,14 @@ const Wizard = lazy(() => import('./pages/Wizard'))
 const AddChannel = lazy(() => import('./pages/AddChannel'))
 const EditChannel = lazy(() => import('./pages/EditChannel'))
 const JobDetail = lazy(() => import('./pages/JobDetail'))
+const VideoStudio = lazy(() => import('./pages/VideoStudio'))
 const PostsList = lazy(() => import('./pages/PostsList'))
 const PostEditor = lazy(() => import('./pages/PostEditor'))
 const AgentReviewQueue = lazy(() => import('./pages/AgentReviewQueue'))
 const AgentCandidatePage = lazy(() => import('./pages/AgentCandidatePage'))
 const AgentRunDetail = lazy(() => import('./pages/AgentRunDetail'))
 const TopicScout = lazy(() => import('./pages/TopicScout'))
+const VideoSchedules = lazy(() => import('./pages/VideoSchedules'))
 const AgentEditor = lazy(() => import('./pages/AgentEditor'))
 const AgentFaq = lazy(() => import('./pages/AgentFaq'))
 const AgentOps = lazy(() => import('./pages/AgentOps'))
@@ -280,6 +282,8 @@ export default function App() {
               <PostsList />
             </ProtectedRoute>
           } />
+          <Route path="/workspaces/:workspaceId/content/videos" element={<ProtectedRoute><VideoStudio /></ProtectedRoute>} />
+          <Route path="/workspaces/:workspaceId/content/videos/:projectId" element={<ProtectedRoute><VideoStudio /></ProtectedRoute>} />
           <Route path="/workspaces/:workspaceId/content/new" element={
             <ProtectedRoute>
               <PostEditor />
@@ -295,6 +299,7 @@ export default function App() {
               <TopicScout />
             </ProtectedRoute>
           } />
+          <Route path="/workspaces/:workspaceId/agents/videos" element={<ProtectedRoute><VideoSchedules /></ProtectedRoute>} />
           <Route path="/workspaces/:workspaceId/agents/editor" element={
             <ProtectedRoute>
               <AgentEditor />

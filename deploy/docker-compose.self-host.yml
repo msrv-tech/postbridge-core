@@ -104,5 +104,14 @@ services:
       redis:
         condition: service_healthy
 
+  core-video-worker:
+    mem_limit: 2g
+    cpus: 2
+    pids_limit: 256
+    extends:
+      service: core-worker
+    profiles: [video]
+    command: celery -A postbridge.workers.celery_app:celery_app worker -Q video --concurrency=1 --prefetch-multiplier=1 -l info
+
 volumes:
   pb_core_selfhost_pg:

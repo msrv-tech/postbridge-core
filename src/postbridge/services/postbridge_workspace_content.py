@@ -132,6 +132,7 @@ def content_item_to_api_dict(row: ContentItemOrm) -> dict[str, Any]:
         "scheduled_publish_at": scheduled_publish_at,
         "live_sync_source_core_channel_id": src_ch,
         "saas_workspace_id": ws_id,
+        "video_origin": extra.get("video_origin"),
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
@@ -158,6 +159,9 @@ def create_postbridge_content_item(
     live_sync_source_core_channel_id: str | None = None,
     saas_workspace_id: str | None = None,
 ) -> ContentItemOrm:
+    if status == "published" or scheduled_publish_at is not None:
+        from postbridge.services.video_publication import reject_unapproved_route
+        reject_unapproved_route(session, tenant_id, urls=[media_url, cover_image_url, *(media_urls or [])])
     if status not in ("draft", "published"):
         raise ValidationError(
             code="VALIDATION_INVALID_STATUS",
@@ -283,6 +287,17 @@ def update_postbridge_content_item(
     live_sync_source_core_channel_id: str | None | object = _SCHEDULE_UNSET,
     saas_workspace_id: str | None | object = _SCHEDULE_UNSET,
 ) -> ContentItemOrm:
+    from postbridge.services.video_publication import approval_for_content, is_video_post
+    if is_video_post(session, row.id):
+        row = session.scalar(select(ContentItemOrm).where(ContentItemOrm.id == row.id).with_for_update().execution_options(populate_existing=True))
+        if approval_for_content(session, row.id):
+            raise ValidationError(code="VIDEO_PUBLICATION_LOCKED", message="This post is approved; prepare a new video version to edit it", details={})
+        if status == "published" or scheduled_publish_at not in (_SCHEDULE_UNSET, None):
+            raise ValidationError(code="VIDEO_APPROVAL_REQUIRED", message="Use the video approval card to publish this post", details={})
+    if (status or row.status) == "published" or scheduled_publish_at not in (_SCHEDULE_UNSET, None):
+        from postbridge.services.video_publication import reject_unapproved_route
+        reject_unapproved_route(session, row.tenant_id, content_id=row.id,
+            urls=[media_url or row.media_url, cover_image_url, *(media_urls if media_urls is not None else row.media_urls or [])])
     extra = _load_extra(row.body_structured_json)
     if content_md is not None:
         row.body_markdown = content_md
@@ -375,6 +390,10 @@ def update_postbridge_content_item(
 
 
 def delete_postbridge_content_item(session: Session, *, row: ContentItemOrm) -> None:
+    from postbridge.services.video_publication import approval_for_content
+    session.scalar(select(ContentItemOrm).where(ContentItemOrm.id == row.id).with_for_update().execution_options(populate_existing=True))
+    if approval_for_content(session, row.id):
+        raise ValidationError(code="VIDEO_PUBLICATION_LOCKED", message="Approved video posts retain their delivery history", details={})
     session.execute(
         delete(RssFeedItemOrm).where(RssFeedItemOrm.source_post_id == row.id)
     )

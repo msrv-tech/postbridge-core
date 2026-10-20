@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { deleteContentItem, listContentItems } from '../adapters/content'
+import { getVideoCapabilities } from '../adapters/video'
 import { clearToken } from '../adapters/sessionToken'
 import { useAuth } from '../useAuth'
 import AppShell from '../components/AppShell'
@@ -36,6 +37,16 @@ export default function PostsList() {
   const [error, setError] = useState('')
   const [offset, setOffset] = useState(0)
   const [deleteLoadingId, setDeleteLoadingId] = useState(null)
+  const [videoEnabled, setVideoEnabled] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    setVideoEnabled(false)
+    if (workspaceId) getVideoCapabilities(workspaceId)
+      .then((caps) => { if (active) setVideoEnabled(Boolean(caps?.enabled)) })
+      .catch(() => {})
+    return () => { active = false }
+  }, [workspaceId])
 
   const statusFilter = searchParams.get('status') || ''
 
@@ -82,6 +93,7 @@ export default function PostsList() {
       onLogout={handleLogout}
       actions={
         <>
+          {videoEnabled && <Link to={`/workspaces/${workspaceId}/content/videos`} className="btn btn-secondary btn-small">{t('video.title')}</Link>}
           <Link to={`/workspaces/${workspaceId}/agents/topic-scout`} className="btn btn-small">
             {t('agents.nav.topicScout')}
           </Link>

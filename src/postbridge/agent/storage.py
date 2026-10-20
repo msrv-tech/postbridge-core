@@ -74,6 +74,11 @@ def create_agent_task(
     task_config: dict,
     created_by: str | None,
 ) -> AgentTaskOrm:
+    if mode == "video_autopilot":
+        from postbridge.services.video_schedules import create_video_agent_task
+        return create_video_agent_task(session, tenant_id=tenant_id, channel_id=channel_id, goal_text=goal_text,
+            schedule_cron=schedule_cron, timezone=timezone, task_config=task_config, created_by=created_by,
+            autonomy_mode=autonomy_mode, max_candidates_per_run=max_candidates_per_run)
     row = AgentTaskOrm(
         id=str(uuid4()),
         tenant_id=tenant_id,
@@ -91,7 +96,7 @@ def create_agent_task(
         task_config_json=json.dumps(task_config, ensure_ascii=True),
         created_by=created_by,
         status="active",
-        next_run_at=next_run_at_from_cron(schedule_cron),
+        next_run_at=next_run_at_from_cron(schedule_cron, timezone=timezone),
     )
     session.add(row)
     session.flush()
@@ -126,7 +131,7 @@ def pause_agent_task(session: Session, *, tenant_id: str, task_id: str) -> Agent
 def resume_agent_task(session: Session, *, tenant_id: str, task_id: str) -> AgentTaskOrm:
     row = get_agent_task(session, tenant_id=tenant_id, task_id=task_id)
     row.status = "active"
-    row.next_run_at = next_run_at_from_cron(row.schedule_cron, base=datetime.now(UTC))
+    row.next_run_at = next_run_at_from_cron(row.schedule_cron, base=datetime.now(UTC), timezone=row.timezone)
     session.flush()
     return row
 
@@ -400,7 +405,7 @@ def mark_run_completed(
         task = session.get(AgentTaskOrm, run.agent_task_id)
         if task is not None:
             task.last_run_at = run.completed_at
-            task.next_run_at = next_run_at_from_cron(task.schedule_cron, base=run.completed_at)
+            task.next_run_at = next_run_at_from_cron(task.schedule_cron, base=run.completed_at, timezone=task.timezone)
     session.flush()
 
 
@@ -1762,8 +1767,9 @@ def cleanup_agent_runtime(
     review_body_cutoff = now - timedelta(days=review_body_days)
     fingerprint_cutoff = now - timedelta(days=fingerprint_days)
 
-    trace_runs_stmt = select(AgentRunOrm).where(AgentRunOrm.created_at < trace_cutoff)
-    runs_stmt = select(AgentRunOrm).where(AgentRunOrm.created_at < review_cutoff)
+    # Video occurrences retain their production/billing provenance with the video project.
+    trace_runs_stmt = select(AgentRunOrm).where(AgentRunOrm.created_at < trace_cutoff, AgentRunOrm.graph_name != "video_autopilot")
+    runs_stmt = select(AgentRunOrm).where(AgentRunOrm.created_at < review_cutoff, AgentRunOrm.graph_name != "video_autopilot")
     reviews_stmt = select(ReviewQueueItemOrm).where(ReviewQueueItemOrm.created_at < review_cutoff)
     if tenant_id:
         trace_runs_stmt = trace_runs_stmt.where(AgentRunOrm.tenant_id == tenant_id)

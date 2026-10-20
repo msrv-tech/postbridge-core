@@ -55,7 +55,11 @@ def test_platform_capabilities_public_map_covers_registry():
         "ai_adapt_supported",
         "fetch_credentials_required",
         "rule_post_text_limit",
+        "video_formats",
     }
+    assert m["youtube"]["video_formats"] == ("short",)
+    assert m["youtube"]["live_sync_publish_supported"] is False
+    assert m["instagram"]["video_formats"] == ("reel",)
     assert m["rss"]["rule_post_text_limit"] is None
     assert m["max"]["rule_post_text_limit"] == 4000
     assert m["zen"]["historical_migration_source_supported"] is True
