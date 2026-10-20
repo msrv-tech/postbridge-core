@@ -198,7 +198,7 @@ test('creates a channel and bridge in the self-host workflow', async ({ page }) 
   await page.getByRole('button', { name: 'Create bridge' }).click()
 
   await expect(page).toHaveURL(/\/web\/workspaces\/local\/channels\?success=channel_connected/)
-  await expect(page.getByText('Bridge connected. Live sync is active.')).toBeVisible()
+  await expect(page.getByText('Bridge connected.', { exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Bridges' })).toBeVisible()
   await expect(page.locator('.channel-link-badge-name', { hasText: 'RSS' }).first()).toBeVisible()
 })

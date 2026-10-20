@@ -962,7 +962,7 @@ export const catalogs = {
     'channels.noWorkspace.text': 'Добавьте бота в Telegram-канал или создайте новый мост, чтобы создать рабочий сценарий.',
     'channels.vk.error': 'Ошибка подключения VK: {error}',
     'channels.vk.connected': 'Группы VK подключены. Теперь выберите их в «Новый мост».',
-    'channels.bridge.connected': 'Мост подключён. Live-sync активен.',
+    'channels.bridge.connected': 'Мост подключён.',
     'channels.migrationPaid': 'Оплата прошла успешно. Запустите исторический перенос для нужного моста.',
     'channels.channelAdded': 'Канал добавлен. Добавьте ещё каналы и создайте мост между ними.',
     'channels.channelUpdated': 'Настройки канала сохранены.',

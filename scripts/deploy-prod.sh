@@ -113,6 +113,13 @@ build_services=("$api_service")
 if [[ -n "$worker_service" ]]; then
   build_services+=("$worker_service")
 fi
+# Update an opted-in video worker on later releases; first activation stays explicit.
+for candidate in core-video-worker video-worker; do
+  if has_service "$candidate" && compose --profile video ps --services --filter status=running | grep -qx "$candidate"; then
+    build_services+=("$candidate")
+    break
+  fi
+done
 
 echo "Building Core images..."
 if [[ "${POSTBRIDGE_DEPLOY_SERIAL_BUILD:-0}" == "1" ]]; then
