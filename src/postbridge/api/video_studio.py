@@ -39,6 +39,16 @@ def build_router(prefix, tenant_dependency):
     def capabilities(tenant_id: str = Depends(tenant_dependency)):
         return service.capabilities()
 
+    @router.get("/tiktok/channels/{channel_id}/creator-info")
+    def tiktok_creator_info(channel_id: UUID, tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
+        from postbridge.services.tiktok import get_creator_info
+        return get_creator_info(session, tenant_id, str(channel_id))
+
+    @router.delete("/tiktok/channels/{channel_id}/connection")
+    def disconnect_tiktok(channel_id: UUID, tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
+        from postbridge.services.tiktok import disconnect
+        return disconnect(session, tenant_id, str(channel_id))
+
     @router.get("")
     def list_projects(limit: int = Query(20, ge=1, le=50), offset: int = Query(0, ge=0),
                       tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):

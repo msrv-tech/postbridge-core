@@ -487,7 +487,7 @@ def delete_service_channel(
             message_key="error.validation.channel_not_found",
             details={"channel_id": channel_id},
         )
-    if ch.platform == "youtube":
+    if ch.platform in {"youtube", "tiktok"}:
         from postbridge.services.youtube_data import purge_channel_data
         purge_channel_data(session, ch)
     else:
@@ -1812,7 +1812,7 @@ def service_list_live_sync_targets_by_source(
     out: list[ServiceLiveSyncTargetOut] = []
     for b in bridges:
         tgt = session.get(ChannelOrm, b.target_channel_id)
-        if tgt is None or tgt.tenant_id != tenant_id or tgt.platform == "youtube" or (b.settings_json or {}).get("video_delivery") is not None:
+        if tgt is None or tgt.tenant_id != tenant_id or tgt.platform in {"youtube", "tiktok"} or (b.settings_json or {}).get("video_delivery") is not None:
             continue
         out.append(
             ServiceLiveSyncTargetOut(

@@ -8,6 +8,7 @@ import {
   getLinkedinAuthorizeUrl,
   getMetaAuthorizeUrl,
   getYouTubeAuthorizeUrl,
+  getTikTokAuthorizeUrl,
   getXAuthorizeUrl,
   listLinkedinOrganizations,
   requestMaxChannelVerification,
@@ -44,7 +45,7 @@ const ALL_PLATFORMS = [
   { id: 'linkedin', label: 'LinkedIn' },
   { id: 'facebook', label: 'Facebook' },
   { id: 'instagram', label: 'Instagram' },
-  ...(!isSelfhostMode() ? [{ id: 'youtube', label: 'YouTube' }] : []),
+  ...(!isSelfhostMode() ? [{ id: 'youtube', label: 'YouTube' }, { id: 'tiktok', label: 'TikTok' }] : []),
   { id: 'x', label: 'X' },
   { id: 'bluesky', label: 'Bluesky' },
   { id: 'mastodon', label: 'Mastodon' },
@@ -98,6 +99,7 @@ export default function AddChannel() {
   const [loading, setLoading] = useState(false)
   const [validating, setValidating] = useState(false)
   const [youtubePolicyAccepted, setYoutubePolicyAccepted] = useState(false)
+  const [tiktokPolicyAccepted, setTikTokPolicyAccepted] = useState(false)
   const [error, setError] = useState('')
   // MAX: verification with a unique code.
   const [maxCode, setMaxCode] = useState(null)
@@ -330,6 +332,8 @@ export default function AddChannel() {
 
   const handlePlatformChange = (newPlatform) => {
     setPlatform(newPlatform)
+    setYoutubePolicyAccepted(false)
+    setTikTokPolicyAccepted(false)
     setMaxCode(null)
     setMaxDeeplink(null)
     setMaxCodeRequested(false)
@@ -558,6 +562,20 @@ export default function AddChannel() {
               catch (failure) { setError(failure.message) }
               finally { setValidating(false) }
             }}>{t('youtube.connect')}</button>
+            {error && <p className="error">{error}</p>}
+          </div> : platform === 'tiktok' ? <div>
+            <p>{t('tiktok.connectHint')}</p>
+            <label className="checkbox-label"><input type="checkbox" checked={tiktokPolicyAccepted} onChange={event => setTikTokPolicyAccepted(event.target.checked)} />
+              <span>{t('tiktok.policyAccept')}{' '}<a href="/terms" target="_blank" rel="noreferrer">{t('youtube.postbridgeTerms')}</a>,{' '}
+                <a href="/privacy" target="_blank" rel="noreferrer">{t('youtube.privacy')}</a>,{' '}
+                <a href="https://www.tiktok.com/legal/page/row/terms-of-service/en" target="_blank" rel="noreferrer">{t('tiktok.terms')}</a>.</span>
+            </label>
+            <button type="button" className="btn" disabled={validating || !tiktokPolicyAccepted} onClick={async () => {
+              setValidating(true); setError('')
+              try { const result = await getTikTokAuthorizeUrl(workspaceId, tiktokPolicyAccepted); window.location.href = result.authorize_url }
+              catch (failure) { setError(failure.message) }
+              finally { setValidating(false) }
+            }}>{t('tiktok.connect')}</button>
             {error && <p className="error">{error}</p>}
           </div> : <>
           {platform === 'telegram' && (

@@ -16,6 +16,8 @@ from postbridge.integrations.video_delivery import DeliveryPending, VideoDeliver
 class VideoDeliveryContext:
     def __init__(self, session, target_id, snapshot):
         self.session, self.target_id, self.snapshot = session, target_id, snapshot
+        target = session.get(PublicationTargetOrm, target_id)
+        self.channel_id, self.tenant_id = target.channel_id, target.tenant_id
         row = session.get(VideoDeliveryStateOrm, target_id)
         self.state = json.loads(decrypt_credential_secret(row.encrypted_state)) if row else {}
 

@@ -1203,6 +1203,76 @@ test('video delivery reveals YouTube metadata on selection and reconciles the sa
   await expect(card.getByRole('button', { name: 'Check existing upload', exact: true })).toHaveCount(0)
 })
 
+test('TikTok review has no default visibility and requires current creator settings and declarations', async ({ page }, testInfo) => {
+  await mockSaasBff(page)
+  const postId = '00000000-0000-4000-8000-000000000093'
+  const coreId = '00000000-0000-4000-8000-000000000094'
+  let body
+  let creatorRequests = 0
+  let approved = false
+  const reply = (route, value) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(value) })
+  const view = () => ({ enabled: true, source_duration_seconds: 10, snapshot_hash: 'a'.repeat(64), approval_id: approved ? 'approval' : null,
+    snapshot: { version: 1, output_url: '/short.mp4', text: 'Exact creator caption' }, destinations: [],
+    bridges: [{ id: 'tiktok-bridge', channel_id: coreId, title: 'TikTok creator', platform: 'tiktok', format: 'tiktok', settings_hash: 'b'.repeat(64), options: { format: 'tiktok', contains_synthetic_media: true } }], targets: [] })
+  await page.route('**/short.mp4', route => route.fulfill({ contentType: 'video/mp4', body: '' }))
+  await page.route(`**/workspaces/ws-1/posts/${postId}`, route => reply(route, { id: postId, title: 'Clip', content_md: 'Exact creator caption', status: 'draft', media_url: '/short.mp4', video_origin: { version: 1, output_url: '/short.mp4' } }))
+  await page.route('**/workspaces/ws-1/videos/posts/**', route => {
+    if (new URL(route.request().url()).pathname.endsWith('/approve')) { approved = true; body = route.request().postDataJSON() }
+    return reply(route, view())
+  })
+  await page.route(`**/videos/tiktok/channels/${coreId}/creator-info`, route => {
+    creatorRequests += 1
+    return reply(route, { creator_nickname: 'Current nickname', creator_username: 'creator', privacy_level_options: ['PUBLIC_TO_EVERYONE', 'SELF_ONLY'],
+      max_video_post_duration_sec: 180, comment_disabled: false, duet_disabled: true, stitch_disabled: false, app_audited: true })
+  })
+  await page.addInitScript(() => { localStorage.setItem('postbridge_token', 'saas-token'); localStorage.setItem('postbridge.locale', 'en') })
+  await page.goto(`/workspaces/ws-1/content/${postId}`)
+  const card = page.getByRole('region', { name: 'Video delivery', exact: true })
+  await card.getByRole('button', { name: 'Save and review delivery', exact: true }).click()
+  await card.getByLabel('TikTok creator · TikTok · TikTok video', { exact: true }).check()
+  await expect(card.getByText('Current nickname', { exact: true })).toBeVisible()
+  const visibility = card.getByLabel('Visibility', { exact: true })
+  await expect(visibility).toHaveValue('')
+  await expect(card.getByLabel('Allow comments', { exact: false })).not.toBeChecked()
+  await expect(card.getByLabel('Allow Duet', { exact: false })).toBeDisabled()
+  const confirm = card.getByRole('button', { name: 'Confirm and send', exact: true })
+  await expect(confirm).toBeDisabled()
+  await visibility.selectOption('SELF_ONLY')
+  await card.getByLabel('This video promotes a brand, product or service', { exact: true }).check()
+  await expect(card.getByLabel('Branded content (another brand)', { exact: true })).toBeDisabled()
+  await expect(confirm).toBeDisabled()
+  await card.getByLabel('Your brand', { exact: true }).check()
+  await expect(card.getByText("Your video will be labeled as 'Promotional content'.", { exact: true })).toBeVisible()
+  await card.getByLabel('I have the rights to share this original video on TikTok.', { exact: true }).check()
+  await card.getByLabel("By posting, you agree to TikTok's Music Usage Confirmation.", { exact: true }).check()
+  await expect(confirm).toBeEnabled()
+  await visibility.selectOption('PUBLIC_TO_EVERYONE')
+  await card.getByLabel('Branded content (another brand)', { exact: true }).check()
+  await expect(confirm).toBeDisabled()
+  await expect(card.getByRole('option', { name: 'Only me', exact: true })).toHaveAttribute('disabled', '')
+  await card.getByLabel("By posting, you agree to TikTok's Branded Content Policy and Music Usage Confirmation.", { exact: true }).check()
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await card.screenshot({ path: testInfo.outputPath('tiktok-per-post-review-mobile.png') })
+  await confirm.click()
+  expect(creatorRequests).toBe(1)
+  expect(body).toMatchObject({ bridge_ids: ['tiktok-bridge'], expected_bridges: { 'tiktok-bridge': 'b'.repeat(64) },
+    tiktok_options: { [coreId]: { privacy_level: 'PUBLIC_TO_EVERYONE', allow_comment: false, allow_duet: false, allow_stitch: false,
+      commercial_content: true, brand_organic: true, branded_content: true, original_content_confirmed: true, music_usage_confirmed: true } } })
+})
+
+test('TikTok connects as a receiving channel with explicit policy acceptance', async ({ page }, testInfo) => {
+  await mockSaasBff(page)
+  await page.addInitScript(() => { localStorage.setItem('postbridge_token', 'saas-token'); localStorage.setItem('postbridge.locale', 'en') })
+  await page.goto('/workspaces/ws-1/channels/add')
+  await page.getByLabel('Platform', { exact: true }).selectOption('tiktok')
+  const connect = page.getByRole('button', { name: 'Connect TikTok', exact: true })
+  await expect(connect).toBeDisabled()
+  await page.getByLabel(/I agree to the TikTok connection terms:/).check()
+  await expect(connect).toBeEnabled()
+  await page.screenshot({ path: testInfo.outputPath('tiktok-connection-policy.png'), fullPage: true })
+})
+
 test('YouTube connection requires policy acceptance before OAuth', async ({ page }, testInfo) => {
   await mockSaasBff(page)
   await page.addInitScript(() => { localStorage.setItem('postbridge_token', 'saas-token'); localStorage.setItem('postbridge.locale', 'en') })

@@ -6,7 +6,7 @@ import AppShell from '../components/AppShell'
 import { useI18n } from '../i18n'
 
 function platformLabel(platform, t) {
-  const labels = { telegram: 'TG', max: 'MAX', vk: 'VK', zen: 'RSS', rss: 'RSS', postbridge: 'Postbridge', youtube: 'YouTube', instagram: 'Instagram' }
+  const labels = { telegram: 'TG', max: 'MAX', vk: 'VK', zen: 'RSS', rss: 'RSS', postbridge: 'Postbridge', youtube: 'YouTube', instagram: 'Instagram', tiktok: 'TikTok' }
   return labels[platform] || platform
 }
 
@@ -56,7 +56,7 @@ export default function Wizard() {
     }
   }, [channels, sourceChannelId, sourceChannels, targetChannels, targetValue])
 
-  const videoMode = targetChannel?.platform === 'youtube' || (sourceChannel?.platform === 'postbridge' && videoEnabled)
+  const videoMode = ['youtube', 'tiktok'].includes(targetChannel?.platform) || (sourceChannel?.platform === 'postbridge' && videoEnabled)
   useEffect(() => { setVideoSettings(defaultVideoBridgeSettings(targetChannel?.platform)); setVideoEnabled(false) }, [targetChannel?.id])
   const handleCreate = async () => {
     if (!sourceChannel) return

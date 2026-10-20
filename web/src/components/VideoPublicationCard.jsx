@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { getVideoPublication, approveVideoPublication, retryVideoPublication, cancelVideoPublication, rescheduleVideoPublication, reconcileVideoPublication } from '../adapters/video'
+import { getVideoPublication, approveVideoPublication, retryVideoPublication, cancelVideoPublication, rescheduleVideoPublication, reconcileVideoPublication, getTikTokCreatorInfo } from '../adapters/video'
+import TikTokPublicationOptions, { emptyTikTokOptions, validTikTokOptions } from './TikTokPublicationOptions'
 import { useI18n } from '../i18n'
 import { useAuth } from '../useAuth'
 import { getAllTimezoneSelectOptions } from '../timezoneOptions'
@@ -13,11 +14,16 @@ export default function VideoPublicationCard({ workspaceId, postId, dirty, saveD
   const [reviewing, setReviewing] = useState(false)
   const [selected, setSelected] = useState([])
   const [options, setOptions] = useState({})
+  const [tiktokOptions, setTikTokOptions] = useState({})
+  const [tiktokCreators, setTikTokCreators] = useState({})
+  const tiktokRequests = useRef(new Set())
   const throughBridges = Array.isArray(view?.bridges)
   const destinations = throughBridges ? view.bridges : view?.destinations || []
   const optionFor = (destination) => (throughBridges ? destination.options : options[destination.id]) || { format: destination.format || 'video', title: '', visibility: 'private', made_for_kids: null, contains_synthetic_media: true }
   const changeOption = (destination, key, value) => setOptions((old) => ({ ...old, [destination.id]: { ...optionFor(destination), [key]: value } }))
-  const optionsValid = !destinations.some((destination) => selected.includes(destination.id) && destination.platform === 'youtube' && (!(optionFor(destination).title || '').trim() || optionFor(destination).made_for_kids === null))
+  const optionsValid = !destinations.some((destination) => selected.includes(destination.id) && (
+    destination.platform === 'youtube' && (!(optionFor(destination).title || '').trim() || optionFor(destination).made_for_kids === null)
+    || destination.platform === 'tiktok' && !validTikTokOptions(tiktokOptions[destination.id], tiktokCreators[destination.id]?.creator, view.source_duration_seconds, view.snapshot.text)))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [scheduled, setScheduled] = useState(false)
@@ -29,6 +35,21 @@ export default function VideoPublicationCard({ workspaceId, postId, dirty, saveD
   const zones = useMemo(() => getAllTimezoneSelectOptions(t, timezone), [t, timezone])
   const timingValid = !scheduled || resolution.status === 'valid'
   const alive = useRef(true)
+  const refreshTikTok = async (destination) => {
+    if (tiktokRequests.current.has(destination.id)) return
+    tiktokRequests.current.add(destination.id)
+    setTikTokOptions(old => ({ ...old, [destination.id]: emptyTikTokOptions() }))
+    setTikTokCreators(old => ({ ...old, [destination.id]: { loading: true } }))
+    try {
+      const creator = await getTikTokCreatorInfo(workspaceId, destination.channel_id || destination.id)
+      if (alive.current) setTikTokCreators(old => ({ ...old, [destination.id]: { creator } }))
+    } catch (failure) { if (alive.current) setTikTokCreators(old => ({ ...old, [destination.id]: { error: failure.message } })) }
+    finally { tiktokRequests.current.delete(destination.id) }
+  }
+  useEffect(() => {
+    if (reviewing) destinations.filter(item => item.platform === 'tiktok' && selected.includes(item.id)
+      && !tiktokCreators[item.id]).forEach(refreshTikTok)
+  }, [reviewing, destinations, selected, tiktokCreators])
   useEffect(() => {
     alive.current = true
     let inFlight = false
@@ -56,12 +77,15 @@ export default function VideoPublicationCard({ workspaceId, postId, dirty, saveD
     if (!saved || !alive.current) return
     const result = await getVideoPublication(workspaceId, postId)
     if (!alive.current) return
-    setView(result); setReviewing(true); onLocked(Boolean(result.approval_id))
+    setTikTokOptions({}); setTikTokCreators({}); setView(result); setReviewing(true); onLocked(Boolean(result.approval_id))
   })
   const approve = () => run(async () => {
     const result = await approveVideoPublication(workspaceId, postId, { expected_snapshot: view.snapshot_hash,
       ...(throughBridges ? { bridge_ids: selected, expected_bridges: Object.fromEntries(destinations.filter(destination => selected.includes(destination.id)).map(destination => [destination.id, destination.settings_hash])) }
         : { channel_ids: selected, options: Object.fromEntries(destinations.filter((destination) => selected.includes(destination.id)).map((destination) => [destination.id, destination.platform === 'youtube' ? optionFor(destination) : { format: destination.format || 'video' }])) }),
+      ...(destinations.some(destination => selected.includes(destination.id) && destination.platform === 'tiktok') ? {
+        tiktok_options: Object.fromEntries(destinations.filter(destination => selected.includes(destination.id) && destination.platform === 'tiktok')
+          .map(destination => [destination.channel_id || destination.id, tiktokOptions[destination.id]])) } : {}),
       ...(scheduled ? { publish_at: resolution.iso, timezone } : {}) })
     if (alive.current) { setView(result); onLocked(Boolean(result.approval_id)) }
   })
@@ -107,12 +131,12 @@ export default function VideoPublicationCard({ workspaceId, postId, dirty, saveD
         <strong>{target.title}</strong>{' · '}{t(`videoPublish.format.${target.format || 'video'}`)}{' · '}{t(`videoPublish.status.${target.status}`)}
         {target.platform === 'youtube' && target.options?.title && <p>{target.options.title}{' · '}{t(`videoPublish.visibility.${target.options.visibility || 'private'}`)}</p>}
         {target.external_url && <>{' · '}<a href={target.external_url} target="_blank" rel="noreferrer">{t('videoPublish.open')}</a></>}
-        {view.enabled && ['youtube', 'instagram'].includes(target.platform) && ['unknown', 'failed'].includes(target.status) && !target.error_code?.startsWith('VIDEO_BRIDGE_') && !['EXTERNAL_API_INSTAGRAM_REJECTED', 'EXTERNAL_API_YOUTUBE_REJECTED'].includes(target.error_code) && <button type="button" className="btn btn-secondary btn-small" disabled={busy} onClick={() => run(async () => { const result = await reconcileVideoPublication(workspaceId, postId, target.id); if (alive.current) setView(result) })}>{t('videoPublish.checkResult')}</button>}
+        {view.enabled && ['youtube', 'instagram', 'tiktok'].includes(target.platform) && ['unknown', 'failed'].includes(target.status) && !target.error_code?.startsWith('VIDEO_BRIDGE_') && !['EXTERNAL_API_INSTAGRAM_REJECTED', 'EXTERNAL_API_YOUTUBE_REJECTED', 'EXTERNAL_API_TIKTOK_REJECTED'].includes(target.error_code) && <button type="button" className="btn btn-secondary btn-small" disabled={busy} onClick={() => run(async () => { const result = await reconcileVideoPublication(workspaceId, postId, target.id); if (alive.current) setView(result) })}>{t('videoPublish.checkResult')}</button>}
         {target.error_code?.startsWith('VIDEO_BRIDGE_') && <Link to={`/workspaces/${workspaceId}/channels`}>{t('videoBridge.manage')}</Link>}
         {target.status === 'unknown' && <p className="muted">{t('videoPublish.unknownHint')}</p>}
         {(target.status === 'expired' || target.error_code === 'VIDEO_DELIVERY_MISSED') && <p className="muted">{t('videoPublish.missedHint')}</p>}
         {target.status === 'failed' && target.error_code !== 'VIDEO_DELIVERY_MISSED' && <p className="error">{t(target.error_code?.startsWith('VIDEO_BRIDGE_') ? `api.error.${target.error_code}` : target.error_code === 'EXTERNAL_API_YOUTUBE_VISIBILITY_MISMATCH' ? 'videoPublish.visibilityMismatch' : 'videoPublish.failedHint')}</p>}
-        {view.enabled && (!view.delivery?.deadline_at || new Date(view.delivery.deadline_at).getTime() > Date.now()) && target.status === 'failed' && ['EXTERNAL_API_TELEGRAM_PUBLISH_ERROR', 'EXTERNAL_API_INSTAGRAM_REJECTED', 'EXTERNAL_API_YOUTUBE_REJECTED'].includes(target.error_code) && <button type="button" className="btn btn-secondary btn-small" disabled={busy} onClick={() => run(async () => { const result = await retryVideoPublication(workspaceId, postId, target.id); if (alive.current) setView(result) })}>{t('videoPublish.retry')}</button>}
+        {view.enabled && (!view.delivery?.deadline_at || new Date(view.delivery.deadline_at).getTime() > Date.now()) && target.status === 'failed' && ['EXTERNAL_API_TELEGRAM_PUBLISH_ERROR', 'EXTERNAL_API_INSTAGRAM_REJECTED', 'EXTERNAL_API_YOUTUBE_REJECTED', 'EXTERNAL_API_TIKTOK_REJECTED'].includes(target.error_code) && <button type="button" className="btn btn-secondary btn-small" disabled={busy} onClick={() => run(async () => { const result = await retryVideoPublication(workspaceId, postId, target.id); if (alive.current) setView(result) })}>{t('videoPublish.retry')}</button>}
       </li>)}</ul>
       {view.delivery?.history?.length > 1 && <details><summary>{t('videoPublish.timeHistory')}</summary>{view.delivery.history.map((entry) => <p key={entry.version}>{entry.publish_at ? formatDeliveryTime(entry.publish_at, entry.timezone, locale) + ` · ${entry.timezone}` : t('videoPublish.immediate')}</p>)}</details>}
     </> : !view.enabled ? <p className="muted">{t('videoPublish.disabled')}</p> : <>
@@ -123,7 +147,13 @@ export default function VideoPublicationCard({ workspaceId, postId, dirty, saveD
         <video className="video-publication-preview" src={view.snapshot.output_url} controls playsInline preload="metadata" aria-label={t('videoPublish.preview')} />
         <pre className="video-publication-text">{view.snapshot.text || t('videoPublish.noCaption')}</pre>
         <fieldset disabled={busy}><legend>{t(throughBridges ? 'videoBridge.routes' : 'videoPublish.destinations')}</legend>
-          {destinations.length ? destinations.map((destination) => <label key={destination.id}><input type="checkbox" checked={selected.includes(destination.id)} onChange={(event) => setSelected((old) => event.target.checked ? [...old, destination.id] : old.filter((id) => id !== destination.id))} />{destination.title}{' · '}{destination.platform === 'youtube' ? 'YouTube' : destination.platform === 'instagram' ? 'Instagram' : 'Telegram'}{' · '}{t(`videoPublish.format.${destination.format || 'video'}`)}</label>) : <p>{t(throughBridges ? 'videoBridge.noRoutes' : 'videoPublish.noDestinations')}</p>}
+          {destinations.length ? destinations.map((destination) => <label key={destination.id}><input type="checkbox" checked={selected.includes(destination.id)} onChange={(event) => {
+            setSelected((old) => event.target.checked ? [...old, destination.id] : old.filter((id) => id !== destination.id))
+            if (destination.platform === 'tiktok' && !event.target.checked) {
+              setTikTokCreators(old => { const next = { ...old }; delete next[destination.id]; return next })
+              setTikTokOptions(old => { const next = { ...old }; delete next[destination.id]; return next })
+            }
+          }} />{destination.title}{' · '}{({ youtube: 'YouTube', instagram: 'Instagram', tiktok: 'TikTok', telegram: 'Telegram' })[destination.platform] || destination.platform || 'Telegram'}{' · '}{t(`videoPublish.format.${destination.format || 'video'}`)}</label>) : <p>{t(throughBridges ? 'videoBridge.noRoutes' : 'videoPublish.noDestinations')}</p>}
         </fieldset>
         {throughBridges && <>
           <p className="muted">{t('videoBridge.reviewHint')}</p>
@@ -133,6 +163,10 @@ export default function VideoPublicationCard({ workspaceId, postId, dirty, saveD
             <p>{t(`videoPublish.visibility.${optionFor(destination).visibility}`)}{' · '}{t(optionFor(destination).made_for_kids ? 'videoPublish.kidsAudience' : 'videoPublish.generalAudience')}</p>
           </div>)}
         </>}
+        {destinations.filter(destination => selected.includes(destination.id) && destination.platform === 'tiktok').map(destination => <TikTokPublicationOptions key={destination.id}
+          state={tiktokCreators[destination.id]} value={tiktokOptions[destination.id] || emptyTikTokOptions()} busy={busy}
+          duration={view.source_duration_seconds} onRefresh={() => refreshTikTok(destination)}
+          onChange={value => setTikTokOptions(old => ({ ...old, [destination.id]: value }))} />)}
         {!throughBridges && destinations.filter((destination) => selected.includes(destination.id) && destination.platform === 'youtube').map((destination) => <fieldset className="video-provider-options" key={destination.id} disabled={busy}>
           <legend>YouTube · {destination.title}</legend>
           <label>{t('videoPublish.youtubeTitle')}<input maxLength={100} value={optionFor(destination).title} onChange={(event) => changeOption(destination, 'title', event.target.value)} required /></label>

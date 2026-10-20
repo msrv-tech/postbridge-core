@@ -28,6 +28,8 @@ class PostPayload:
     visibility: str | None = None
     made_for_kids: bool | None = None
     contains_synthetic_media: bool | None = None
+    tiktok_options: dict[str, Any] | None = None
+    video_duration_seconds: float | None = None
 
 
 @dataclass(slots=True)

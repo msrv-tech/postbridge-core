@@ -90,12 +90,12 @@ function HelpTip({ text }) {
 function BridgeVideoSettings({ bridge, workspaceId, onSaved }) {
   const { t } = useI18n()
   const initial = bridge.settings_json?.video_delivery
-  const [enabled, setEnabled] = useState(bridge.target_platform === 'youtube' || Boolean(initial))
+  const [enabled, setEnabled] = useState(['youtube', 'tiktok'].includes(bridge.target_platform) || Boolean(initial))
   const [value, setValue] = useState(initial || defaultVideoBridgeSettings(bridge.target_platform))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   return <div className="video-bridge-settings">
-    {bridge.target_platform !== 'youtube' && <label><input type="checkbox" checked={enabled} disabled={busy} onChange={event => setEnabled(event.target.checked)} />{t('videoBridge.videoOnly')}</label>}
+    {!['youtube', 'tiktok'].includes(bridge.target_platform) && <label><input type="checkbox" checked={enabled} disabled={busy} onChange={event => setEnabled(event.target.checked)} />{t('videoBridge.videoOnly')}</label>}
     {enabled && <VideoBridgeSettings platform={bridge.target_platform} value={value} onChange={setValue} busy={busy} />}
     {error && <p className="error" role="alert">{error}</p>}
     <button type="button" className="btn btn-secondary btn-small" disabled={busy || (enabled && bridge.target_platform === 'youtube' && value.made_for_kids == null)} onClick={async () => {
@@ -803,6 +803,9 @@ export default function Channels() {
         </div>
       )}
 
+      {new URLSearchParams(location.search).has('tiktok_connection') && <p className={new URLSearchParams(location.search).get('tiktok_connection') === 'connected' ? 'success' : 'error'}>
+        {t(new URLSearchParams(location.search).get('tiktok_connection') === 'connected' ? 'tiktok.connected' : new URLSearchParams(location.search).get('tiktok_connection') === 'channel_already_connected' ? 'tiktok.alreadyConnected' : 'tiktok.connectionFailed')}
+      </p>}
       {new URLSearchParams(location.search).has('youtube_connection') && <p className={new URLSearchParams(location.search).get('youtube_connection') === 'connected' ? 'success' : 'error'}>
         {t(new URLSearchParams(location.search).get('youtube_connection') === 'connected' ? 'youtube.connected' : new URLSearchParams(location.search).get('youtube_connection') === 'channel_already_connected' ? 'youtube.alreadyConnected' : 'youtube.connectionFailed')}
       </p>}
@@ -1104,7 +1107,7 @@ export default function Channels() {
                           className="badge badge-running bridge-live-sync-badge"
                           title={t('channels.liveSync.title')}
                         >
-                          {ch.settings_json?.video_delivery || ch.target_platform === 'youtube' ? t('videoBridge.reviewed') : 'Live sync'}
+                          {ch.settings_json?.video_delivery || ['youtube', 'tiktok'].includes(ch.target_platform) ? t('videoBridge.reviewed') : 'Live sync'}
                         </span>
                       ) : (
                         <span
@@ -1114,7 +1117,7 @@ export default function Channels() {
                           {t('channels.liveSync.off')}
                         </span>
                       )}
-                      {!ch.settings_json?.video_delivery && ch.target_platform !== 'youtube' && (
+                      {!ch.settings_json?.video_delivery && !['youtube', 'tiktok'].includes(ch.target_platform) && (
                       <button
                         type="button"
                         className="btn btn-secondary btn-small"
@@ -1136,8 +1139,8 @@ export default function Channels() {
                   <details className="bridge-settings-details">
                     <summary>{t('channels.bridgeSettings')}</summary>
                     <div className="bridge-settings-panel">
-                    {ch.source_platform === 'postbridge' && ['youtube', 'instagram', 'telegram'].includes(ch.target_platform) && <BridgeVideoSettings key={ch.id + JSON.stringify(ch.settings_json?.video_delivery)} bridge={ch} workspaceId={workspaceId} onSaved={updated => setChannels(items => items.map(item => item.id === ch.id ? { ...item, settings_json: updated.settings_json } : item))} />}
-                    {!ch.settings_json?.video_delivery && ch.target_platform !== 'youtube' && <>
+                    {ch.source_platform === 'postbridge' && ['youtube', 'instagram', 'telegram', 'tiktok'].includes(ch.target_platform) && <BridgeVideoSettings key={ch.id + JSON.stringify(ch.settings_json?.video_delivery)} bridge={ch} workspaceId={workspaceId} onSaved={updated => setChannels(items => items.map(item => item.id === ch.id ? { ...item, settings_json: updated.settings_json } : item))} />}
+                    {!ch.settings_json?.video_delivery && !['youtube', 'tiktok'].includes(ch.target_platform) && <>
                     <div className="bridge-adaptation-settings">
                       <div className="bridge-adaptation-mode">
                         <label className="field-label-with-help" htmlFor={`bridge-adaptation-${ch.id}`}>

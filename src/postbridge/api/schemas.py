@@ -50,6 +50,16 @@ class YouTubeCredentials(BaseModel):
     expires_at: int | None = None
 
 
+class TikTokCredentials(BaseModel):
+    access_token: str = Field(min_length=1)
+    refresh_token: str = Field(min_length=1)
+    open_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._-]+$")
+    client_key: str = Field(min_length=1)
+    client_secret: str = Field(min_length=1)
+    expires_at: int
+    refresh_expires_at: int
+
+
 class FacebookCredentials(BaseModel):
     """Credentials for Facebook Pages publishing."""
 

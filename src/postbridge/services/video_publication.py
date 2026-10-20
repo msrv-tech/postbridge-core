@@ -21,11 +21,12 @@ from postbridge.models.domain import (ChannelOrm, ContentItemOrm, MediaAssetOrm,
 from postbridge.services.postbridge_workspace_content import _load_extra
 from postbridge.services.video_media import video_error
 from postbridge.services.video_delivery_time import DeliveryTiming, DELIVERY_GRACE, now_utc, timing_value, validate_future, delivery_view, assert_window
+from postbridge.integrations.tiktok.api import TikTokPostOptions
 
 
 class VideoDestinationOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    format: Literal["video", "reel", "short"] = "video"
+    format: Literal["video", "reel", "short", "tiktok"] = "video"
     title: str | None = Field(default=None, min_length=1, max_length=100)
     visibility: Literal["private", "unlisted", "public"] = "private"
     made_for_kids: bool | None = None
@@ -39,6 +40,7 @@ class ApproveVideoPublication(DeliveryTiming):
     bridge_ids: list[str] = Field(default_factory=list, max_length=10)
     expected_bridges: dict[str, str] = Field(default_factory=dict)
     options: dict[UUID, VideoDestinationOptions] = Field(default_factory=dict)
+    tiktok_options: dict[UUID, TikTokPostOptions] = Field(default_factory=dict, max_length=10)
 
     @model_validator(mode="after")
     def check_selection(self):
@@ -123,7 +125,12 @@ def _slug(channel):
     return _resolve_target_channel_slug(channel)
 
 
-VIDEO_FORMATS = {"telegram": "video", "instagram": "reel", "youtube": "short"}
+VIDEO_FORMATS = {"telegram": "video", "instagram": "reel", "youtube": "short", "tiktok": "tiktok"}
+
+
+def _source_duration(session, receipt):
+    revision = session.get(VideoRevisionOrm, receipt.revision_id)
+    return sum(float(scene.get("duration_seconds", 0)) for scene in revision.scenes)
 
 
 def _options(payload):
@@ -143,6 +150,7 @@ def publication_view(session: Session, tenant_id: str, content_id: str):
         ChannelOrm.platform.in_(VIDEO_FORMATS), ChannelOrm.kind == "destination", ChannelOrm.status == "connected")).all()
     from postbridge.services.video_bridges import reviewed_bridges
     return {"bridges": reviewed_bridges(session, tenant_id, post), "enabled": get_settings().video_publication_enabled, "content_item_id": content_id,
+        "source_duration_seconds": _source_duration(session, receipt),
         "snapshot": {k: v for k, v in snapshot.items() if k not in {"destinations", "object_key"}},
         "snapshot_hash": fingerprint({k: v for k, v in snapshot.items() if k != "destinations"}),
         "approval_id": approval.id if approval else None,
@@ -158,6 +166,12 @@ def publication_view(session: Session, tenant_id: str, content_id: str):
 
 
 def approve_publication(session: Session, tenant_id: str, content_id: str, payload: ApproveVideoPublication):
+    requested_tiktok = {str(key): value.model_dump(mode="json") for key, value in payload.tiktok_options.items()}
+    # Refresh tokens before taking the post lock: rotation commits independently
+    # of the immutable approval. Replays do not need a working provider API.
+    from postbridge.services.tiktok import get_creator_info
+    creators = {} if approval_for_content(session, content_id) else {
+        key: get_creator_info(session, tenant_id, key) for key in requested_tiktok}
     post, receipt = _post(session, tenant_id, content_id, lock=True)
     previous = approval_for_content(session, content_id)
     ids = sorted(str(cid) for cid in payload.channel_ids)
@@ -166,13 +180,16 @@ def approve_publication(session: Session, tenant_id: str, content_id: str, paylo
     if previous:
         previous_hash = fingerprint({k: v for k, v in previous.snapshot.items() if k != "destinations"})
         initial = previous.initial_timing or {"publish_at": None, "timezone": None}
-        previous_options = {key: value["options"] for key, value in previous.snapshot["destinations"].items() if value.get("options")}
+        saved_tiktok = {key: value["options"]["tiktok"] for key, value in previous.snapshot["destinations"].items()
+            if value.get("options", {}).get("tiktok")}
+        previous_options = {key: {k: v for k, v in value["options"].items() if k != "tiktok"}
+            for key, value in previous.snapshot["destinations"].items() if value.get("options")}
         if payload.bridge_ids:
             saved = {value.get("bridge", {}).get("id"): value for value in previous.snapshot["destinations"].values()}
             if set(payload.bridge_ids) != set(saved) or any(payload.expected_bridges.get(key) != saved[key]["bridge"]["settings_hash"] for key in saved):
                 raise video_error("VIDEO_APPROVAL_CONFLICT", "This post already has a different bridge approval")
             ids, options = sorted(previous.snapshot["destinations"]), previous_options
-        if payload.expected_snapshot != previous_hash or ids != sorted(previous.snapshot["destinations"]) or initial != timing_value(payload) or options != previous_options:
+        if payload.expected_snapshot != previous_hash or ids != sorted(previous.snapshot["destinations"]) or initial != timing_value(payload) or options != previous_options or requested_tiktok != saved_tiktok:
             raise video_error("VIDEO_APPROVAL_CONFLICT", "This post already has an immutable publication approval")
         return publication_view(session, tenant_id, content_id)
     if not get_settings().video_publication_enabled:
@@ -194,6 +211,8 @@ def approve_publication(session: Session, tenant_id: str, content_id: str, paylo
     channels = session.scalars(select(ChannelOrm).where(ChannelOrm.tenant_id == tenant_id, ChannelOrm.id.in_(ids))).all()
     if len(channels) != len(ids) or any(ch.platform not in VIDEO_FORMATS or ch.kind != "destination" or ch.status != "connected" for ch in channels):
         raise video_error("VIDEO_DESTINATION_UNAVAILABLE", "Choose connected video destinations")
+    if set(requested_tiktok) != {ch.id for ch in channels if ch.platform == "tiktok"}:
+        raise video_error("VIDEO_DESTINATION_OPTIONS_INVALID", "Review every selected TikTok account and its per-video settings")
     from postbridge.integrations.channel_credentials import load_channel_credential_row
     from postbridge.integrations.registry import decode_publish_credentials_for_platform
     for ch in channels:
@@ -212,6 +231,10 @@ def approve_publication(session: Session, tenant_id: str, content_id: str, paylo
         if ch.platform == "youtube" and (not settings.get("title", "").strip() or settings.get("made_for_kids") is None
                 or len(snapshot["text"].encode("utf-8")) > 5000 or any(c in settings["title"] + snapshot["text"] for c in "<>")):
             raise video_error("VIDEO_DESTINATION_OPTIONS_INVALID", "Review the YouTube title, description, audience and visibility")
+        if ch.platform == "tiktok":
+            from postbridge.integrations.tiktok.api import validate_post
+            validate_post(requested_tiktok[ch.id], creators[ch.id], _source_duration(session, receipt), snapshot["text"])
+            options[ch.id] = {**settings, "tiktok": requested_tiktok[ch.id]}
         if ch.platform != "youtube" and (parsed.scheme != "https" or parsed.username or parsed.password or private_host):
             raise video_error("VIDEO_PUBLIC_MEDIA_REQUIRED", "A public HTTPS media URL is required for delivery")
         credentials = decode_publish_credentials_for_platform(ch.platform, load_channel_credential_row(session, ch.id, tenant_id))
@@ -219,6 +242,8 @@ def approve_publication(session: Session, tenant_id: str, content_id: str, paylo
             raise video_error("VIDEO_DESTINATION_UNAVAILABLE", "Connect bot credentials for every selected channel")
         if ch.platform == "youtube" and credentials.channel_id != _slug(ch).removeprefix("youtube/"):
             raise video_error("VIDEO_DESTINATION_UNAVAILABLE", "YouTube credentials belong to another channel")
+        if ch.platform == "tiktok" and credentials.open_id != _slug(ch).removeprefix("tiktok/"):
+            raise video_error("VIDEO_DESTINATION_UNAVAILABLE", "TikTok credentials belong to another account")
         if ch.platform == "instagram" and credentials.instagram_user_id != _slug(ch).removeprefix("instagram/"):
             raise video_error("VIDEO_DESTINATION_UNAVAILABLE", "Instagram credentials belong to another account")
     snapshot["destinations"] = {ch.id: {"slug": _slug(ch), "platform": ch.platform, "title": ch.title,
@@ -268,7 +293,8 @@ def approved_payload(session, target, content, render, *, check_time=True):
     return PostPayload(source_post_id=content.id, text=snapshot["text"], media_url=snapshot["output_url"],
         media_urls=[snapshot["output_url"]], media_type="video", publication_format=settings.get("format", "video"),
         video_title=settings.get("title"), visibility=settings.get("visibility"), made_for_kids=settings.get("made_for_kids"),
-        contains_synthetic_media=settings.get("contains_synthetic_media"))
+        contains_synthetic_media=settings.get("contains_synthetic_media"),
+        tiktok_options=settings.get("tiktok"), video_duration_seconds=_source_duration(session, receipt))
 
 
 def retry_failed_target(session, tenant_id, content_id, target_id):
@@ -277,7 +303,7 @@ def retry_failed_target(session, tenant_id, content_id, target_id):
     target = session.get(PublicationTargetOrm, target_id)
     if not approval or not target or target.publication_plan_id != approval.publication_plan_id:
         raise video_error("VIDEO_DESTINATION_UNAVAILABLE", "Publication target not found")
-    if target.status != "failed" or target.error_code not in {"EXTERNAL_API_TELEGRAM_PUBLISH_ERROR", "EXTERNAL_API_INSTAGRAM_REJECTED", "EXTERNAL_API_YOUTUBE_REJECTED"}:
+    if target.status != "failed" or target.error_code not in {"EXTERNAL_API_TELEGRAM_PUBLISH_ERROR", "EXTERNAL_API_INSTAGRAM_REJECTED", "EXTERNAL_API_YOUTUBE_REJECTED", "EXTERNAL_API_TIKTOK_REJECTED"}:
         raise video_error("VIDEO_RETRY_UNSAFE", "Only a confirmed rejected delivery may be retried")
     approved_payload(session, target, post, None)
     target.status, target.error_code, target.error_message = "pending", None, None
@@ -311,7 +337,7 @@ def reconcile_target(session, tenant_id, content_id, target_id):
     target = session.get(PublicationTargetOrm, target_id)
     from postbridge.models.domain import VideoDeliveryStateOrm
     from postbridge.services.video_delivery_state import VideoDeliveryContext
-    if not approval or not target or target.publication_plan_id != approval.publication_plan_id or target.platform not in {"youtube", "instagram"}:
+    if not approval or not target or target.publication_plan_id != approval.publication_plan_id or target.platform not in {"youtube", "instagram", "tiktok"}:
         raise video_error("VIDEO_DESTINATION_UNAVAILABLE", "Choose an approved video destination")
     if target.status not in {"unknown", "failed"}:
         return publication_view(session, tenant_id, content_id)

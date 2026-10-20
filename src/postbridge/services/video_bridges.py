@@ -4,24 +4,25 @@ from postbridge.domain.errors import ValidationError
 from postbridge.models.domain import BridgeOrm, ChannelOrm
 from postbridge.services.video_media import video_error
 
-FORMATS = {"telegram": "video", "instagram": "reel", "youtube": "short"}
+FORMATS = {"telegram": "video", "instagram": "reel", "youtube": "short", "tiktok": "tiktok"}
 
 
 def normalize_bridge_settings(settings, source, target, mode="live_sync"):
     from postbridge.services.video_publication import VideoDestinationOptions
     values = dict(settings or {})
     raw = values.get("video_delivery")
-    if raw is None and target.platform != "youtube":
+    if raw is None and target.platform not in {"youtube", "tiktok"}:
         return settings
     if source.platform != "postbridge" or target.platform not in FORMATS or mode != "live_sync":
         raise video_error("VIDEO_BRIDGE_UNSUPPORTED", "Video bridges require a Postbridge source and a supported video destination")
     try:
-        options = VideoDestinationOptions.model_validate(raw or {})
+        options = VideoDestinationOptions.model_validate(raw or ({"format": "tiktok"} if target.platform == "tiktok" else {}))
     except ValueError:
         raise video_error("VIDEO_BRIDGE_SETTINGS_INVALID", "Review the receiving side video settings") from None
     if options.format != FORMATS[target.platform] or target.platform == "youtube" and options.made_for_kids is None:
         raise video_error("VIDEO_BRIDGE_SETTINGS_INVALID", "Choose the video format and YouTube audience on the receiving side")
-    values["video_delivery"] = options.model_dump(mode="json", exclude_none=True)
+    values["video_delivery"] = ({"format": "tiktok", "contains_synthetic_media": options.contains_synthetic_media}
+        if target.platform == "tiktok" else options.model_dump(mode="json", exclude_none=True))
     return values
 
 
@@ -82,5 +83,6 @@ def assert_approved_bridge(session, tenant_id, post, destination):
     if bridge is None:
         raise video_error("VIDEO_BRIDGE_UNAVAILABLE", "The approved bridge was deleted")
     _, options, context = context_for(session, tenant_id, bridge, post)
-    if context != expected or options != destination["options"]:
+    approved_options = {key: value for key, value in destination["options"].items() if key != "tiktok"}
+    if context != expected or options != approved_options:
         raise video_error("VIDEO_BRIDGE_CHANGED", "The approved bridge settings changed; delivery was stopped")

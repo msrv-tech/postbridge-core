@@ -143,6 +143,8 @@ class Settings:
     agent_review_body_retention_days: int
     video_studio_enabled: bool = False
     video_publication_enabled: bool = False
+    tiktok_media_url_prefix: str | None = None
+    tiktok_direct_post_audited: bool = False
     video_ai_enabled: bool = False
     video_ai_selfhost_budget_units: int = 0
     video_speech_enabled: bool = False
@@ -301,6 +303,8 @@ def get_settings() -> Settings:
         telegram_bot_username=(os.getenv("TELEGRAM_BOT_USERNAME") or "").strip().lstrip("@"),
         video_studio_enabled=_to_bool(os.getenv("VIDEO_STUDIO_ENABLED")),
         video_publication_enabled=_to_bool(os.getenv("VIDEO_PUBLICATION_ENABLED")),
+        tiktok_media_url_prefix=os.getenv("TIKTOK_MEDIA_URL_PREFIX") or None,
+        tiktok_direct_post_audited=_to_bool(os.getenv("TIKTOK_DIRECT_POST_AUDITED")),
         video_ai_enabled=_to_bool(os.getenv("VIDEO_AI_ENABLED")),
         video_ai_selfhost_budget_units=int(os.getenv("VIDEO_AI_SELFHOST_BUDGET_UNITS", "0")),
         video_speech_enabled=_to_bool(os.getenv("VIDEO_SPEECH_ENABLED")),

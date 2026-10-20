@@ -37,7 +37,9 @@ class ProviderUrlFilter(logging.Filter):
         if isinstance(record.args, tuple):
             def safe(value):
                 if isinstance(value, httpx.URL) and (
-                        'access_token' in value.params or value.host in {'www.googleapis.com', 'youtube.googleapis.com'} and value.path.startswith('/upload/youtube/')):
+                        'access_token' in value.params or 'upload_token' in value.params
+                        or value.host.endswith('.tiktokapis.com') and value.host.startswith('open-upload')
+                        or value.host in {'www.googleapis.com', 'youtube.googleapis.com'} and value.path.startswith('/upload/youtube/')):
                     return value.copy_with(query=b'redacted')
                 return value
             record.args = tuple(safe(value) for value in record.args)

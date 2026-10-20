@@ -318,7 +318,7 @@ class PublicationTargetExecutor:
         from postbridge.services.video_delivery_state import DeliveryPending, VideoDeliveryContext
         receipt = None
         try:
-            if video_approval and target.platform in {"youtube", "instagram"}:
+            if video_approval and target.platform in {"youtube", "instagram", "tiktok"}:
                 delivery = VideoDeliveryContext(self.session, target_id, video_approval.snapshot)
                 receipt = publisher.publish_video(slug, post, credentials, delivery)
                 external_id = receipt.external_id

@@ -18,6 +18,7 @@ from postbridge.integrations.registry_impl import vk as vk_plat
 from postbridge.integrations.registry_impl import x as x_plat
 from postbridge.integrations.registry_impl import zen as zen_plat
 from postbridge.integrations.registry_impl import youtube as youtube_plat
+from postbridge.integrations.registry_impl import tiktok as tiktok_plat
 from postbridge.integrations.registry_impl.types import PlatformRegistration
 
 _DEFAULT_AI = DefaultPlatformAiAdapter()
@@ -36,6 +37,7 @@ def _all_registrations() -> list[PlatformRegistration]:
         facebook_plat.make_registration(ai),
         instagram_plat.make_registration(ai),
         youtube_plat.make_registration(ai),
+        tiktok_plat.make_registration(ai),
         x_plat.make_registration(ai),
         bluesky_plat.make_registration(ai),
         mastodon_plat.make_registration(ai),

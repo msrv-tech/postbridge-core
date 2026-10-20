@@ -27,3 +27,4 @@ export const listVideoMaterials = (workspaceId, { search = '', folder, offset = 
 export const updateVideoMaterial = (workspaceId, id, payload) => api(path(workspaceId, `/materials/${id}`), { method: 'PATCH', body: JSON.stringify(payload) })
 
 export const reconcileVideoPublication = (workspaceId, id, targetId) => api(path(workspaceId, `/posts/${id}/publication/targets/${targetId}/reconcile`), { method: 'POST' })
+export const getTikTokCreatorInfo = (workspaceId, channelId) => api(`/workspaces/${workspaceId}/videos/tiktok/channels/${channelId}/creator-info`)

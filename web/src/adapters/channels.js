@@ -71,6 +71,7 @@ export function getMetaAuthorizeUrl(workspaceId) {
 }
 
 export const getYouTubeAuthorizeUrl = (workspaceId, acceptedPolicy = false) => api(`/workspaces/${workspaceId}/credentials/youtube/authorize-url?accepted_policy=${acceptedPolicy ? 'true' : 'false'}`)
+export const getTikTokAuthorizeUrl = (workspaceId, acceptedPolicy = false) => api(`/workspaces/${workspaceId}/credentials/tiktok/authorize-url?accepted_policy=${acceptedPolicy ? 'true' : 'false'}`)
 
 export function listLinkedinOrganizations(workspaceId, payload) {
   return api(`/workspaces/${workspaceId}/credentials/linkedin/organizations`, {
