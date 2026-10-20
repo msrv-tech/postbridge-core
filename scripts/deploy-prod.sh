@@ -48,7 +48,8 @@ compose() {
   fi
 }
 
-services="$(compose config --services)"
+# Config inspection must include optional definitions; it does not start them.
+services="$(compose --profile '*' config --services)"
 has_service() {
   grep -qx "$1" <<<"$services"
 }
