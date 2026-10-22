@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import AppShell from '../components/AppShell'
 import { useAuth } from '../useAuth'
 import { isSelfhostMode } from '../adapters/runtime'
@@ -9,7 +9,10 @@ import { useI18n } from '../i18n'
 import './VideoStudio.css'
 import VideoMaterialPicker from '../components/VideoMaterialPicker'
 
-import { createVideoVoiceVariant } from '../adapters/video'
+import { createVideoVoiceVariant, createVideoVoiceBatch, createVideoBatch } from '../adapters/video'
+import VideoVariantChoices from '../components/VideoVariantChoices'
+import VideoBatches from '../components/VideoBatches'
+import VideoBudgetPreview, { estimateVideoUnits } from '../components/VideoBudgetPreview'
 import { videoSceneInput as sceneInput } from '../videoSceneInput'
 const displaySeconds = (value) => typeof value === 'number' ? Number(value.toFixed(3)) : value
 const working = (project) => ['queued', 'running'].includes(project?.current?.status)
@@ -19,6 +22,8 @@ const failureKey = (current) => current.usage?.uncertain ? 'video.reconciliation
 
 export default function VideoStudio() {
   const { workspaceId, projectId } = useParams()
+  const [query] = useSearchParams()
+  const requestedVersion = Number(query.get("version"))
   const { t, locale } = useI18n()
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -31,6 +36,7 @@ export default function VideoStudio() {
   const [manual, setManual] = useState(false)
   const [duration, setDuration] = useState(20)
   const [style, setStyle] = useState('')
+  const [generatedVisuals, setGeneratedVisuals] = useState('images')
   const [template, setTemplate] = useState('product_demo')
   const [brandName, setBrandName] = useState('')
   const [brandColor, setBrandColor] = useState('#38bdf8')
@@ -40,6 +46,11 @@ export default function VideoStudio() {
   const [selectedVersion, setSelectedVersion] = useState(null)
   const [voiceForm, setVoiceForm] = useState(false)
   const [voiceLanguage, setVoiceLanguage] = useState('ru')
+  const [batchCount, setBatchCount] = useState(1)
+  const [variants, setVariants] = useState([])
+  const [batchVoices, setBatchVoices] = useState(false)
+  const [batchBudget, setBatchBudget] = useState('')
+  const [batchRefresh, setBatchRefresh] = useState(0)
   const [editRequest, setEditRequest] = useState('')
   const [preparingPost, setPreparingPost] = useState(false)
   const [postCaption, setPostCaption] = useState('')
@@ -83,14 +94,16 @@ export default function VideoStudio() {
     setManual(false)
     setDuration(20)
     setStyle(''); setTemplate('product_demo'); setBrandName(''); setBrandColor('#38bdf8')
-    setNarration(true); setVoice('Kore'); setVoiceStyle('neutral'); setSelectedVersion(null); setVoiceForm(false)
+    setGeneratedVisuals('images')
+    setNarration(true); setVoice('Kore'); setVoiceStyle('neutral'); setSelectedVersion(Number.isInteger(requestedVersion) && requestedVersion > 0 ? requestedVersion : null); setVoiceForm(false)
+    setBatchCount(1); setVariants([]); setBatchVoices(false); setBatchBudget(''); setBatchRefresh(0)
     setEditRequest('')
     setPreparingPost(false)
     setPostCaption('')
     setCapabilities(null)
     setBusy(false)
     requestKey.current = null
-  }, [workspaceId, projectId])
+  }, [workspaceId, projectId, requestedVersion])
 
   useEffect(() => {
     let active = true
@@ -114,7 +127,7 @@ export default function VideoStudio() {
     }
     load()
     return () => { active = false }
-  }, [workspaceId, projectId, isNew, offset])
+  }, [workspaceId, projectId, isNew, offset, requestedVersion])
 
   useEffect(() => {
     if (!project) return
@@ -166,13 +179,18 @@ export default function VideoStudio() {
     const refresh = async (event) => {
       if (event.detail?.workspaceId !== workspaceId || event.detail?.project_id !== projectId) return
       try {
+        if (!projectId) {
+          const value = await listVideos(workspaceId, offset)
+          if (active) { setProjects(value.items || []); setHasMore(value.has_more) }
+          return
+        }
         const value = await getVideo(workspaceId, projectId)
         if (active) { setProject(value); if (event.detail.version) setSelectedVersion(event.detail.version) }
       } catch (e) { if (active) setError(e.message) }
     }
     window.addEventListener('postbridge-video-updated', refresh)
     return () => { active = false; window.removeEventListener('postbridge-video-updated', refresh) }
-  }, [workspaceId, projectId])
+  }, [workspaceId, projectId, offset])
 
   const upload = (event) => {
     const files = Array.from(event.target.files || [])
@@ -202,12 +220,21 @@ export default function VideoStudio() {
           ...(scenes.some((scene) => scene.narration_text?.trim() && !scene.speech_asset_id) ? { narration_enabled: true } : {}) } : {}),
         ...(isNew && capabilities.autopilot_enabled && !manual ? {
           mode: 'autopilot', language: locale === 'en' ? 'en' : 'ru', duration_seconds: Number(duration), style, template,
+          ...(generatedVisuals === 'video' ? { generated_visuals: 'video' } : {}),
           ...(capabilities.speech_enabled && narration ? { narration_enabled: true, voice, voice_style: voiceStyle } : {}),
         } : {}) }
       // Reuse the same key after network errors, but never for changed inputs.
-      const fingerprint = JSON.stringify(body)
+      const batch = isNew && ((body.mode === 'autopilot' && batchCount > 1) || batchVoices && variants.length > 0)
+      const batchOptions = { count: body.mode === 'autopilot' ? Number(batchCount) : 1,
+        variants: batchVoices ? variants : [], ...(batchBudget ? { max_units_total: Number(batchBudget) } : {}) }
+      const fingerprint = JSON.stringify({ body, ...(batch ? batchOptions : {}) })
       if (requestKey.current?.fingerprint !== fingerprint) requestKey.current = { fingerprint, key: crypto.randomUUID() }
       body.request_key = requestKey.current.key
+      if (batch) {
+        await createVideoBatch(workspaceId, { video: body, request_key: body.request_key, ...batchOptions })
+        if (currentRoute.current === route) navigate(base)
+        return
+      }
       const value = isNew ? await createVideo(workspaceId, body)
         : await reviseVideo(workspaceId, projectId, { ...body, expected_version: project.current_version })
       if (currentRoute.current !== route) return
@@ -221,11 +248,13 @@ export default function VideoStudio() {
     event.preventDefault()
     run(async () => {
       const body = { expected_version: project.current_version, source_version: current.version,
-        language: voiceLanguage, voice, voice_style: voiceStyle }
+        ...(batchVoices ? { variants, ...(batchBudget ? { max_units_total: Number(batchBudget) } : {}) }
+          : { language: voiceLanguage, voice, voice_style: voiceStyle }) }
       const fingerprint = JSON.stringify(body)
       if (requestKey.current?.fingerprint !== fingerprint) requestKey.current = { fingerprint, key: crypto.randomUUID() }
-      const value = await createVideoVoiceVariant(workspaceId, project.id, { ...body, request_key: requestKey.current.key })
+      const value = await (batchVoices ? createVideoVoiceBatch : createVideoVoiceVariant)(workspaceId, project.id, { ...body, request_key: requestKey.current.key })
       if (currentRoute.current !== route) return
+      if (batchVoices) { setBatchRefresh((n) => n + 1); setVoiceForm(false); return }
       setSelectedVersion(value.requested_revision?.version || value.current_version); setProject(value); setVoiceForm(false)
     })
   }
@@ -281,6 +310,7 @@ export default function VideoStudio() {
             {brandName.trim() && <label>{t('videoStoryboard.brandColor')}<input type="color" value={brandColor} onChange={(e) => setBrandColor(e.target.value)} disabled={busy} /></label>}
             <label><input type="checkbox" checked={manual} onChange={(e) => setManual(e.target.checked)} disabled={busy} />{t('video.manualOnly')}</label>
             {!manual && <>
+              {capabilities.video_generation_enabled && <label>{t('videoGeneration.visuals')}<select value={generatedVisuals} onChange={(e) => setGeneratedVisuals(e.target.value)} disabled={busy}><option value="images">{t('videoGeneration.images')}</option><option value="video">{t('videoGeneration.video')}</option></select></label>}
               <label>{t('video.targetDuration')}<select value={duration} onChange={(e) => setDuration(e.target.value)} disabled={busy}>{[10, 15, 20, 30, 45].map((seconds) => <option value={seconds} key={seconds}>{t('video.seconds', { seconds })}</option>)}</select></label>
               <label>{t('video.style')}<input type="text" value={style} maxLength={500} onChange={(e) => setStyle(e.target.value)} disabled={busy} /></label>
               {capabilities.speech_enabled && <>
@@ -288,7 +318,16 @@ export default function VideoStudio() {
                 {narration && <label>{t('videoVoice.voice')}<select value={voice} onChange={(e) => setVoice(e.target.value)}>{capabilities.speech_voices.map((name) => <option key={name} value={name}>{t(`videoVoice.voice.${name}`)}</option>)}</select></label>}
               </>}
             </>}
+            {!manual && <label>{t('videoBatch.count')}<input type="number" min="1" max="5" value={batchCount} disabled={busy} onChange={(e) => setBatchCount(Number(e.target.value))} /></label>}
+            {capabilities.speech_enabled && <>
+              <label><input type="checkbox" checked={batchVoices} disabled={busy} onChange={(e) => setBatchVoices(e.target.checked)} />{t('videoBatch.extraVoices')}</label>
+              {batchVoices && <VideoVariantChoices value={variants} onChange={setVariants} disabled={busy} />}
+            </>}
+            {(!manual && batchCount > 1 || batchVoices) && <label>{t('videoBatch.budget')}<input type="number" min="1" max="100000000" value={batchBudget} onChange={(e) => setBatchBudget(e.target.value)} placeholder={t('videoSchedule.planBudget')} /></label>}
           </details>}
+          {(!manual && batchCount > 1 || batchVoices && variants.length > 0) && <p>{t('videoAuto.count', { count: (!manual ? batchCount : 1) * (batchVoices ? variants.length + 1 : 1) })}</p>}
+          <VideoBudgetPreview units={estimateVideoUnits(capabilities, { mode: capabilities.autopilot_enabled && !manual ? 'autopilot' : 'manual', generated_visuals: generatedVisuals,
+            duration_seconds: Number(duration), scenes: materials, narration_enabled: !manual && narration && capabilities.speech_enabled }, !manual ? batchCount : 1, batchVoices ? variants : [])} limit={(!manual && batchCount > 1 || batchVoices && variants.length > 0) ? batchBudget : null} />
           <button className="btn" disabled={busy || !brief.trim()}>{busy ? t('video.working') : capabilities.autopilot_enabled && !manual ? t('video.createAuto') : materials.length ? t('video.assemble') : t('video.saveIdea')}</button>
         </form> : project ? <div className="video-project-layout">
           <section className="card video-preview">
@@ -331,12 +370,20 @@ export default function VideoStudio() {
                 <button className="btn btn-secondary" disabled={busy || unsavedChanges} onClick={() => { setVoiceLanguage(current.language || 'ru'); setVoiceForm(true) }}>{t('videoVoice.change')}</button>
               </div> : <form onSubmit={submitVoice}>
                 <p className="muted">{t('videoVoice.reuseHint')}</p>
-                <label>{t('videoVoice.language')}<select value={voiceLanguage} onChange={(e) => setVoiceLanguage(e.target.value)} disabled={busy}>{capabilities.speech_languages.map((language) => <option key={language} value={language}>{t(`videoVoice.language.${language}`)}</option>)}</select></label>
+                <label><input type="checkbox" checked={batchVoices} onChange={(e) => setBatchVoices(e.target.checked)} />{t('videoBatch.multiple')}</label>
+                {batchVoices ? <>
+                  <VideoVariantChoices value={variants} onChange={setVariants} disabled={busy} />
+                  <label>{t('videoBatch.budget')}<input type="number" min="1" max="100000000" value={batchBudget} onChange={(e) => setBatchBudget(e.target.value)} placeholder={t('videoSchedule.planBudget')} /></label>
+                </> : <><label>{t('videoVoice.language')}<select value={voiceLanguage} onChange={(e) => setVoiceLanguage(e.target.value)} disabled={busy}>{capabilities.speech_languages.map((language) => <option key={language} value={language}>{t(`videoVoice.language.${language}`)}</option>)}</select></label>
                 <label>{t('videoVoice.voice')}<select value={voice} onChange={(e) => setVoice(e.target.value)} disabled={busy}>{capabilities.speech_voices.map((name) => <option key={name} value={name}>{t(`videoVoice.voice.${name}`)}</option>)}</select></label>
                 <label>{t('videoVoice.style')}<select value={voiceStyle} onChange={(e) => setVoiceStyle(e.target.value)} disabled={busy}>{['neutral', 'warm', 'energetic'].map((style) => <option key={style} value={style}>{t(`videoVoice.style.${style}`)}</option>)}</select></label>
-                <div className="inline-actions"><button className="btn" disabled={busy || unsavedChanges}>{t('videoVoice.create')}</button><button className="btn btn-secondary" type="button" disabled={busy} onClick={() => setVoiceForm(false)}>{t('common.cancel')}</button></div>
+                </>}
+                <VideoBudgetPreview units={(capabilities.reservation_units || 0) * (batchVoices ? variants.length : 1)} limit={batchVoices ? batchBudget : null} />
+                <div className="inline-actions"><button className="btn" disabled={busy || unsavedChanges || batchVoices && !variants.length}>{t(batchVoices ? 'videoBatch.create' : 'videoVoice.create')}</button><button className="btn btn-secondary" type="button" disabled={busy} onClick={() => setVoiceForm(false)}>{t('common.cancel')}</button></div>
               </form>}
             </div>}
+            {capabilities.supports_campaigns && current.status === 'succeeded' && <Link to={`/workspaces/${workspaceId}/content/video-campaigns?project=${project.id}&version=${current.version}`}>{t('videoCampaign.addCurrent')}</Link>}
+            <VideoBatches workspaceId={workspaceId} projectId={project.id} refreshKey={batchRefresh} />
             {project.revisions.length > 1 && <details><summary>{t('video.history')}</summary>{project.revisions.map((revision) => <p key={revision.id}>{t('video.version', { version: revision.version })} · {t(`videoVoice.language.${revision.language || 'ru'}`)} · {t(`video.status.${revision.status}`)} {revision.output_url && <a href={`${revision.output_url}?download=1`} target="_blank" rel="noreferrer">{t('video.download')}</a>}{revision.post_draft?.content_item_id && <>{' · '}<Link to={`/workspaces/${workspaceId}/content/${revision.post_draft.content_item_id}`}>{t('videoPost.open')}</Link></>}</p>)}</details>}
           </section>
           {capabilities.enabled && <form className="card video-scenes" onSubmit={submit}>
@@ -355,11 +402,12 @@ export default function VideoStudio() {
                   {scene.kind === 'video' && <label>{t('videoStoryboard.trimStart')}<input type="number" min="0" max="180" step="any" value={displaySeconds(scene.source_start_seconds || 0)} onChange={(e) => updateScene(index, { source_start_seconds: e.target.value })} /></label>}
                   {scene.kind !== 'video' && <label>{t('videoStoryboard.motion')}<select value={scene.motion || 'none'} onChange={(e) => updateScene(index, { motion: e.target.value })}>{['none', 'zoom_in', 'pan_left', 'pan_right'].map((value) => <option key={value} value={value}>{t(`videoStoryboard.motion.${value}`)}</option>)}</select></label>}
                   <label>{t('videoStoryboard.transition')}<select value={scene.transition || 'cut'} onChange={(e) => updateScene(index, { transition: e.target.value })}>{['cut', 'fade'].map((value) => <option key={value} value={value}>{t(`videoStoryboard.transition.${value}`)}</option>)}</select></label>
-                  <details><summary>{t('videoStoryboard.replace')}</summary><VideoMaterialPicker workspaceId={workspaceId} disabled={busy || working(viewProject)} onChoose={(item) => updateScene(index, { asset_id: item.asset_id, url: item.url, kind: item.kind, source_start_seconds: undefined, image_prompt: undefined, regenerate_image: undefined, motion: undefined, preview_url: undefined })} /></details>
-                  {capabilities.generated_media && <>
-                    <label><input type="checkbox" checked={!!scene.regenerate_image} onChange={(e) => updateScene(index, { regenerate_image: e.target.checked || undefined })} />{t('videoStoryboard.regenerate')}</label>
-                    {scene.regenerate_image && <label>{t('videoStoryboard.prompt')}<textarea required maxLength={1200} rows={3} value={scene.image_prompt || ''} onChange={(e) => updateScene(index, { image_prompt: e.target.value })} /></label>}
-                    {scene.regenerate_image && <p className="muted">{t('videoStoryboard.reuse')}</p>}
+                  <details><summary>{t('videoStoryboard.replace')}</summary><VideoMaterialPicker workspaceId={workspaceId} disabled={busy || working(viewProject)} onChoose={(item) => updateScene(index, { asset_id: item.asset_id, url: item.url, kind: item.kind, source_start_seconds: undefined, image_prompt: undefined, regenerate_image: undefined, regenerate_video: undefined, generation_kind: undefined, motion: undefined, preview_url: undefined })} /></details>
+                  {(capabilities.generated_media || capabilities.video_generation_enabled) && <>
+                    {capabilities.generated_media && <label><input type="checkbox" checked={!!scene.regenerate_image} onChange={(e) => updateScene(index, { regenerate_image: e.target.checked || undefined, regenerate_video: undefined, generation_kind: 'image' })} />{t('videoStoryboard.regenerate')}</label>}
+                    {capabilities.video_generation_enabled && <label><input type="checkbox" checked={!!scene.regenerate_video} onChange={(e) => updateScene(index, { regenerate_video: e.target.checked || undefined, regenerate_image: undefined, duration_seconds: e.target.checked ? Math.min(8, Number(scene.duration_seconds)) : scene.duration_seconds, generation_kind: 'video' })} />{t('videoGeneration.regenerate')}</label>}
+                    {(scene.regenerate_image || scene.regenerate_video) && <label>{t('videoStoryboard.prompt')}<textarea required maxLength={1200} rows={3} value={scene.image_prompt || ''} onChange={(e) => updateScene(index, { image_prompt: e.target.value })} /></label>}
+                    {(scene.regenerate_image || scene.regenerate_video) && <p className="muted">{t('videoStoryboard.reuse')}</p>}
                   </>}
                 </details>
                 <div className="inline-actions">
@@ -375,10 +423,13 @@ export default function VideoStudio() {
               {brandName.trim() && <label>{t('videoStoryboard.brandColor')}<input type="color" value={brandColor} onChange={(e) => setBrandColor(e.target.value)} disabled={busy || working(viewProject)} /></label>}
             </details>
             <p className="muted">{t('video.total', { seconds: scenes.reduce((sum, s) => sum + Number(s.duration_seconds || 0), 0).toLocaleString(locale === 'en' ? 'en-US' : 'ru-RU', { maximumFractionDigits: 1 }) })}</p>
+            <VideoBudgetPreview units={estimateVideoUnits(capabilities, { scenes, narration_enabled: scenes.some((s) => s.narration_text?.trim() && !s.speech_asset_id) })} />
             <button className="btn" disabled={busy || working(viewProject) || !scenes.length || scenes.reduce((sum, s) => sum + Number(s.duration_seconds || 0), 0) > 45}>{busy ? t('video.working') : t('video.assemble')}</button>
           </form>}
         </div> : <>
           {capabilities.enabled && <div className="video-list-actions"><Link className="btn" to={`${base}/new`}>{t('video.new')}</Link>{capabilities.supports_schedules && <Link className="btn btn-secondary" to={`/workspaces/${workspaceId}/agents/videos`}>{t('videoSchedule.title')}</Link>}</div>}
+          {capabilities.supports_campaigns && <p><Link to={`/workspaces/${workspaceId}/content/video-campaigns`}>{t('videoCampaign.title')}</Link></p>}
+          <VideoBatches workspaceId={workspaceId} />
           {!projects.length && <div className="card"><h2>{t('video.empty')}</h2><p>{t('video.emptyHint')}</p></div>}
           <div className="video-grid">{projects.map((item) => <Link className="card video-card" key={item.id} to={`${base}/${item.id}`}>
             {item.current.output_url && <video src={item.current.output_url} preload="metadata" muted aria-label={t('video.preview')} />}

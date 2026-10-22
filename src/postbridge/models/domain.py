@@ -822,6 +822,45 @@ class VideoProductionJobOrm(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class VideoBatchOrm(Base):
+    """Durable bounded production batches; each item uses ordinary video jobs."""
+    __tablename__ = "video_batches"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "request_key", name="uq_video_batch_request"),
+        CheckConstraint("status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')", name="ck_video_batch_status"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    request_key: Mapped[str] = mapped_column(String(64))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    created_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source_project_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("video_projects.id"), nullable=True)
+    source_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    expected_project_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    policy_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class VideoBatchItemOrm(Base):
+    __tablename__ = "video_batch_items"
+    __table_args__ = (UniqueConstraint("batch_id", "position", name="uq_video_batch_position"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    batch_id: Mapped[str] = mapped_column(String(36), ForeignKey("video_batches.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int] = mapped_column(Integer)
+    payload_json: Mapped[dict] = mapped_column(JSON)
+    result_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    project_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("video_projects.id"), nullable=True)
+    revision_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("video_revisions.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
 class VideoSpeechAssetOrm(Base):
     """Verified generated PCM assets reusable within one tenant."""
     __tablename__ = "video_speech_assets"
@@ -856,6 +895,7 @@ class VideoPublicationApprovalOrm(Base):
     post_draft_id: Mapped[str] = mapped_column(String(36), ForeignKey("video_post_drafts.id", ondelete="RESTRICT"), unique=True)
     publication_plan_id: Mapped[str] = mapped_column(String(36), ForeignKey("publication_plans.id", ondelete="RESTRICT"), unique=True)
     snapshot: Mapped[dict] = mapped_column(JSON)
+    auto_agent_run_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agent_runs.id", ondelete="RESTRICT"), nullable=True)
     initial_timing: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     schedule_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     schedule_history: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
@@ -871,8 +911,10 @@ class VideoAgentExecutionOrm(Base):
     tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
     task_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agent_tasks.id", ondelete="SET NULL"), index=True)
     occurrence_key: Mapped[str] = mapped_column(String(80))
+    publication_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     input_snapshot: Mapped[dict] = mapped_column(JSON)
     project_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("video_projects.id", ondelete="SET NULL"), unique=True)
+    batch_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("video_batches.id"), nullable=True)
     lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)

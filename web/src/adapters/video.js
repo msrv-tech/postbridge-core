@@ -7,6 +7,10 @@ export const getVideo = (workspaceId, id) => api(path(workspaceId, `/${id}`))
 export const createVideo = (workspaceId, payload) => api(path(workspaceId), { method: 'POST', body: JSON.stringify(payload) })
 export const reviseVideo = (workspaceId, id, payload) => api(path(workspaceId, `/${id}/revisions`), { method: 'POST', body: JSON.stringify(payload) })
 export const createVideoVoiceVariant = (workspaceId, id, payload) => api(path(workspaceId, `/${id}/voice-variants`), { method: 'POST', body: JSON.stringify(payload) })
+export const createVideoBatch = (workspaceId, payload) => api(path(workspaceId, '/batches'), { method: 'POST', body: JSON.stringify(payload) })
+export const createVideoVoiceBatch = (workspaceId, id, payload) => api(path(workspaceId, `/${id}/voice-batches`), { method: 'POST', body: JSON.stringify(payload) })
+export const listVideoBatches = (workspaceId, projectId) => api(path(workspaceId, `/batches${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`))
+export const cancelVideoBatch = (workspaceId, id) => api(path(workspaceId, `/batches/${id}/cancel`), { method: 'POST' })
 export const cancelVideo = (workspaceId, id, version, sourceVersion) => api(path(workspaceId, `/${id}/cancel`), { method: 'POST', body: JSON.stringify({ expected_version: version, ...(sourceVersion ? { source_version: sourceVersion } : {}) }) })
 export const prepareVideoPost = (workspaceId, id, payload) => api(path(workspaceId, `/${id}/post-draft`), { method: 'POST', body: JSON.stringify(payload) })
 export const getVideoPublication = (workspaceId, id) => api(path(workspaceId, `/posts/${id}/publication`))
@@ -28,3 +32,5 @@ export const updateVideoMaterial = (workspaceId, id, payload) => api(path(worksp
 
 export const reconcileVideoPublication = (workspaceId, id, targetId) => api(path(workspaceId, `/posts/${id}/publication/targets/${targetId}/reconcile`), { method: 'POST' })
 export const getTikTokCreatorInfo = (workspaceId, channelId) => api(`/workspaces/${workspaceId}/videos/tiktok/channels/${channelId}/creator-info`)
+
+export const getVideoScheduleBridges = (workspaceId, channelId) => api(path(workspaceId, `/schedule-bridges?channel_id=${encodeURIComponent(channelId)}`))

@@ -14,7 +14,7 @@ from postbridge.domain.errors import ValidationError
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 MAX_SCENES = 8
 MAX_DURATION = 45
-WIDTH, HEIGHT, FPS = 720, 1280, 24
+WIDTH, HEIGHT, FPS = 1080, 1920, 24
 
 
 def video_error(code: str, message: str) -> ValidationError:
@@ -126,18 +126,18 @@ def render_montage(scenes: list[dict], sources: dict[str, Path], directory: Path
             brand = directory / f"brand-{index}.txt"
             brand.write_text("\n".join(textwrap.wrap(options["brand_name"], width=32)), encoding="utf-8")
             color = (options.get("brand_color") or "#38bdf8").replace("#", "0x")
-            filters += f",drawbox=x=0:y=0:w=iw:h=12:color={color}:t=fill,drawtext=textfile='{brand}':expansion=none:fontcolor={color}:fontsize=28:x=(w-text_w)/2:y=64"
+            filters += f",drawbox=x=0:y=0:w=iw:h=18:color={color}:t=fill,drawtext=textfile='{brand}':expansion=none:fontcolor={color}:fontsize=42:x=(w-text_w)/2:y=96"
         if scene.get("caption"):
             filters += (
-                f",drawtext=textfile='{caption}':expansion=none:fontcolor=white:fontsize=30:"
-                f"x=(w-text_w)/2:y={'180' if speech_path else 'h-240-text_h'}:box=1:boxcolor=black@0.7:boxborderw=16"
+                f",drawtext=textfile='{caption}':expansion=none:fontcolor=white:fontsize=45:"
+                f"x=(w-text_w)/2:y={'270' if speech_path else 'h-360-text_h'}:box=1:boxcolor=black@0.7:boxborderw=24"
             )
         if speech_path and scene.get("narration_text"):
             subtitle = directory / f"subtitle-{index}.txt"
             subtitle.write_text("\n".join(textwrap.wrap(scene["narration_text"], width=32)), encoding="utf-8")
             # Phrase-level cues follow the measured audio, not guessed word timings.
-            filters += (f",drawtext=textfile='{subtitle}':expansion=none:fontcolor=white:fontsize=28:"
-                        f"x=(w-text_w)/2:y=h-220-text_h:box=1:boxcolor=black@0.7:boxborderw=12:enable='lt(t,{speech_seconds})'")
+            filters += (f",drawtext=textfile='{subtitle}':expansion=none:fontcolor=white:fontsize=42:"
+                        f"x=(w-text_w)/2:y=h-330-text_h:box=1:boxcolor=black@0.7:boxborderw=18:enable='lt(t,{speech_seconds})'")
         if scene.get("transition") == "fade":
             filters += f",fade=t=in:st=0:d=0.2,fade=t=out:st={max(.2, scene['duration_seconds'] - .2)}:d=0.2"
         input_args = ["-loop", "1"] if meta["kind"] == "image" else ["-stream_loop", "-1"]

@@ -13,15 +13,22 @@ from postbridge.models.domain import (AgentRunOrm, AgentTaskOrm, ChannelOrm, Ten
     VideoAgentExecutionOrm, VideoProductionJobOrm, VideoRevisionOrm)
 from postbridge.services.video_media import video_error
 from postbridge.services.video_studio import VideoCreate, _check_assets, capabilities, require_enabled
+from postbridge.services.video_batches import ProjectBatchCreate, VoiceChoice
+
+
+from postbridge.services.video_auto_publication import AutoPublicationPolicy
 
 
 class VideoTaskConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_key: str = Field(min_length=8, max_length=64, pattern=r"^[A-Za-z0-9:_-]+$")
     video: VideoCreate
+    count: int = Field(default=1, ge=1, le=5)
+    variants: list[VoiceChoice] = Field(default_factory=list, max_length=6)
     max_units_per_run: int | None = Field(default=None, ge=1, le=100_000_000)
     max_units_per_month: int | None = Field(default=None, ge=1, le=100_000_000)
     notify: bool = True
+    auto_publication: AutoPublicationPolicy | None = None
 
 
 def utc(value):
@@ -35,6 +42,7 @@ def validate_template(config, goal_text):
             raise ValueError("Template contains internal billing data or a different task")
         if value.video.mode == "manual" and not value.video.scenes:
             raise ValueError("Manual templates need materials")
+        ProjectBatchCreate(request_key=value.request_key, video=value.video, count=value.count, variants=value.variants)
         return value
     except (ValidationError, ValueError) as exc:
         raise video_error("VIDEO_SCHEDULE_INVALID", "Check the video task, materials and budget settings") from exc
@@ -45,11 +53,15 @@ def create_video_agent_task(session, *, tenant_id, channel_id, goal_text, schedu
     require_enabled()
     config = validate_template(task_config, goal_text)
     if autonomy_mode != "draft_approval" or max_candidates_per_run != 1:
-        raise video_error("VIDEO_SCHEDULE_INVALID", "Video tasks create one draft per run")
+        raise video_error("VIDEO_SCHEDULE_INVALID", "Video tasks create one bounded draft batch per run")
     if not capabilities()["supports_schedules"]:
         raise video_error("VIDEO_SCHEDULE_UNAVAILABLE", "Video scheduling is not configured")
     if config.video.mode == "autopilot" and not capabilities()["autopilot_enabled"]:
         raise video_error("VIDEO_AUTOPILOT_UNAVAILABLE", "Video autopilot is not configured")
+    if (config.variants or config.video.narration_enabled) and not capabilities()["speech_enabled"]:
+        raise video_error("VIDEO_SPEECH_UNAVAILABLE", "Google speech generation is not configured")
+    if (config.video.generated_visuals == "video" or any(s.regenerate_video or not s.asset_id and s.generation_kind == "video" for s in config.video.scenes)) and not capabilities()["video_generation_enabled"]:
+        raise video_error("VIDEO_GENERATION_UNAVAILABLE", "AI video generation is not configured")
     try:
         from croniter import croniter
         ZoneInfo(timezone or "UTC")
@@ -78,6 +90,11 @@ def create_video_agent_task(session, *, tenant_id, channel_id, goal_text, schedu
         status="active", next_run_at=next_run)
     session.add(row)
     session.flush()
+    if config.auto_publication:
+        from types import SimpleNamespace
+        from postbridge.services.video_auto_publication import assert_policy
+        assert_policy(session, tenant_id, SimpleNamespace(task_id=row.id, input_snapshot={
+            "auto_publication": config.auto_publication.model_dump(), "created_by": created_by}))
     return row
 
 
@@ -112,8 +129,10 @@ def enqueue_video_agent_run(session, *, tenant_id, task_id, occurrence_key=None,
     production["request_key"] = f"agent-video:{run_id}"
     session.add(VideoAgentExecutionOrm(id=run_id, tenant_id=tenant_id, task_id=task.id, occurrence_key=key,
         input_snapshot={"video": production, "created_by": task.created_by,
+            "count": config.count, "variants": [v.model_dump() for v in config.variants],
             "max_units_per_run": config.max_units_per_run, "max_units_per_month": config.max_units_per_month,
-            "notify": config.notify, "timezone": task.timezone}, notification_acknowledged=1 if active else 0))
+            "notify": config.notify, "timezone": task.timezone,
+            "auto_publication": config.auto_publication.model_dump() if config.auto_publication else None}, notification_acknowledged=1 if active else 0))
     task.last_run_at = now
     if scheduled:
         # Advance from now: missed occurrences never produce a catch-up spending burst.
@@ -126,15 +145,35 @@ def video_execution_payload(session, run):
     execution = session.get(VideoAgentExecutionOrm, run.id)
     if execution is None:
         return None
-    return {"project_id": execution.project_id, "task_id": execution.task_id,
-            "occurrence_key": execution.occurrence_key, "input_snapshot": execution.input_snapshot}
+    result = {"project_id": execution.project_id, "batch_id": execution.batch_id, "task_id": execution.task_id,
+            "occurrence_key": execution.occurrence_key, "input_snapshot": execution.input_snapshot,
+            "auto_publication": execution.publication_json or {}}
+    if execution.batch_id:
+        from postbridge.services.video_batches import get_batch
+        result["batch"] = get_batch(session, execution.tenant_id, execution.batch_id)
+    return result
 
 
 def synchronize_video_agent_runs(session):
+    from sqlalchemy import or_
+    from postbridge.models.domain import VideoBatchOrm, VideoBatchItemOrm
     rows = session.execute(select(VideoAgentExecutionOrm, AgentRunOrm).join(AgentRunOrm,
-        VideoAgentExecutionOrm.id == AgentRunOrm.id).where(VideoAgentExecutionOrm.project_id.is_not(None),
+        VideoAgentExecutionOrm.id == AgentRunOrm.id).where(or_(VideoAgentExecutionOrm.project_id.is_not(None), VideoAgentExecutionOrm.batch_id.is_not(None)),
         AgentRunOrm.status.in_(["queued", "running"])).with_for_update()).all()
     for execution, run in rows:
+        if execution.batch_id:
+            batch = session.get(VideoBatchOrm, execution.batch_id)
+            first = session.scalar(select(VideoBatchItemOrm).where(VideoBatchItemOrm.batch_id == execution.batch_id)
+                .order_by(VideoBatchItemOrm.position).limit(1))
+            execution.project_id = first.project_id if first else None
+            if batch.status in {"queued", "running"}:
+                continue
+            run.status = "awaiting_review" if batch.status == "succeeded" else batch.status
+            run.completed_at, run.error_code = datetime.now(UTC), batch.error_code
+            run.trace_json = json.dumps({"result": {"video_batch_id": batch.id,
+                "video_project_id": execution.project_id, "status": batch.status}, "trace": [], "tool_summary": {}})
+            run.token_usage_json = "{}"
+            continue
         revision = session.scalar(select(VideoRevisionOrm).where(VideoRevisionOrm.project_id == execution.project_id,
             VideoRevisionOrm.request_key == execution.input_snapshot["video"]["request_key"]))
         job = session.scalar(select(VideoProductionJobOrm).where(VideoProductionJobOrm.revision_id == revision.id)) if revision else None

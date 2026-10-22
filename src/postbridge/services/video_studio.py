@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from postbridge.config import get_settings
 from postbridge.infrastructure.media_storage import managed_media_url, upload_media_file
 from postbridge.models.domain import MediaAssetOrm, TenantOrm, VideoProjectOrm, VideoRevisionOrm, VideoProductionJobOrm, VideoSpeechAssetOrm
-from postbridge.services.video_media import MAX_DURATION, MAX_SCENES, MAX_UPLOAD_BYTES, inspect_media, video_error
+from postbridge.services.video_media import HEIGHT, WIDTH, MAX_DURATION, MAX_SCENES, MAX_UPLOAD_BYTES, inspect_media, video_error
 
 
 class VideoScene(BaseModel):
@@ -31,13 +31,19 @@ class VideoScene(BaseModel):
     visual_description: str | None = Field(default=None, max_length=1200)
     image_prompt: str | None = Field(default=None, max_length=1200)
     regenerate_image: Literal[True] | None = None
+    regenerate_video: Literal[True] | None = None
+    generation_kind: Literal["image", "video"] | None = None
     source_start_seconds: float | None = Field(default=None, ge=0, le=180)
     motion: Literal["none", "zoom_in", "pan_left", "pan_right"] | None = None
     transition: Literal["cut", "fade"] | None = None
 
     @model_validator(mode="after")
     def check_visual(self):
-        if (not self.asset_id or self.regenerate_image) and not (self.image_prompt or "").strip():
+        if self.regenerate_image and self.regenerate_video:
+            raise ValueError("Choose one visual generation method")
+        if (self.regenerate_video or not self.asset_id and self.generation_kind == "video") and self.duration_seconds > 8:
+            raise ValueError("Generated video scenes can be at most eight seconds long")
+        if (not self.asset_id or self.regenerate_image or self.regenerate_video) and not (self.image_prompt or "").strip():
             raise ValueError("A generated scene requires an image prompt")
         return self
 
@@ -50,6 +56,7 @@ class VideoCreate(BaseModel):
     language: Literal["ru", "en"] = "ru"
     duration_seconds: int = Field(default=20, ge=10, le=45)
     style: str = Field(default="", max_length=500)
+    generated_visuals: Literal["images", "video"] = "images"
     template: Literal["problem_solution", "product_demo", "tutorial"] | None = None
     brand_name: str | None = Field(default=None, max_length=80)
     brand_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
@@ -85,9 +92,11 @@ def capabilities() -> dict:
     autopilot = bool(funded and settings.ai_image_generation_model)
     return {"enabled": settings.video_studio_enabled, "generated_media": autopilot, "autopilot_enabled": autopilot,
             "speech_enabled": bool(funded and settings.video_speech_enabled and settings.video_speech_model == "gemini-2.5-flash-tts"),
+            "video_generation_enabled": bool(funded and settings.video_generation_enabled and settings.video_generation_model in {
+                "veo-3.1-fast-generate-001", "veo-3.1-fast-generate-001:720p"}),
             "speech_languages": ["ru", "en"], "speech_voices": ["Kore", "Charon", "Puck"],
             "max_upload_bytes": MAX_UPLOAD_BYTES, "max_scenes": MAX_SCENES, "max_duration_seconds": MAX_DURATION,
-            "width": 720, "height": 1280, "supports_schedules": bool(settings.video_studio_enabled and
+            "width": WIDTH, "height": HEIGHT, "supports_schedules": bool(settings.video_studio_enabled and
                 (settings.postbridge_app_mode == "selfhost" or settings.saas_base_url and settings.status_event_webhook_token))}
 
 
@@ -97,6 +106,9 @@ def require_enabled():
 
 
 def _project(session: Session, tenant_id: str, project_id: str, *, lock=False) -> VideoProjectOrm:
+    if lock:
+        # Keep the same lock order for UI edits, batch variants and media admission.
+        session.scalar(select(TenantOrm).where(TenantOrm.id == tenant_id).with_for_update())
     stmt = select(VideoProjectOrm).where(VideoProjectOrm.id == project_id, VideoProjectOrm.tenant_id == tenant_id)
     if lock:
         stmt = stmt.with_for_update().execution_options(populate_existing=True)
@@ -178,6 +190,7 @@ def project_payload(session: Session, project: VideoProjectOrm) -> dict:
                       "created_at": revision.created_at, "mode": (revision.production_options or {}).get("mode", "manual"),
                       "language": (revision.production_options or {}).get("language", "ru"),
                       "narration_enabled": (revision.production_options or {}).get("narration_enabled", False),
+                      "generated_visuals": (revision.production_options or {}).get("generated_visuals", "images"),
                       "voice": (revision.production_options or {}).get("voice", "Kore"),
                       "voice_style": (revision.production_options or {}).get("voice_style", "neutral"),
                       "source_version": (revision.production_options or {}).get("source_version"),
@@ -185,6 +198,10 @@ def project_payload(session: Session, project: VideoProjectOrm) -> dict:
                       "usage": job_usage(job)})
     from postbridge.models.domain import VideoAgentExecutionOrm
     origin = session.scalar(select(VideoAgentExecutionOrm).where(VideoAgentExecutionOrm.project_id == project.id))
+    if not origin:
+        from postbridge.models.domain import VideoBatchItemOrm
+        origin = session.scalar(select(VideoAgentExecutionOrm).join(VideoBatchItemOrm,
+            VideoBatchItemOrm.batch_id == VideoAgentExecutionOrm.batch_id).where(VideoBatchItemOrm.project_id == project.id))
     return {"id": project.id, "brief": project.brief, "current_version": project.current_version,
             "origin": {"agent_run_id": origin.id, "agent_task_id": origin.task_id} if origin else None,
             "created_at": project.created_at, "updated_at": project.updated_at, "revisions": items,
@@ -206,12 +223,14 @@ def job_usage(job) -> dict:
     progress = (job.progress_json or {}) if job else {}
     steps = progress.get("steps", {}).values()
     return {"tokens_charged": sum(s.get("units", 0) for s in steps),
-            "uncertain": any(s.get("state") in {"started", "unknown"} for s in steps),
+            "uncertain": any(s.get("state") in {"started", "unknown", "video_pending"} for s in steps),
             "reservation_id": progress.get("billing", {}).get("reservation_id")}
 
 
 def production_options(payload) -> dict:
     options = {key: getattr(payload, key) for key in ("mode", "language", "duration_seconds", "style")}
+    if payload.generated_visuals != "images":
+        options["generated_visuals"] = payload.generated_visuals
     if payload.narration_enabled or any(scene.speech_asset_id for scene in payload.scenes):
         options.update(narration_enabled=payload.narration_enabled, voice=payload.voice, voice_style=payload.voice_style)
     options.update({key: getattr(payload, key) for key in ("template", "brand_name", "brand_color") if getattr(payload, key) is not None})
@@ -236,7 +255,10 @@ def _add_revision(session: Session, project: VideoProjectOrm, payload: VideoCrea
                                                         VideoRevisionOrm.request_key == payload.request_key)):
         raise video_error("VIDEO_REQUEST_CONFLICT", "This request was already used for another video")
     autopilot = payload.mode == "autopilot"
-    generated = any(not s.get("asset_id") or s.get("regenerate_image") for s in scenes)
+    generated = any(not s.get("asset_id") or s.get("regenerate_image") or s.get("regenerate_video") for s in scenes)
+    video_generated = autopilot and payload.generated_visuals == "video" or any(s.get("regenerate_video") or s.get("generation_kind") == "video" and not s.get("asset_id") for s in scenes)
+    if video_generated and not capabilities()["video_generation_enabled"]:
+        raise video_error("VIDEO_GENERATION_UNAVAILABLE", "AI video scene generation is not configured")
     paid = autopilot or payload.narration_enabled or generated
     if autopilot and any(scene.get("speech_asset_id") for scene in scenes):
         raise video_error("VIDEO_SPEECH_ASSET_INVALID", "Reuse narrated scenes in manual assembly or create a voice variant")
@@ -266,7 +288,7 @@ def _add_revision(session: Session, project: VideoProjectOrm, payload: VideoCrea
             status="queued", stage="queued", attempts=0, progress_json={"billing": billing, "steps": {}} if paid else {}))
 
 
-def create_project(session: Session, tenant_id: str, payload: VideoCreate, *, agent_run_id: str | None = None) -> dict:
+def create_project(session: Session, tenant_id: str, payload: VideoCreate, *, agent_run_id: str | None = None, commit: bool = True) -> dict:
     require_enabled()
     if payload.request_key.startswith("agent-video:") and payload.request_key != f"agent-video:{agent_run_id}":
         raise video_error("VIDEO_REQUEST_CONFLICT", "Agent video request keys belong to their scheduled run")
@@ -283,7 +305,7 @@ def create_project(session: Session, tenant_id: str, payload: VideoCreate, *, ag
         session.add(row)
         session.flush()
         _add_revision(session, row, payload)
-        session.commit()
+        session.commit() if commit else session.flush()
     except IntegrityError:
         session.rollback()
         row = session.scalar(select(VideoProjectOrm).where(VideoProjectOrm.tenant_id == tenant_id,

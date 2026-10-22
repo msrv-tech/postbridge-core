@@ -177,7 +177,7 @@ def test_real_render_has_video_audio_and_idempotent_completion(state):
     assert rendered["current"]["status"] == "succeeded"
     output = session.get(MediaAssetOrm, rendered["current"]["output_asset_id"])
     metadata = inspect_media(tmp / "storage" / output.object_key)
-    assert (metadata["width"], metadata["height"]) == (720, 1280)
+    assert (metadata["width"], metadata["height"]) == (1080, 1920)
     assert metadata["has_audio"]
     assert 0.9 < metadata["duration_seconds"] < 1.2
     video_tasks.process_video_job.run(job_id)

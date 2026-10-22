@@ -15,6 +15,7 @@ from postbridge.domain.errors import PostbridgeError
 from postbridge.infrastructure.media_storage import copy_media_object_to_file, delete_media_object, upload_media_file
 from postbridge.models.domain import MediaAssetOrm, VideoRevisionOrm, VideoProductionJobOrm
 from postbridge.services.video_media import MAX_UPLOAD_BYTES, inspect_media, render_montage, video_error
+from postbridge.services.video_generation import WaitingForVideo
 from postbridge.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,16 @@ logger = logging.getLogger(__name__)
 
 @celery_app.task(name="postbridge.video.dispatch")
 def dispatch_video_jobs():
+    # Financial recovery continues after cancellation or disabling new production.
+    with SESSION_LOCAL() as session:
+        now = datetime.now(UTC)
+        ids = session.scalars(select(VideoProductionJobOrm.id).where(VideoProductionJobOrm.status.in_(["cancelled", "failed"]),
+            VideoProductionJobOrm.progress_json["video_settlement_pending"].as_boolean().is_(True),
+            or_(VideoProductionJobOrm.lease_until.is_(None), VideoProductionJobOrm.lease_until < now)).limit(20)).all()
+    for job_id in ids:
+        celery_app.send_task("postbridge.video.settle_scenes", args=[job_id], queue="video")
+    from postbridge.workers.video_batch_tasks import dispatch_video_batches
+    dispatch_video_batches(SESSION_LOCAL)
     from postbridge.workers.video_schedule_tasks import dispatch_video_agent_executions
     dispatch_video_agent_executions(SESSION_LOCAL)
     if not get_settings().video_studio_enabled:
@@ -30,7 +41,7 @@ def dispatch_video_jobs():
         now = datetime.now(UTC)
         # The database is the outbox. Broker failures leave jobs recoverable on the next tick.
         ids = session.scalars(select(VideoProductionJobOrm.id).where(
-            or_(VideoProductionJobOrm.status == "queued",
+            or_((VideoProductionJobOrm.status == "queued") & or_(VideoProductionJobOrm.lease_until.is_(None), VideoProductionJobOrm.lease_until < now),
                 (VideoProductionJobOrm.status == "running") & (VideoProductionJobOrm.lease_until < now))
         ).order_by(VideoProductionJobOrm.created_at).limit(20)).all()
     for job_id in ids:
@@ -56,7 +67,7 @@ def process_video_job(job_id: str):
         lease = job.lease_until
         if lease and lease.tzinfo is None:
             lease = lease.replace(tzinfo=UTC)
-        if job.status == "running" and lease and lease >= now:
+        if lease and lease >= now:
             return
         if job.attempts >= 3:
             job.status, job.stage, job.error_code = "failed", "failed", "VIDEO_ATTEMPT_LIMIT"
@@ -103,7 +114,7 @@ def process_video_job(job_id: str):
                         sources[asset_id] = path
             copy_sources(scenes)
             paid_engine = None
-            if options.get("mode") == "autopilot" or options.get("narration_enabled") or any(not s.get("asset_id") or s.get("regenerate_image") for s in scenes):
+            if options.get("mode") == "autopilot" or options.get("narration_enabled") or any(not s.get("asset_id") or s.get("regenerate_image") or s.get("regenerate_video") for s in scenes):
                 from postbridge.services.video_autopilot import VideoAutopilot
                 paid_engine = VideoAutopilot(SESSION_LOCAL, job_id, token)
                 if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
@@ -117,7 +128,7 @@ def process_video_job(job_id: str):
             if options.get("mode") == "autopilot":
                 scenes = paid_engine.produce(
                     brief=brief, options=options, input_scenes=scenes, directory=directory, on_stage=set_stage)
-            elif any(not s.get("asset_id") or s.get("regenerate_image") for s in scenes):
+            elif any(not s.get("asset_id") or s.get("regenerate_image") or s.get("regenerate_video") for s in scenes):
                 scenes = paid_engine.materialize(scenes, options=options, directory=directory, on_stage=set_stage)
             if options.get("narration_enabled"):
                 from postbridge.services.video_speech import produce_speech
@@ -172,6 +183,14 @@ def process_video_job(job_id: str):
                 job.completed_at = datetime.now(UTC)
                 session.commit()
                 uploaded_key = None
+    except WaitingForVideo:
+        with SESSION_LOCAL() as session:
+            job = session.scalar(select(VideoProductionJobOrm).where(VideoProductionJobOrm.id == job_id).with_for_update())
+            if job.status == "running" and job.lease_token == token:
+                job.status, job.stage = "queued", "generating_video"
+                job.attempts = max(0, job.attempts - 1)
+                job.lease_until = datetime.now(UTC) + timedelta(seconds=20)
+                session.commit()
     except InterruptedError:
         pass
     except Exception as exc:
@@ -194,3 +213,29 @@ def process_video_job(job_id: str):
                     delete_media_object(cleanup_key)
             except Exception:
                 logger.warning("Video temporary output cleanup deferred: %s", job_id)
+
+
+@celery_app.task(name="postbridge.video.settle_scenes", soft_time_limit=120, time_limit=150)
+def settle_video_scenes(job_id):
+    from postbridge.services.video_autopilot import VideoAutopilot
+    from postbridge.services.video_generation import settle_pending
+    token = str(uuid4())
+    with SESSION_LOCAL() as db:
+        job = db.scalar(select(VideoProductionJobOrm).where(VideoProductionJobOrm.id == job_id).with_for_update())
+        now = datetime.now(UTC)
+        lease = job.lease_until if job else None
+        if lease and lease.tzinfo is None:
+            lease = lease.replace(tzinfo=UTC)
+        if not job or job.status not in {"cancelled", "failed"} or lease and lease > now:
+            return
+        job.lease_token, job.lease_until = token, now + timedelta(seconds=180)
+        db.commit()
+    try:
+        settle_pending(VideoAutopilot(SESSION_LOCAL, job_id, token))
+    except Exception:
+        logger.warning("Video scene settlement deferred: %s", job_id)
+    finally:
+        with SESSION_LOCAL() as db:
+            db.execute(update(VideoProductionJobOrm).where(VideoProductionJobOrm.id == job_id,
+                VideoProductionJobOrm.lease_token == token).values(lease_until=datetime.now(UTC) + timedelta(minutes=5)))
+            db.commit()

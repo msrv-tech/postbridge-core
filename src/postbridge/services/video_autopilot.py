@@ -30,6 +30,8 @@ class PlannedScene(BaseModel):
     source_start_seconds: float | None = Field(default=None, ge=0, le=180)
     motion: str | None = Field(default=None, pattern=r"^(none|zoom_in|pan_left|pan_right)$")
     transition: str | None = Field(default=None, pattern=r"^(cut|fade)$")
+    generation_kind: str | None = Field(default=None, pattern=r"^(image|video)$")
+    regenerate_video: bool | None = None
 
 
 class MaterialAnalysis(BaseModel):
@@ -127,7 +129,7 @@ class VideoAutopilot:
     def save(self, *, financial=False):
         with self.factory() as session:
             job = session.scalar(select(VideoProductionJobOrm).where(VideoProductionJobOrm.id == self.job_id).with_for_update())
-            if job.lease_token != self.token or job.status not in ({"running", "cancelled"} if financial else {"running"}):
+            if job.lease_token != self.token or job.status not in ({"running", "cancelled", "failed"} if financial else {"running"}):
                 raise InterruptedError("Video job is cancelled or superseded")
             job.progress_json = json.loads(json.dumps(self.progress))
             session.commit()
@@ -269,6 +271,15 @@ class VideoAutopilot:
             instruction += (" Include narration_text for every scene: short natural speech in the requested language, "
                             "no more than two words per target second. Caption is a shorter on-screen heading. "
                             "Narration contains only spoken words, no acting instructions or markup.")
+        import math
+        max_generated_videos = math.ceil(options["duration_seconds"] / 8)
+        if options.get("generated_visuals") == "video":
+            instruction += (f" Missing visuals are moving AI video scenes: generation_kind=video. Generate at most {max_generated_videos} such scenes. "
+                "Each generated video scene is at most 8 seconds; distribute the requested total across the available scenes. "
+                "You may animate an uploaded IMAGE as its first frame with regenerate_video=true and an image_prompt describing motion. "
+                "Preserve uploaded demo VIDEO clips. Generated content must not invent readable interfaces or product facts.")
+        else:
+            instruction += " Set generation_kind=image for missing visuals. Do not request video generation or animate uploaded images."
         on_stage("storyboard")
         def parse_storyboard(body):
             text = body["choices"][0]["message"]["content"].strip()
@@ -280,6 +291,17 @@ class VideoAutopilot:
             if abs(sum(s.duration_seconds for s in plan.scenes) - options["duration_seconds"]) > 1:
                 raise video_error("VIDEO_AI_INVALID_STORYBOARD", "The storyboard did not match the requested duration")
             by_id = {m["asset_id"]: m for m in context}
+            generated_videos = 0
+            for scene in plan.scenes:
+                wants_video = scene.regenerate_video or not scene.asset_id and (scene.generation_kind == "video" or options.get("generated_visuals") == "video")
+                if wants_video:
+                    if options.get("generated_visuals") != "video" or scene.duration_seconds > 8:
+                        raise video_error("VIDEO_AI_INVALID_STORYBOARD", "The storyboard exceeded its authorized generation method")
+                    if scene.regenerate_video and (not scene.image_prompt or by_id.get(scene.asset_id, {}).get("kind") != "image"):
+                        raise video_error("VIDEO_AI_INVALID_STORYBOARD", "An animated first frame must be an uploaded image")
+                    generated_videos += 1
+            if generated_videos > max_generated_videos:
+                raise video_error("VIDEO_AI_INVALID_STORYBOARD", "The storyboard exceeded its video-scene budget")
             fit_clip_fragments(plan, by_id)
             return plan.model_dump(exclude_none=True)
         plan = self.paid_step("storyboard", "/v1/chat/completions", {
@@ -298,8 +320,13 @@ class VideoAutopilot:
         scenes = []
         for index, item in enumerate(items):
             asset_id = item.get("asset_id")
-            generated = not asset_id or item.get("regenerate_image")
-            if generated:
+            generated = not asset_id or item.get("regenerate_image") or item.get("regenerate_video")
+            video = bool(item.get("regenerate_video") or generated and (item.get("generation_kind") == "video" or options.get("generated_visuals") == "video"))
+            if generated and video:
+                from postbridge.services.video_generation import generate_scene
+                on_stage("generating_video")
+                asset_id = generate_scene(self, index=index, scene=item, options=options, directory=directory)
+            elif generated:
                 on_stage("generating_images")
                 generated_id = str(uuid5(NAMESPACE_URL, f"postbridge-video:{self.job_id}:image:{index}"))
                 def restore_image(generated_id=generated_id):
@@ -328,7 +355,7 @@ class VideoAutopilot:
                     "size": "1024x1536", "n": 1, "response_format": "b64_json"}, store_image,
                     restore=restore_image, artifact_id=generated_id)
                 asset_id = result["asset_id"]
-            scene = {k: v for k, v in item.items() if v is not None and k != "regenerate_image"}
+            scene = {k: v for k, v in item.items() if v is not None and k not in {"regenerate_image", "regenerate_video"}}
             if generated:
                 scene.pop("source_start_seconds", None)
                 scene["visual_description"] = item["image_prompt"]

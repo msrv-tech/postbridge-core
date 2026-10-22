@@ -165,7 +165,7 @@ def publication_view(session: Session, tenant_id: str, content_id: str):
             "error_code": target.error_code} for target in targets]}
 
 
-def approve_publication(session: Session, tenant_id: str, content_id: str, payload: ApproveVideoPublication):
+def approve_publication(session: Session, tenant_id: str, content_id: str, payload: ApproveVideoPublication, *, schedule_run_id=None):
     requested_tiktok = {str(key): value.model_dump(mode="json") for key, value in payload.tiktok_options.items()}
     # Refresh tokens before taking the post lock: rotation commits independently
     # of the immutable approval. Replays do not need a working provider API.
@@ -255,7 +255,7 @@ def approve_publication(session: Session, tenant_id: str, content_id: str, paylo
     session.get(PublicationPlanOrm, chain.publication_plan_id).timezone = payload.timezone
     timing = timing_value(payload)
     approval = VideoPublicationApprovalOrm(id=str(uuid4()), tenant_id=tenant_id, post_draft_id=receipt.id,
-        publication_plan_id=chain.publication_plan_id, snapshot=snapshot, initial_timing=timing,
+        publication_plan_id=chain.publication_plan_id, snapshot=snapshot, initial_timing=timing, auto_agent_run_id=schedule_run_id,
         schedule_version=1, schedule_history=[{**timing, "version": 1, "created_at": now.isoformat()}],
         deadline_at=(payload.publish_at or now) + DELIVERY_GRACE)
     session.add(approval)
@@ -273,6 +273,13 @@ def approved_payload(session, target, content, render, *, check_time=True):
         return None
     if not get_settings().video_publication_enabled:
         raise video_error("VIDEO_PUBLICATION_DISABLED", "Video publication is paused")
+    if approval.auto_agent_run_id:
+        from postbridge.models.domain import VideoAgentExecutionOrm
+        from postbridge.services.video_auto_publication import assert_policy
+        execution = session.get(VideoAgentExecutionOrm, approval.auto_agent_run_id)
+        if not execution:
+            raise video_error("VIDEO_AUTO_PUBLICATION_REVOKED", "The schedule consent is unavailable")
+        assert_policy(session, target.tenant_id, execution)
     if check_time:
         assert_window(approval, now_utc())
     receipt = session.get(VideoPostDraftOrm, approval.post_draft_id)

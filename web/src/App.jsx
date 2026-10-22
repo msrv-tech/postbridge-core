@@ -29,6 +29,7 @@ const Wizard = lazy(() => import('./pages/Wizard'))
 const AddChannel = lazy(() => import('./pages/AddChannel'))
 const EditChannel = lazy(() => import('./pages/EditChannel'))
 const JobDetail = lazy(() => import('./pages/JobDetail'))
+const VideoCampaigns = lazy(() => import('./pages/VideoCampaigns'))
 const VideoStudio = lazy(() => import('./pages/VideoStudio'))
 const PostsList = lazy(() => import('./pages/PostsList'))
 const PostEditor = lazy(() => import('./pages/PostEditor'))
@@ -283,6 +284,7 @@ export default function App() {
             </ProtectedRoute>
           } />
           <Route path="/workspaces/:workspaceId/content/videos" element={<ProtectedRoute><VideoStudio /></ProtectedRoute>} />
+          <Route path="/workspaces/:workspaceId/content/video-campaigns" element={<ProtectedRoute><VideoCampaigns /></ProtectedRoute>} />
           <Route path="/workspaces/:workspaceId/content/videos/:projectId" element={<ProtectedRoute><VideoStudio /></ProtectedRoute>} />
           <Route path="/workspaces/:workspaceId/content/new" element={
             <ProtectedRoute>

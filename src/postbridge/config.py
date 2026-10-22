@@ -149,6 +149,8 @@ class Settings:
     video_ai_selfhost_budget_units: int = 0
     video_speech_enabled: bool = False
     video_speech_model: str = "gemini-2.5-flash-tts"
+    video_generation_enabled: bool = False
+    video_generation_model: str = "veo-3.1-fast-generate-001"
 
 
 def _to_bool(value: str | None, default: bool = False) -> bool:
@@ -309,6 +311,8 @@ def get_settings() -> Settings:
         video_ai_selfhost_budget_units=int(os.getenv("VIDEO_AI_SELFHOST_BUDGET_UNITS", "0")),
         video_speech_enabled=_to_bool(os.getenv("VIDEO_SPEECH_ENABLED")),
         video_speech_model=os.getenv("VIDEO_SPEECH_MODEL", "gemini-2.5-flash-tts").strip(),
+        video_generation_enabled=_to_bool(os.getenv("VIDEO_GENERATION_ENABLED")),
+        video_generation_model=os.getenv("VIDEO_GENERATION_MODEL", "veo-3.1-fast-generate-001").strip(),
         core_service_token=_strip_optional_env(os.getenv("CORE_SERVICE_TOKEN")),
         status_event_outbox_batch_size=int(
             os.getenv("STATUS_EVENT_OUTBOX_BATCH_SIZE", "100")

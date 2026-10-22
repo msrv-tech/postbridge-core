@@ -19,6 +19,7 @@ from postbridge.services.video_publication import reconcile_target
 from postbridge.services.video_delivery_time import RescheduleVideoPublication, reschedule_publication
 from postbridge.services.video_speech import VoiceVariantRequest, create_voice_variant
 from postbridge.services.video_library import MaterialUpdate, list_materials, update_material
+from postbridge.services import video_batches as batches
 
 
 def selfhost_tenant(request: Request, session: Session = Depends(get_db_session)) -> str:
@@ -59,6 +60,25 @@ def build_router(prefix, tenant_dependency):
                session: Session = Depends(get_db_session)):
         return service.create_project(session, tenant_id, payload)
 
+    from postbridge.services import video_auto_publication as automatic
+
+    @router.get("/schedule-bridges")
+    def schedule_bridges(channel_id: UUID, tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
+        return automatic.schedule_bridges(session, tenant_id, str(channel_id))
+
+    @router.post("/schedules/runs/{run_id}/auto-posts")
+    def auto_posts(run_id: UUID, tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
+        return automatic.prepare_auto_posts(session, tenant_id, str(run_id))
+
+    @router.get("/schedules/runs/{run_id}/posts/{content_id}/approval")
+    def auto_approval(run_id: UUID, content_id: UUID, tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
+        return automatic.auto_approval(session, tenant_id, str(run_id), str(content_id)).model_dump(mode="json")
+
+    @router.post("/schedules/runs/{run_id}/posts/{content_id}/approve")
+    def auto_approve(run_id: UUID, content_id: UUID, payload: ApproveVideoPublication,
+                     tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
+        return automatic.approve_auto_post(session, tenant_id, str(run_id), str(content_id), payload)
+
     @router.get("/materials")
     def materials(folder: str | None = Query(None, max_length=120), search: str = Query("", max_length=180),
                   limit: int = Query(20, ge=1, le=50), offset: int = Query(0, ge=0),
@@ -88,6 +108,36 @@ def build_router(prefix, tenant_dependency):
     @router.get("/by-request/{request_key}")
     def by_request(request_key: str, tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
         return service.project_by_request(session, tenant_id, request_key)
+
+    @router.get("/batches")
+    def list_batches(project_id: UUID | None = None, limit: int = Query(20, ge=1, le=50),
+                     tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
+        return batches.list_batches(session, tenant_id, project_id=str(project_id) if project_id else None, limit=limit)
+
+    from postbridge.services.video_metrics import VideoMetricsRequest, read_video_metrics
+
+    @router.post("/publication-metrics")
+    def publication_metrics(payload: VideoMetricsRequest, tenant_id: str = Depends(tenant_dependency),
+                            session: Session = Depends(get_db_session)):
+        return read_video_metrics(session, tenant_id, payload)
+
+    @router.post("/batches", status_code=201)
+    def create_batch(payload: batches.ProjectBatchCreate, tenant_id: str = Depends(tenant_dependency),
+                     session: Session = Depends(get_db_session)):
+        return batches.create_project_batch(session, tenant_id, payload)
+
+    @router.get("/batches/{batch_id}")
+    def get_batch(batch_id: UUID, tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
+        return batches.get_batch(session, tenant_id, str(batch_id))
+
+    @router.post("/batches/{batch_id}/cancel")
+    def cancel_batch(batch_id: UUID, tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
+        return batches.cancel_batch(session, tenant_id, str(batch_id))
+
+    @router.post("/{project_id}/voice-batches", status_code=201)
+    def create_voice_batch(project_id: UUID, payload: batches.VoiceBatchCreate,
+                           tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
+        return batches.create_voice_batch(session, tenant_id, str(project_id), payload)
 
     @router.get("/posts/{content_id}/publication")
     def publication(content_id: UUID, tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):

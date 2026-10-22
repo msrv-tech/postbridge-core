@@ -32,7 +32,7 @@ class VoiceVariantRequest(BaseModel):
     billing_budget_units: int = Field(default=0, ge=0, le=100_000_000)
 
 
-def create_voice_variant(session, tenant_id: str, project_id: str, payload: VoiceVariantRequest):
+def create_voice_variant(session, tenant_id: str, project_id: str, payload: VoiceVariantRequest, *, commit=True):
     from postbridge.services.video_studio import (_project, _add_revision, VideoCreate, VideoScene, capabilities,
         project_by_request, require_enabled)
     require_enabled()
@@ -59,7 +59,7 @@ def create_voice_variant(session, tenant_id: str, project_id: str, payload: Voic
         raise video_error("VIDEO_NOT_READY", "Choose a completed video version")
     source_language = (source.production_options or {}).get("language", "ru")
     # Assets and text come from the immutable selected revision, not client URLs.
-    scenes = [{key: value for key, value in scene.items() if key in VideoScene.model_fields and key not in {"speech_asset_id", "regenerate_image"}}
+    scenes = [{key: value for key, value in scene.items() if key in VideoScene.model_fields and key not in {"speech_asset_id", "regenerate_image", "regenerate_video"}}
               for scene in (job.progress_json or {}).get("scenes", source.scenes)]
     project.current_version += 1
     from datetime import UTC, datetime
@@ -75,7 +75,7 @@ def create_voice_variant(session, tenant_id: str, project_id: str, payload: Voic
     revision.production_options = {**revision.production_options, "source_version": source.version,
         "visual_revision_id": (source.production_options or {}).get("visual_revision_id", source.id),
         "translate_from": source_language if source_language != payload.language else None, "variant_request": public}
-    session.commit()
+    session.commit() if commit else session.flush()
     return project_by_request(session, tenant_id, payload.request_key)
 
 

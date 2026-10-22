@@ -93,7 +93,7 @@ def test_clip_trim_produces_the_selected_frames_and_rejects_out_of_bounds(state)
     output = tmp / 'selected.mp4'
     copy_media_object_to_file(session.get(MediaAssetOrm, current['output_asset_id']).object_key, output)
     pixel = subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-ss', '0.5', '-i', str(output),
-        '-vf', 'crop=2:2:360:640,scale=1:1', '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-threads', '1', 'pipe:1'],
+        '-vf', 'crop=2:2:(iw-2)/2:(ih-2)/2,scale=1:1', '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-threads', '1', 'pipe:1'],
         check=True, capture_output=True, timeout=30).stdout
     assert pixel[2] > 200 and pixel[0] < 30  # The chosen fragment is blue, never the red opening.
     import wave

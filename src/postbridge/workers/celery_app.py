@@ -26,6 +26,7 @@ def create_celery_app() -> Celery:
             "postbridge.workers.media_generation_tasks",
             "postbridge.workers.video_tasks",
             "postbridge.workers.video_schedule_tasks",
+            "postbridge.workers.video_batch_tasks",
             "postbridge.workers.video_publication_tasks",
         ],
     )

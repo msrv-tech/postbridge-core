@@ -30,7 +30,7 @@ function isSafeWorkspaceRoute(workspaceId, route) {
 }
 
 function pageFromPath(pathname) {
-  if (pathname.includes('/content/videos') || pathname.includes('/agents/videos')) return 'video'
+  if (pathname.includes('/content/videos') || pathname.includes('/agents/videos') || pathname.includes('/content/video-campaigns')) return 'video'
   if (pathname.includes('/channels')) return 'channels'
   if (pathname.includes('/content')) return 'content'
   if (pathname.includes('/agents/')) return 'agents'
@@ -93,7 +93,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
   const widgetRef = useRef(null)
   const requestRef = useRef(null)
   const [hidden, setHidden] = useState(() => isSupportAssistantHidden(workspaceId))
-  const [collapsed, setCollapsed] = useState(() => location.pathname.includes('/videos'))
+  const [collapsed, setCollapsed] = useState(() => location.pathname.includes('/videos') || location.pathname.includes('/content/video-campaigns'))
   const [position, setPosition] = useState(() => readPosition(workspaceId))
   const [drag, setDrag] = useState(null)
   const [question, setQuestion] = useState('')

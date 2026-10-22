@@ -32,3 +32,11 @@
 .video-library input, .video-studio input[type=search] { box-sizing: border-box; max-width: 100%; padding: .6rem; font: inherit; border: 1px solid var(--border, #cbd5e1); border-radius: .5rem; color: inherit; background: transparent; }
 .video-scene-advanced { border-top: 1px solid var(--border, #cbd5e1); margin-top: .75rem; }
 .support-assistant-video-card { border: 1px solid var(--border, #cbd5e1); padding: .7rem; border-radius: .5rem; margin: .7rem 0; overflow-wrap: anywhere; }
+
+.video-studio fieldset { min-width: 0; border: 1px solid var(--border, #334155); border-radius: .7rem; margin: 1rem 0; padding: 1rem; }
+.video-studio input:not([type]), .video-studio input[type=url], .video-studio input[readonly] { box-sizing: border-box; width: 100%; padding: .75rem; font: inherit; border: 1px solid var(--border, #334155); border-radius: .6rem; color: inherit; background: var(--surface, #162033); }
+.video-funnel { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: .75rem; margin: 1.25rem 0; }
+.video-funnel strong, .video-funnel span { display: block; }
+.video-funnel strong { font-size: 1.35rem; }
+.video-funnel span { font-size: .85rem; opacity: .75; }
+.video-campaigns code { overflow-wrap: anywhere; }

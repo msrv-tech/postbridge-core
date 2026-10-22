@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { isAuthenticated } from './adapters/sessionToken'
+import { captureVideoAttribution, claimVideoAttribution } from './videoAttribution'
 import { loadCurrentUser } from './adapters/auth'
+
+captureVideoAttribution()
 
 export function useAuth() {
   const [user, setUser] = useState(null);
@@ -14,6 +17,7 @@ export function useAuth() {
     return loadCurrentUser()
       .then((data) => {
         setUser(data);
+        if (data) claimVideoAttribution();
         return data;
       })
       .catch(() => {
