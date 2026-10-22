@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, Navigate, useLocation } from 'react-router-dom'
 import { BILLING_SUPPORT_EMAIL } from '../billingSupport'
 import { getPublicMarket } from '../branding'
+import { isSelfhostMode } from '../adapters/runtime'
 import PublicLayout from '../components/PublicLayout'
 import { useI18n } from '../i18n'
 
@@ -138,10 +139,11 @@ export default function LegalPage() {
   const { pathname } = useLocation()
   const { t } = useI18n()
   const isRu = getPublicMarket() === 'ru'
+  const useServerDocument = isRu || !isSelfhostMode()
   const [remoteState, setRemoteState] = useState(null)
 
   useEffect(() => {
-    if (!isRu || !ioDocuments[pathname]) return undefined
+    if (!useServerDocument || !ioDocuments[pathname]) return undefined
     const controller = new AbortController()
     fetch(`/api/legal-documents/${pathname.slice(1)}`, {
       headers: { Accept: 'application/json' },
@@ -151,7 +153,7 @@ export default function LegalPage() {
       .then(async (response) => {
         if (!response.ok) throw new Error('Legal document unavailable')
         const data = await response.json()
-        if (data.lang !== 'ru' || !Array.isArray(data.sections)) {
+        if (!['ru', 'en'].includes(data.lang) || !Array.isArray(data.sections)) {
           throw new Error('Unexpected legal document')
         }
         setRemoteState({ pathname, document: data, error: false })
@@ -162,11 +164,11 @@ export default function LegalPage() {
         }
       })
     return () => controller.abort()
-  }, [isRu, pathname])
+  }, [isRu, useServerDocument, pathname])
 
   if (!ioDocuments[pathname]) return <Navigate to="/" replace />
   const currentState = remoteState?.pathname === pathname ? remoteState : null
-  const legalDocument = isRu ? currentState?.document : ioDocuments[pathname]
+  const legalDocument = useServerDocument ? currentState?.document : ioDocuments[pathname]
   if (!legalDocument) {
     return (
       <PublicLayout>
