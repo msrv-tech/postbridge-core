@@ -123,12 +123,16 @@ for candidate in core-video-worker video-worker; do
 done
 
 echo "Building Core images..."
+build_options=()
+if [[ -n "${POSTBRIDGE_DEBIAN_MIRROR:-}" ]]; then
+  build_options+=(--build-arg "POSTBRIDGE_DEBIAN_MIRROR=$POSTBRIDGE_DEBIAN_MIRROR")
+fi
 if [[ "${POSTBRIDGE_DEPLOY_SERIAL_BUILD:-0}" == "1" ]]; then
   for service in "${build_services[@]}"; do
-    compose build "$service"
+    compose build "${build_options[@]}" "$service"
   done
 else
-  compose build "${build_services[@]}"
+  compose build "${build_options[@]}" "${build_services[@]}"
 fi
 
 echo "Running migrations..."

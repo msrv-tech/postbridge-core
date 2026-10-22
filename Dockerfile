@@ -22,7 +22,7 @@ ENV VITE_POSTBRIDGE_DISABLED_PLATFORMS=${VITE_POSTBRIDGE_DISABLED_PLATFORMS}
 ENV VITE_POSTBRIDGE_PUBLIC_BASE_URL=${VITE_POSTBRIDGE_PUBLIC_BASE_URL}
 RUN npm run build
 
-FROM python:3.14-slim
+FROM python:3.14-slim AS runtime-base
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -33,12 +33,20 @@ ENV POSTBRIDGE_CONTAINER_IMAGE=${POSTBRIDGE_CONTAINER_IMAGE}
 
 WORKDIR /app
 
+ARG POSTBRIDGE_DEBIAN_MIRROR=
+RUN if [ -n "$POSTBRIDGE_DEBIAN_MIRROR" ]; then \
+      sed -i "s|http://deb.debian.org|${POSTBRIDGE_DEBIAN_MIRROR%/}|g" /etc/apt/sources.list.d/debian.sources; \
+    fi \
+    && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM runtime-base AS runtime
+
 COPY pyproject.toml README.md alembic.ini /app/
 COPY src /app/src
 COPY alembic /app/alembic
 COPY --from=web-build /web/dist /app/web/dist
-
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core tzdata && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir .
 
