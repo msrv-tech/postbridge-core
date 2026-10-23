@@ -54,6 +54,9 @@ jobs:
       - name: Test analytics consent
         run: npm --prefix web run test:consent
 
+      - name: Test video budget preview
+        run: npm --prefix web run test:video-budget
+
       - name: Install Playwright browser
         run: npm --prefix web exec playwright install --with-deps chromium
 

@@ -17,10 +17,10 @@ class WaitingForVideo(Exception):
     """Yield the production worker while a known asynchronous operation runs."""
 
 
-def gateway_video(method, path, payload=None):
+def gateway_video(method, path, payload=None, *, timeout=75):
     settings = get_settings()
     headers = {"Authorization": f"Bearer {settings.ai_gateway_api_key}"}
-    with httpx.Client(timeout=75) as client:
+    with httpx.Client(timeout=timeout) as client:
         with client.stream(method, join_openai_compatible_path(settings.ai_gateway_base_url, path),
                            headers=headers, json=payload) as response:
             response.raise_for_status()
@@ -33,6 +33,28 @@ def gateway_video(method, path, payload=None):
     if not isinstance(body, dict):
         raise ValueError("Invalid video gateway response")
     return body
+
+
+def generation_price():
+    """Read the funded payer's quote; Postbridge never sets video coefficients."""
+    from postbridge.services.video_studio import capabilities
+    if not capabilities()["video_generation_enabled"]:
+        raise video_error("VIDEO_GENERATION_UNAVAILABLE", "AI video generation is not configured")
+    settings = get_settings()
+    try:
+        catalog = gateway_video("GET", "/v1/videos/models", timeout=10)
+        model = next(m for m in catalog["models"] if m["id"] == settings.video_generation_model)
+        quote = next(q for q in model["quotes"] if q["duration_seconds"] == 8)
+        units = quote["billing_units"]
+        resolution = model["resolution"]
+        expected_resolution = "720p" if settings.video_generation_model.endswith(":720p") else "1080p"
+        if (catalog.get("enabled") is not True or resolution != expected_resolution or isinstance(units, bool)
+                or not isinstance(units, int) or not 0 < units <= 100_000_000):
+            raise ValueError("Invalid gateway quote")
+    except (httpx.HTTPError, KeyError, TypeError, ValueError, StopIteration) as exc:
+        raise video_error("VIDEO_PRICING_UNAVAILABLE", "The video price is temporarily unavailable") from exc
+    return {"source": "gitsell", "model": model["id"], "duration_seconds": 8,
+        "units_per_scene": units, "resolution": resolution}
 
 
 def _lookup(step):

@@ -10,6 +10,7 @@
     "screenshots:readme": "node scripts/capture-readme-screenshots.mjs",
     "check:i18n": "node scripts/check-i18n-boundaries.mjs",
     "test:consent": "node --test scripts/test-analytics-consent.mjs",
+    "test:video-budget": "node --test scripts/test-video-budget.mjs",
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:e2e:saas": "playwright test -c playwright.saas.config.js",

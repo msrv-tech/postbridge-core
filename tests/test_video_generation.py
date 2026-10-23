@@ -109,3 +109,42 @@ def test_disabled_video_model_rejects_scene_before_production(auto):
     with error("VIDEO_GENERATION_UNAVAILABLE"):
         create_project(db, tenant, VideoCreate(brief="A scene", request_key=str(uuid4()),
             scenes=[{"generation_kind": "video", "image_prompt": "Abstract animation", "duration_seconds": 4}]))
+
+
+def test_generation_price_forwards_the_funded_gateway_quote_without_conversion(auto, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from postbridge.api.video_studio import build_router
+    monkeypatch.setenv("VIDEO_GENERATION_ENABLED", "1")
+    seen = []
+    def gateway(method, path, payload=None, **kwargs):
+        seen.append((method, path, payload, kwargs))
+        return {"enabled": True, "models": [{"id": "other", "quotes": []},
+            {"id": "veo-3.1-fast-generate-001", "resolution": "1080p",
+             "billing_units_per_second": 9999999, "quotes": [{"duration_seconds": 8, "billing_units": 321071}]}]}
+    monkeypatch.setattr(video_generation, "gateway_video", gateway)
+    app = FastAPI()
+    app.include_router(build_router("/test/videos", lambda: auto[1]))
+    with TestClient(app) as client:
+        response = client.get("/test/videos/generation-price")
+    assert response.status_code == 200
+    assert response.json() == {"source": "gitsell", "model": "veo-3.1-fast-generate-001",
+        "resolution": "1080p", "duration_seconds": 8, "units_per_scene": 321071}
+    assert seen == [("GET", "/v1/videos/models", None, {"timeout": 10})]
+
+
+@pytest.mark.parametrize("units", [None, True, 0, -1, "321071", 321071.5, 100000001])
+def test_generation_price_rejects_missing_or_invalid_quote(auto, monkeypatch, units):
+    monkeypatch.setenv("VIDEO_GENERATION_ENABLED", "1")
+    monkeypatch.setattr(video_generation, "gateway_video", lambda *a, **kw: {"enabled": True, "models": [
+        {"id": "veo-3.1-fast-generate-001", "quotes": [{"duration_seconds": 8, "billing_units": units}]}]})
+    with error("VIDEO_PRICING_UNAVAILABLE"):
+        video_generation.generation_price()
+
+
+def test_generation_price_has_no_legacy_multiplier_fallback(auto, monkeypatch):
+    monkeypatch.setenv("VIDEO_GENERATION_ENABLED", "1")
+    monkeypatch.setattr(video_generation, "gateway_video", lambda *a, **kw: {"enabled": True, "models": [
+        {"id": "veo-3.1-fast-generate-001", "billing_units_per_second": 166666}]})
+    with error("VIDEO_PRICING_UNAVAILABLE"):
+        video_generation.generation_price()

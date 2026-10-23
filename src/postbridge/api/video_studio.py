@@ -40,6 +40,11 @@ def build_router(prefix, tenant_dependency):
     def capabilities(tenant_id: str = Depends(tenant_dependency)):
         return service.capabilities()
 
+    @router.get("/generation-price")
+    def generation_price(tenant_id: str = Depends(tenant_dependency)):
+        from postbridge.services.video_generation import generation_price
+        return generation_price()
+
     @router.get("/tiktok/channels/{channel_id}/creator-info")
     def tiktok_creator_info(channel_id: UUID, tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
         from postbridge.services.tiktok import get_creator_info
