@@ -147,6 +147,7 @@ class Settings:
     tiktok_direct_post_audited: bool = False
     video_ai_enabled: bool = False
     video_ai_selfhost_budget_units: int = 0
+    video_image_model: str = "gemini-2.5-flash-image"
     video_speech_enabled: bool = False
     video_speech_model: str = "gemini-2.5-flash-tts"
     video_generation_enabled: bool = False
@@ -309,6 +310,7 @@ def get_settings() -> Settings:
         tiktok_direct_post_audited=_to_bool(os.getenv("TIKTOK_DIRECT_POST_AUDITED")),
         video_ai_enabled=_to_bool(os.getenv("VIDEO_AI_ENABLED")),
         video_ai_selfhost_budget_units=int(os.getenv("VIDEO_AI_SELFHOST_BUDGET_UNITS", "0")),
+        video_image_model=os.getenv("VIDEO_IMAGE_MODEL", "gemini-2.5-flash-image").strip(),
         video_speech_enabled=_to_bool(os.getenv("VIDEO_SPEECH_ENABLED")),
         video_speech_model=os.getenv("VIDEO_SPEECH_MODEL", "gemini-2.5-flash-tts").strip(),
         video_generation_enabled=_to_bool(os.getenv("VIDEO_GENERATION_ENABLED")),

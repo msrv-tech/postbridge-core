@@ -19,7 +19,7 @@ The root Compose `video` profile provides a dedicated worker and beat for local 
 | `VIDEO_AI_ENABLED=1` | Core API and video worker; enables paid storyboard and image generation when dependencies are configured |
 | `AI_GATEWAY_BASE_URL`, `AI_GATEWAY_API_KEY` | Existing funded gateway connection; users do not supply separate provider credentials |
 | `AI_GATEWAY_DEFAULT_MODEL` | Multimodal model supporting image input and structured JSON for analysis/storyboards |
-| `AI_IMAGE_GENERATION_MODEL` | Image model supporting inline `b64_json` responses through `/v1/images/generations` |
+| `VIDEO_IMAGE_MODEL` | Video-studio illustration model, default `gemini-2.5-flash-image`, currently the only model supported by the bounded image endpoint. Independent of the general `AI_IMAGE_GENERATION_MODEL` |
 | `VIDEO_SPEECH_ENABLED=1` | Core API and video worker; opt-in Google narration and language/voice variants, disabled by default |
 | `VIDEO_SPEECH_MODEL` | Currently only `gemini-2.5-flash-tts`; the funded gateway must expose the JSON `/v1/audio/generations` contract |
 | `POSTBRIDGE_APP_MODE=saas` | Hosted Core API and workers; every paid step requires a SaaS reservation grant |

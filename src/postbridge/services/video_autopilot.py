@@ -366,7 +366,7 @@ class VideoAutopilot:
                         material = store_video_material(session, self.tenant_id, path, asset_id=generated_id)
                         return {"asset_id": material["media_asset_id"]}
                 result = self.paid_step(f"image:{index}", "/v1/images/generations", {
-                    "model": settings.ai_image_generation_model, "prompt": (
+                    "model": settings.video_image_model, "prompt": (
                         "Create one vertical 9:16 illustrative scene. No text, no readable UI, no logos, no watermark. "
                         + item["image_prompt"] + "\nStyle: " + options["style"]),
                     "size": "1024x1536", "n": 1, "response_format": "b64_json"}, store_image,

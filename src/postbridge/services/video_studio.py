@@ -89,7 +89,7 @@ def capabilities() -> dict:
                      and (settings.postbridge_app_mode == "saas"
                      and settings.saas_base_url and settings.status_event_webhook_token
                      or settings.postbridge_app_mode == "selfhost" and settings.video_ai_selfhost_budget_units > 0))
-    autopilot = bool(funded and settings.ai_image_generation_model)
+    autopilot = bool(funded and settings.video_image_model == "gemini-2.5-flash-image")
     return {"enabled": settings.video_studio_enabled, "generated_media": autopilot, "autopilot_enabled": autopilot,
             "speech_enabled": bool(funded and settings.video_speech_enabled and settings.video_speech_model == "gemini-2.5-flash-tts"),
             "video_generation_enabled": bool(funded and settings.video_generation_enabled and settings.video_generation_model in {

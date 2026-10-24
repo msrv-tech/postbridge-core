@@ -64,9 +64,21 @@ def test_autopilot_without_uploads_creates_images_and_real_mp4(auto, monkeypatch
     assert len(result["current"]["scenes"]) == 2
     assert all(s["url"].endswith(".png") for s in result["current"]["scenes"])
     assert len(calls) == 3
+    assert all(body["model"] == "gemini-2.5-flash-image" for path, body, _ in calls if path.endswith("images/generations"))
     video_tasks.process_video_job.run(project["current"]["job_id"])
     assert len(calls) == 3
     assert project_by_request(session, tenant, body.request_key)["requested_revision"]["usage"]["tokens_charged"] == 50
+
+
+def test_unsupported_studio_image_model_rejects_before_paid_storyboard(auto, monkeypatch):
+    from postbridge.domain.errors import ValidationError
+    session, tenant, _, _, _ = auto
+    monkeypatch.setenv("VIDEO_IMAGE_MODEL", "gpt-image-2")
+    calls = mock_gateway(monkeypatch)
+    with pytest.raises(ValidationError) as rejected:
+        create_project(session, tenant, request())
+    assert rejected.value.code == "VIDEO_AUTOPILOT_UNAVAILABLE"
+    assert calls == []
 
 
 def test_uploaded_materials_are_reused_without_paid_image_generation(auto, monkeypatch):
