@@ -158,17 +158,22 @@ def project_payload(session: Session, project: VideoProjectOrm) -> dict:
         asset = session.get(MediaAssetOrm, job.output_asset_id) if job and job.output_asset_id else None
         public_scenes = []
         progress = (job.progress_json or {}) if job else {}
-        effective_scenes = progress.get("scenes", revision.scenes)
         planned = progress.get("steps", {}).get("storyboard", {}).get("result", {}).get("scenes", [])
-        if planned and not progress.get("scenes"):
-            available = []
-            for index, scene in enumerate(planned):
-                image_step = progress.get("steps", {}).get(f"image:{index}", {})
-                source_id = scene.get("asset_id") or image_step.get("result", {}).get("asset_id") or image_step.get("artifact_id")
-                source = session.get(MediaAssetOrm, source_id) if source_id else None
-                if source and source.tenant_id == project.tenant_id:
-                    available.append({"asset_id": source.id, "caption": scene["caption"], "duration_seconds": scene["duration_seconds"]})
-            effective_scenes = available or revision.scenes
+        # The original manifest remains immutable. Expose verified checkpoints so
+        # a failed neighbour does not make the user repay a completed visual.
+        effective_scenes = [dict(scene) for scene in (progress.get("scenes") or planned or revision.scenes)]
+        for index, scene in enumerate(effective_scenes):
+            steps = progress.get("steps", {})
+            native_step = steps.get(f"video:{index}", {})
+            image_step = steps.get(f"image:{index}", {})
+            completed = native_step if native_step.get("state") == "done" else image_step
+            source_id = completed.get("result", {}).get("asset_id") if completed.get("state") == "done" else None
+            source = session.get(MediaAssetOrm, source_id) if source_id else None
+            if source and source.tenant_id == project.tenant_id:
+                scene["asset_id"] = source.id
+                scene.pop("regenerate_video", None)
+                scene.pop("regenerate_image", None)
+                scene.pop("source_start_seconds", None)
         for index, scene in enumerate(effective_scenes):
             source = session.get(MediaAssetOrm, scene["asset_id"]) if scene.get("asset_id") else None
             speech_asset = session.get(MediaAssetOrm, scene["speech_asset_id"]) if scene.get("speech_asset_id") else None

@@ -1,6 +1,7 @@
 """Video templates and durable occurrences on the existing agent scheduler."""
 from datetime import UTC, datetime
 import json
+import hashlib
 from uuid import NAMESPACE_URL, uuid4, uuid5
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -29,6 +30,24 @@ class VideoTaskConfig(BaseModel):
     max_units_per_month: int | None = Field(default=None, ge=1, le=100_000_000)
     notify: bool = True
     auto_publication: AutoPublicationPolicy | None = None
+    material_folder: str | None = Field(default=None, max_length=120)
+    material_limit: int = Field(default=6, ge=1, le=8)
+
+
+class VideoScheduleEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    goal_text: str = Field(min_length=1, max_length=4000)
+    schedule_cron: str | None = Field(default=None, max_length=128)
+    timezone: str = Field(min_length=1, max_length=64)
+    task_config: dict
+    created_by: str = Field(min_length=1, max_length=128)
+
+
+def schedule_payload(task):
+    return {key: getattr(task, key) for key in ("id", "channel_id", "mode", "status", "goal_text",
+        "schedule_cron", "timezone", "next_run_at", "last_run_at", "created_by")} | {
+        "task_config": json.loads(task.task_config_json), "template_hash": template_hash(task)}
 
 
 def utc(value):
@@ -38,6 +57,12 @@ def utc(value):
 def validate_template(config, goal_text):
     try:
         value = VideoTaskConfig.model_validate(config)
+        if value.material_folder is not None and (value.video.mode != "autopilot" or value.video.scenes):
+            raise ValueError("A dynamic folder requires autopilot without fixed materials")
+        if value.auto_publication and value.auto_publication.language_bridge_ids:
+            languages = {value.video.language, *(v.language for v in value.variants)}
+            if not languages.issubset(value.auto_publication.language_bridge_ids):
+                raise ValueError("Choose destinations for every generated language")
         if value.video.billing_reservation_id or value.video.billing_budget_units or value.video.brief != goal_text:
             raise ValueError("Template contains internal billing data or a different task")
         if value.video.mode == "manual" and not value.video.scenes:
@@ -98,6 +123,61 @@ def create_video_agent_task(session, *, tenant_id, channel_id, goal_text, schedu
     return row
 
 
+def template_hash(task):
+    values = {key: getattr(task, key) for key in ("channel_id", "goal_text", "schedule_cron", "timezone", "status")}
+    values["config"] = json.loads(task.task_config_json or "{}")
+    return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
+
+
+def update_video_agent_task(session, *, tenant_id, task_id, expected_hash, goal_text,
+                            schedule_cron, timezone, task_config, created_by):
+    require_enabled()
+    task = session.scalar(select(AgentTaskOrm).where(AgentTaskOrm.id == task_id,
+        AgentTaskOrm.tenant_id == tenant_id).with_for_update().execution_options(populate_existing=True))
+    if not task or task.mode != "video_autopilot" or task.status == "archived":
+        raise video_error("VIDEO_SCHEDULE_NOT_FOUND", "Video task not found")
+    if task.created_by != created_by:
+        raise video_error("VIDEO_SCHEDULE_ACTOR_REVOKED", "Only the schedule owner can edit its template")
+    config = validate_template(task_config, goal_text)
+    canonical = config.model_dump()
+    same = (task.goal_text == goal_text and task.schedule_cron == schedule_cron
+        and task.timezone == timezone and json.loads(task.task_config_json) == canonical)
+    if same:
+        return task  # Lost acknowledgement of this exact edit.
+    if template_hash(task) != expected_hash:
+        raise video_error("VIDEO_VERSION_CONFLICT", "This schedule changed; reload before editing")
+    # Reuse creation validation without creating a second schedule or changing its owner.
+    from croniter import croniter
+    try:
+        ZoneInfo(timezone)
+        if schedule_cron and (len(schedule_cron.split()) != 5 or not croniter.is_valid(schedule_cron)):
+            raise ValueError("Invalid cron")
+        next_run = next_run_at_from_cron(schedule_cron, timezone=timezone)
+    except (ValueError, KeyError, ZoneInfoNotFoundError) as exc:
+        raise video_error("VIDEO_SCHEDULE_INVALID", "Choose a valid schedule and timezone") from exc
+    _check_assets(session, tenant_id, [s.model_dump() for s in config.video.scenes])
+    task.goal_text, task.schedule_cron, task.timezone = goal_text, schedule_cron, timezone
+    task.task_config_json = json.dumps(canonical)
+    task.next_run_at = next_run if task.status == "active" else None
+    session.flush()
+    if config.auto_publication:
+        from postbridge.services.video_auto_publication import schedule_bridges
+        available = {b['id']: b for b in schedule_bridges(session, tenant_id, task.channel_id)['items']}
+        if any(key not in available or available[key]['settings_hash'] != config.auto_publication.expected_bridges[key]
+               for key in config.auto_publication.bridge_ids):
+            raise video_error('VIDEO_BRIDGE_CHANGED', 'Review automatic publication after changing a bridge')
+    return task
+
+
+def folder_scenes(session, tenant_id, config):
+    from postbridge.models.domain import MediaAssetOrm, VideoMaterialOrm
+    assets = session.scalars(select(MediaAssetOrm).join(VideoMaterialOrm,
+        VideoMaterialOrm.asset_id == MediaAssetOrm.id).where(VideoMaterialOrm.tenant_id == tenant_id,
+        MediaAssetOrm.tenant_id == tenant_id, VideoMaterialOrm.folder == config.material_folder)
+        .order_by(MediaAssetOrm.created_at.desc(), MediaAssetOrm.id.asc()).limit(config.material_limit)).all()
+    return [{"asset_id": asset.id, "duration_seconds": 5, "caption": ""} for asset in assets]
+
+
 def enqueue_video_agent_run(session, *, tenant_id, task_id, occurrence_key=None, scheduled=False, now=None):
     if not get_settings().video_studio_enabled and scheduled:
         return None
@@ -126,12 +206,17 @@ def enqueue_video_agent_run(session, *, tenant_id, task_id, occurrence_key=None,
     session.add(run)
     session.flush()
     production = config.video.model_dump(exclude={"billing_reservation_id", "billing_budget_units"})
+    if config.material_folder is not None:
+        production["scenes"] = folder_scenes(session, tenant_id, config)
+        if not production["scenes"] and not active:
+            run.status, run.error_code, run.completed_at = "failed", "VIDEO_FOLDER_EMPTY", now
     production["request_key"] = f"agent-video:{run_id}"
     session.add(VideoAgentExecutionOrm(id=run_id, tenant_id=tenant_id, task_id=task.id, occurrence_key=key,
         input_snapshot={"video": production, "created_by": task.created_by,
             "count": config.count, "variants": [v.model_dump() for v in config.variants],
             "max_units_per_run": config.max_units_per_run, "max_units_per_month": config.max_units_per_month,
             "notify": config.notify, "timezone": task.timezone,
+            "material_folder": config.material_folder,
             "auto_publication": config.auto_publication.model_dump() if config.auto_publication else None}, notification_acknowledged=1 if active else 0))
     task.last_run_at = now
     if scheduled:

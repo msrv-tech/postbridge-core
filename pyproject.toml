@@ -33,6 +33,7 @@ dependencies = [
 postbridge-telegram-bot = "postbridge.botkit.platforms.telegram.runtime:main"
 
 [project.optional-dependencies]
+video = ["faster-whisper==1.2.1", "av>=11,<16"]
 dev = [
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",

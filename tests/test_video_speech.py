@@ -209,3 +209,29 @@ def test_speech_migration_handles_baseline_and_guards_downgrade(speech):
     with session.get_bind().begin() as connection, Operations.context(MigrationContext.configure(connection)):
         with pytest.raises(RuntimeError, match="Retain speech"):
             migration["downgrade"]()
+
+
+@pytest.mark.parametrize('still_long',[False,True])
+def test_long_translation_is_shortened_once_and_all_attempts_remain_charged(speech,monkeypatch,still_long):
+    original=make(speech)
+    gateway=video_autopilot.gateway_json
+    attempts=[]
+    def response(path,body,correlation):
+        if path.endswith('completions') and 'available_seconds' in body['messages'][-1]['content']:
+            attempts.append('shorten')
+            return {'usage_tokens_charged':7,'choices':[{'message':{'content':json.dumps({'caption':'Try','narration_text':'Try now.'})}}]}
+        result=gateway(path,body,correlation)
+        if path.endswith('audio/generations'):
+            attempts.append(body['text'])
+            if body['text']=='Try our product today.' or still_long:
+                result['audio']['b64_pcm']=base64.b64encode(b'\x00\x01'*(24000*16)).decode()
+        return result
+    monkeypatch.setattr(video_autopilot,'gateway_json',response)
+    localized,_=variant(speech,original)
+    current=localized['current']
+    assert attempts==['Try our product today.','shorten','Try now.']
+    assert current['usage']['tokens_charged']==36
+    assert current['status']==('failed' if still_long else 'succeeded')
+    if not still_long:
+        assert current['scenes'][0]['narration_text']=='Try now.'
+        assert current['scenes'][0]['asset_id']==original['current']['scenes'][0]['asset_id']

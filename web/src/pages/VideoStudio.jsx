@@ -1,3 +1,4 @@
+import VoicePreview from '../components/VoicePreview'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import AppShell from '../components/AppShell'
@@ -315,7 +316,7 @@ export default function VideoStudio() {
               <label>{t('video.style')}<input type="text" value={style} maxLength={500} onChange={(e) => setStyle(e.target.value)} disabled={busy} /></label>
               {capabilities.speech_enabled && <>
                 <label><input type="checkbox" checked={narration} onChange={(e) => setNarration(e.target.checked)} disabled={busy} />{t('videoVoice.enabled')}</label>
-                {narration && <label>{t('videoVoice.voice')}<select value={voice} onChange={(e) => setVoice(e.target.value)}>{capabilities.speech_voices.map((name) => <option key={name} value={name}>{t(`videoVoice.voice.${name}`)}</option>)}</select></label>}
+                {narration && <><label>{t('videoVoice.voice')}<select value={voice} onChange={(e) => setVoice(e.target.value)}>{capabilities.speech_voices.map((name) => <option key={name} value={name}>{t(`videoVoice.voice.${name}`)}</option>)}</select></label><VoicePreview language={locale === 'en' ? 'en' : 'ru'} voice={voice} /></>}
               </>}
             </>}
             {!manual && <label>{t('videoBatch.count')}<input type="number" min="1" max="5" value={batchCount} disabled={busy} onChange={(e) => setBatchCount(Number(e.target.value))} /></label>}
@@ -375,7 +376,7 @@ export default function VideoStudio() {
                   <VideoVariantChoices value={variants} onChange={setVariants} disabled={busy} />
                   <label>{t('videoBatch.budget')}<input type="number" min="1" max="100000000" value={batchBudget} onChange={(e) => setBatchBudget(e.target.value)} placeholder={t('videoSchedule.planBudget')} /></label>
                 </> : <><label>{t('videoVoice.language')}<select value={voiceLanguage} onChange={(e) => setVoiceLanguage(e.target.value)} disabled={busy}>{capabilities.speech_languages.map((language) => <option key={language} value={language}>{t(`videoVoice.language.${language}`)}</option>)}</select></label>
-                <label>{t('videoVoice.voice')}<select value={voice} onChange={(e) => setVoice(e.target.value)} disabled={busy}>{capabilities.speech_voices.map((name) => <option key={name} value={name}>{t(`videoVoice.voice.${name}`)}</option>)}</select></label>
+                <label>{t('videoVoice.voice')}<select value={voice} onChange={(e) => setVoice(e.target.value)} disabled={busy}>{capabilities.speech_voices.map((name) => <option key={name} value={name}>{t(`videoVoice.voice.${name}`)}</option>)}</select></label><VoicePreview language={voiceLanguage} voice={voice} />
                 <label>{t('videoVoice.style')}<select value={voiceStyle} onChange={(e) => setVoiceStyle(e.target.value)} disabled={busy}>{['neutral', 'warm', 'energetic'].map((style) => <option key={style} value={style}>{t(`videoVoice.style.${style}`)}</option>)}</select></label>
                 </>}
                 <VideoBudgetPreview units={(capabilities.reservation_units || 0) * (batchVoices ? variants.length : 1)} limit={batchVoices ? batchBudget : null} />
@@ -394,6 +395,7 @@ export default function VideoStudio() {
                 {scene.url && !scene.preview_url && (scene.kind === 'video' ? <video src={scene.url} controls preload="metadata" /> : <img src={scene.url} alt={t('video.scene', { number: index + 1 })} loading="lazy" />)}
                 <label>{t('video.caption')}<textarea maxLength={180} rows={2} value={scene.caption} onChange={(e) => updateScene(index, { caption: e.target.value })} /></label>
                 {scene.narration_text != null && <label>{t('videoVoice.text')}<textarea maxLength={400} rows={2} value={scene.narration_text} onChange={(e) => updateScene(index, { narration_text: e.target.value, speech_asset_id: null, speech_url: null })} /></label>}
+                {scene.narration_shortened && <p className="muted">{t('videoVoice.shortened')}</p>}
                 {scene.speech_url && <audio src={scene.speech_url} controls preload="metadata" aria-label={t('videoVoice.preview')} />}
                 <label>{t('video.duration')}<input required type="number" min="1" max="15" step="any" value={displaySeconds(scene.duration_seconds)} onChange={(e) => updateScene(index, { duration_seconds: e.target.value })} /></label>
                 <details className="video-scene-advanced"><summary>{t('videoStoryboard.advanced')}</summary>

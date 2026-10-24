@@ -87,7 +87,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
   const navigate = useNavigate()
   const { locale, t } = useI18n()
   const videoProjectId = location.pathname.match(/\/content\/videos\/([0-9a-f-]{36})$/i)?.[1] || ''
-  const contextKey = `${workspaceId}/${location.pathname}`
+  const contextKey = `${workspaceId}/${location.pathname}${location.search}`
   const contextRef = useRef(contextKey)
   contextRef.current = contextKey
   const widgetRef = useRef(null)
@@ -112,7 +112,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
     setConversationId('')
     setLoading(false)
     setCollapsed(page === 'video')
-  }, [workspaceId, videoProjectId, page])
+  }, [contextKey, videoProjectId, page])
 
   useEffect(() => {
     const handleVisibility = (event) => {
@@ -177,7 +177,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
         client_context: {
           route: `${location.pathname}${location.search}`,
           locale,
-          video_project_id: videoProjectId || undefined,
+          video_project_id: videoContext.projectId || undefined,
           video_has_unsaved_changes: videoContext.hasUnsavedChanges || undefined,
           video_selected_version: videoContext.selectedVersion || undefined,
           video_material_ids: videoContext.materialIds || undefined,
@@ -214,7 +214,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
     }
     window.addEventListener('postbridge-assistant-ask', handleAsk)
     return () => window.removeEventListener('postbridge-assistant-ask', handleAsk)
-  }, [workspaceId, location.pathname, locale, conversationId, loading])
+  }, [workspaceId, location.pathname, location.search, locale, conversationId, loading])
 
   const applyVideoCard = async () => {
     if (loading || !answer?.video_action) return
@@ -224,6 +224,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
       const result = await applyAssistantVideoAction(workspaceId, answer.video_action.id)
       if (contextRef.current !== requestContext) return
       setAnswer((old) => ({ ...old, content_result: result.content_result, video_action: { ...old.video_action, status: 'applied' } }))
+      window.dispatchEvent(new CustomEvent('postbridge-video-schedules-updated', { detail: { workspaceId } }))
       if (result.video_update) window.dispatchEvent(new CustomEvent('postbridge-video-updated', { detail: { workspaceId, ...result.video_update } }))
       if (isSafeWorkspaceRoute(workspaceId, result.route)) navigate(result.route)
     } catch (e) { if (contextRef.current === requestContext) setError(e.message) }
@@ -308,12 +309,22 @@ export default function SupportAssistantWidget({ workspaceId }) {
             <strong>{t(`videoAssistant.card.${answer.video_action.kind}`)}</strong>
             <p>{answer.video_action.summary.brief}</p>
             {answer.video_action.summary.version && <p>{t('video.version', { version: answer.video_action.summary.version })}</p>}
-            {answer.video_action.kind === 'schedule' ? <>
-              <p>{t(`topicScout.schedule.${answer.video_action.summary.frequency}`)} · {answer.video_action.summary.time} · {answer.video_action.summary.timezone}</p>
+            {['schedule', 'schedule_edit'].includes(answer.video_action.kind) ? <>
+              <p>{answer.video_action.summary.frequency === 'custom' ? answer.video_action.summary.schedule_cron : `${t(`topicScout.schedule.${answer.video_action.summary.frequency}`)} · ${answer.video_action.summary.time}`} · {answer.video_action.summary.timezone}</p>
               {answer.video_action.summary.frequency === 'weekly' && <p>{t(`weekday.${['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][answer.video_action.summary.weekday % 7]}`)}</p>}
               <p>{t('videoSchedule.runBudget')}: {answer.video_action.summary.max_units_per_run || t('videoSchedule.planBudget')}<br />{t('videoSchedule.monthlyBudget')}: {answer.video_action.summary.max_units_per_month || t('videoSchedule.planBudget')}</p>
               <p>{t(`videoAssistant.mode.${answer.video_action.summary.mode || 'autopilot'}`)}</p>
-              <p>{t('videoSchedule.draftOnly')}</p>
+              {answer.video_action.summary.generated_visuals && <p>{t(`videoGeneration.${answer.video_action.summary.generated_visuals}`)}</p>}
+              <p>{t('videoSchedule.agentOutput', { count: answer.video_action.summary.count || 1, language: t(`videoVoice.language.${answer.video_action.summary.language || 'ru'}`) })}</p>
+              {answer.video_action.summary.variants?.map((v, i) => <p key={i}>{t(`videoVoice.language.${v.language}`)} · {v.voice} · {t(`videoVoice.style.${v.voice_style}`)}</p>)}
+              {answer.video_action.summary.voice && <p>{answer.video_action.summary.voice} · {answer.video_action.summary.duration_seconds} s</p>}
+              {answer.video_action.summary.material_folder != null && <p>{t('videoSchedule.agentFolder', { folder: answer.video_action.summary.material_folder || t('videoLibrary.noFolder'), count: answer.video_action.summary.material_limit })}</p>}
+              {answer.video_action.summary.destinations?.length ? <>
+                <p>{t('videoAuto.consent', { count: (answer.video_action.summary.count || 1) * (1 + (answer.video_action.summary.variants?.length || 0)) })}</p>
+                {answer.video_action.summary.destinations.map((d, i) => <p key={i}>{d.title}{d.languages?.length ? ` · ${d.languages.join(', ')}` : ''}</p>)}
+                <p>{answer.video_action.summary.caption}</p>
+              </> : <p>{t('videoSchedule.draftOnly')}</p>}
+              {answer.video_action.kind === 'schedule_edit' && <p>{t('videoSchedule.agentStatusKept')}</p>}
             </> : answer.video_action.kind === 'schedule_control' ? <p>{t(`videoAssistant.control.${answer.video_action.summary.action}`)} · {answer.video_action.summary.timezone}</p>
               : ['video_generation', 'content_generation'].includes(answer.video_action.kind) ? <>
                 {answer.video_action.summary.task && <p>{t(`assistant.content.${answer.video_action.summary.task}`)}</p>}

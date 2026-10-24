@@ -287,7 +287,7 @@ test('video autopilot accepts a task without files and exposes generated scenes 
   await mockSaasBff(page)
   const projectId = '00000000-0000-4000-8000-000000000081'
   let created
-  let reads = 0
+  let assemblyObserved = false
   let edited = false
   let assistantRequest
   const scenes = [1, 2].map((number) => ({ asset_id: `00000000-0000-4000-8000-00000000008${number + 1}`,
@@ -321,7 +321,7 @@ test('video autopilot accepts a task without files and exposes generated scenes 
       created = route.request().postDataJSON()
       return reply(project('running'), 201)
     }
-    if (path.endsWith(`/${projectId}`)) return reply(project(++reads > 1 ? 'succeeded' : 'running'))
+    if (path.endsWith(`/${projectId}`)) return reply(project(assemblyObserved ? 'succeeded' : 'running'))
     return reply({ items: [], has_more: false })
   })
   await page.addInitScript(() => {
@@ -336,6 +336,7 @@ test('video autopilot accepts a task without files and exposes generated scenes 
   await page.getByRole('button', { name: 'Create video', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/videos/${projectId}$`))
   await expect(page.getByText('Assembling · Preparing the storyboard')).toBeVisible()
+  assemblyObserved = true
   expect(created.mode).toBe('autopilot')
   expect(created.language).toBe('en')
   expect(created.scenes).toEqual([])
@@ -561,21 +562,19 @@ test('approved video supports local delivery time and an idempotent reschedule',
   await expect(card.getByText('Cancelled', { exact: false })).toBeVisible()
 })
 
-test('video schedules use existing agent tasks and link each prepared draft', async ({ page }, testInfo) => {
+test('video schedules use assistant review cards and retain pause and draft history', async ({ page }, testInfo) => {
   await mockSaasBff(page)
   const taskId = '00000000-0000-4000-8000-000000000091'
   const projectId = '00000000-0000-4000-8000-000000000092'
   const runId = '00000000-0000-4000-8000-000000000093'
   let task
-  let run
-  let createBody
-  let runKey
+  let question
+  let applied = 0
+  let directCreates = 0
   const reply = (route, body) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
-  await page.route('**/workspaces/ws-1/channel-registry', (route) => reply(route, { items: [
-    { id: 'editorial-context', title: 'Editorial context', platform: 'postbridge' },
-  ] }))
   await page.route('**/workspaces/ws-1/videos**', (route) => {
     const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/schedules')) return reply(route, { items: task ? [task] : [] })
     if (path.endsWith('/capabilities')) return reply(route, { enabled: true, autopilot_enabled: true,
       supports_schedules: true, max_upload_bytes: 67108864, max_scenes: 8 })
     const current = { id: 'revision', version: 1, status: 'succeeded', scenes: [], usage: {} }
@@ -585,59 +584,57 @@ test('video schedules use existing agent tasks and link each prepared draft', as
   await page.route('**/workspaces/ws-1/agent/**', (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname
-    if (path.endsWith('/tasks') && request.method() === 'POST') {
-      createBody = request.postDataJSON()
-      task = { ...createBody, id: taskId, status: 'active', next_run_at: '2026-10-20T02:30:00Z' }
-      return reply(route, task)
-    }
-    if (path.endsWith('/tasks')) return reply(route, { items: task ? [task] : [] })
-    if (path.endsWith('/runs')) return reply(route, { items: run ? [run] : [] })
-    if (path.endsWith('/pause') || path.endsWith('/resume')) {
-      task.status = path.endsWith('/pause') ? 'paused' : 'active'
-      return reply(route, task)
-    }
-    if (path.endsWith('/run')) {
-      runKey = request.headers()['idempotency-key']
-      run = { id: runId, agent_task_id: taskId, graph_name: 'video_autopilot', status: 'awaiting_review',
-        created_at: '2026-10-19T02:30:00Z', video_execution: { project_id: projectId } }
-      return reply(route, run)
-    }
+    if (path.endsWith('/tasks') && request.method() === 'POST') directCreates += 1
+    if (path.endsWith('/runs')) return reply(route, { items: task ? [{ id: runId, agent_task_id: taskId,
+      graph_name: 'video_autopilot', status: 'awaiting_review', created_at: '2026-10-19T02:30:00Z',
+      video_execution: { project_id: projectId } }] : [] })
+    if (path.endsWith('/pause')) { task.status = 'paused'; return reply(route, task) }
     return reply(route, { items: [] })
+  })
+  await page.route('**/workspaces/ws-1/assistant/help', (route) => {
+    question = route.request().postDataJSON()
+    return reply(route, { conversation_id: 'schedule-review', message: 'Review this schedule.', video_action: {
+      id: '42', kind: 'schedule', status: 'proposed', summary: { brief: 'A weekly product video', frequency: 'daily',
+        time: '09:30', timezone: 'Asia/Novosibirsk', max_units_per_month: 1000, language: 'en', count: 1,
+        material_folder: 'Product', material_limit: 3, variants: [{ language: 'ru', voice: 'Kore', voice_style: 'warm' }] } } })
+  })
+  await page.route('**/workspaces/ws-1/assistant/actions/42/apply', (route) => {
+    applied += 1
+    task = { id: taskId, goal_text: 'A weekly product video', status: 'active', timezone: 'Asia/Novosibirsk',
+      next_run_at: '2026-10-20T02:30:00Z' }
+    return reply(route, { route: `/workspaces/ws-1/agents/videos?task=${taskId}` })
   })
   await page.addInitScript(() => {
     window.localStorage.setItem('postbridge_token', 'saas-token')
     window.localStorage.setItem('postbridge.locale', 'en')
   })
   await page.goto('/workspaces/ws-1/agents/videos')
-  await page.getByLabel('What is your video about?').fill('A weekly product video')
-  await page.getByLabel('How often to create a video').selectOption('daily')
-  await expect(page.getByLabel('Day of the week')).not.toBeVisible()
-  await page.getByLabel('Start creating at').fill('09:30')
-  await page.getByLabel('Timezone', { exact: true }).selectOption('Asia/Novosibirsk')
-  await expect(page.getByLabel('AI unit limit per month')).not.toBeVisible()
-  await page.getByText('Settings', { exact: true }).last().click()
-  await page.getByLabel('AI unit limit per month').fill('1000')
-  await page.getByLabel('Assemble materials without AI').check()
-  await expect(page.getByLabel('AI unit limit per month')).not.toBeVisible()
-  await page.getByLabel('Assemble materials without AI').uncheck()
-  await page.screenshot({ path: testInfo.outputPath('video-schedule-create.png'), fullPage: true })
+  await expect(page.getByRole('heading', { name: 'Ask the assistant to create videos' })).toBeVisible()
+  await expect(page.locator('.video-studio select, .video-studio input[type=number]')).toHaveCount(0)
+  await page.getByLabel('What should the assistant do?').fill('Create from the Product folder daily at 09:30 Novosibirsk in English and Russian; up to 1000 units a month.')
+  await page.locator('.video-studio form').getByRole('button', { name: 'Assistant', exact: true }).click()
+  await expect(page.getByText('Proposed schedule', { exact: true })).toBeVisible()
+  expect(question.page).toBe('video')
+  expect(question.question).toContain('Product folder')
+  expect(applied).toBe(0)
+  expect(directCreates).toBe(0)
+  await expect(page.getByText('Folder: Product · Up to 3 materials per run', { exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('video-schedule-review.png'), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: testInfo.outputPath('video-schedule-mobile.png'), fullPage: true })
-  await page.getByRole('button', { name: 'Save schedule', exact: true }).click()
+  await page.getByRole('button', { name: 'Enable schedule', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'A weekly product video', exact: true })).toBeVisible()
-  expect(createBody.mode).toBe('video_autopilot')
-  expect(createBody.schedule_cron).toBe('30 9 * * *')
-  expect(createBody.timezone).toBe('Asia/Novosibirsk')
-  expect(createBody.task_config.video.scenes).toEqual([])
-  expect(createBody.task_config.max_units_per_month).toBe(1000)
-  expect(createBody.autonomy_mode).toBe('draft_approval')
+  expect(applied).toBe(1)
   await page.getByRole('button', { name: 'Pause', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Resume', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Resume', exact: true }).click()
-  await page.getByRole('button', { name: 'Prepare now', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Edit with assistant', exact: true }).click()
+  await page.getByLabel('What should the assistant do?').fill('Resume this schedule')
+  await page.locator('.video-studio form').getByRole('button', { name: 'Assistant', exact: true }).click()
+  await expect.poll(() => question.question).toContain('A weekly product video')
+  await expect.poll(() => question.question).toContain('Resume this schedule')
+  await page.getByRole('button', { name: 'Collapse', exact: true }).click()
   await expect(page.getByText('Ready to review', { exact: false })).toBeVisible()
-  expect(runKey).toMatch(/^[0-9a-f-]{36}$/)
   await page.getByRole('link', { name: 'Open project', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/content/videos/${projectId}$`))
   await expect(page.getByRole('link', { name: 'Open schedule', exact: true })).toHaveAttribute('href', `/workspaces/ws-1/agents/videos?task=${taskId}`)

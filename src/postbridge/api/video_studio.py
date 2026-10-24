@@ -20,6 +20,7 @@ from postbridge.services.video_delivery_time import RescheduleVideoPublication, 
 from postbridge.services.video_speech import VoiceVariantRequest, create_voice_variant
 from postbridge.services.video_library import MaterialUpdate, list_materials, update_material
 from postbridge.services import video_batches as batches
+from postbridge.services import video_schedules as schedules
 
 
 def selfhost_tenant(request: Request, session: Session = Depends(get_db_session)) -> str:
@@ -44,6 +45,21 @@ def build_router(prefix, tenant_dependency):
     def generation_price(tenant_id: str = Depends(tenant_dependency)):
         from postbridge.services.video_generation import generation_price
         return generation_price()
+
+    @router.get("/schedules")
+    def video_schedules(tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
+        from sqlalchemy import select
+        from postbridge.models.domain import AgentTaskOrm
+        rows = session.scalars(select(AgentTaskOrm).where(AgentTaskOrm.tenant_id == tenant_id,
+            AgentTaskOrm.mode == "video_autopilot").order_by(AgentTaskOrm.created_at.desc()).limit(200))
+        return {"items": [schedules.schedule_payload(row) for row in rows]}
+
+    @router.patch("/schedules/{task_id}")
+    def edit_video_schedule(task_id: UUID, payload: schedules.VideoScheduleEdit,
+                            tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
+        row = schedules.update_video_agent_task(session, tenant_id=tenant_id, task_id=str(task_id), **payload.model_dump())
+        session.commit()
+        return schedules.schedule_payload(row)
 
     @router.get("/tiktok/channels/{channel_id}/creator-info")
     def tiktok_creator_info(channel_id: UUID, tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):

@@ -133,11 +133,17 @@ def render_montage(scenes: list[dict], sources: dict[str, Path], directory: Path
                 f"x=(w-text_w)/2:y={'270' if speech_path else 'h-360-text_h'}:box=1:boxcolor=black@0.7:boxborderw=24"
             )
         if speech_path and scene.get("narration_text"):
-            subtitle = directory / f"subtitle-{index}.txt"
-            subtitle.write_text("\n".join(textwrap.wrap(scene["narration_text"], width=32)), encoding="utf-8")
-            # Phrase-level cues follow the measured audio, not guessed word timings.
-            filters += (f",drawtext=textfile='{subtitle}':expansion=none:fontcolor=white:fontsize=42:"
-                        f"x=(w-text_w)/2:y=h-330-text_h:box=1:boxcolor=black@0.7:boxborderw=18:enable='lt(t,{speech_seconds})'")
+            words = scene.get("speech_words") or []
+            cues = words if words else [{"text": scene["narration_text"], "start": 0, "end": speech_seconds}]
+            for n, cue in enumerate(cues):
+                start_at, end_at = float(cue["start"]), float(cue["end"])
+                if not 0 <= start_at < end_at <= speech_seconds + .1:
+                    raise video_error("VIDEO_SPEECH_ASSET_INVALID", "Invalid subtitle interval")
+                subtitle = directory / f"subtitle-{index}-{n}.txt"
+                subtitle.write_text("\n".join(textwrap.wrap(cue["text"], width=32)), encoding="utf-8")
+                filters += (f",drawtext=textfile='{subtitle}':expansion=none:fontcolor=white:fontsize=42:"
+                            f"x=(w-text_w)/2:y=h-330-text_h:box=1:boxcolor=black@0.7:boxborderw=18:"
+                            f"enable='gte(t,{start_at:.3f})*lt(t,{end_at:.3f})'")
         if scene.get("transition") == "fade":
             filters += f",fade=t=in:st=0:d=0.2,fade=t=out:st={max(.2, scene['duration_seconds'] - .2)}:d=0.2"
         input_args = ["-loop", "1"] if meta["kind"] == "image" else ["-stream_loop", "-1"]

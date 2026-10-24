@@ -34,3 +34,6 @@ export const reconcileVideoPublication = (workspaceId, id, targetId) => api(path
 export const getTikTokCreatorInfo = (workspaceId, channelId) => api(`/workspaces/${workspaceId}/videos/tiktok/channels/${channelId}/creator-info`)
 
 export const getVideoScheduleBridges = (workspaceId, channelId) => api(path(workspaceId, `/schedule-bridges?channel_id=${encodeURIComponent(channelId)}`))
+
+export const listVideoSchedules = (workspaceId) => api(path(workspaceId, '/schedules'))
+export const updateVideoSchedule = (workspaceId, id, payload) => api(path(workspaceId, `/schedules/${id}`), { method: 'PATCH', body: JSON.stringify(payload) })

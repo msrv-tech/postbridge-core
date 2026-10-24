@@ -873,6 +873,7 @@ class VideoSpeechAssetOrm(Base):
     cache_key: Mapped[str] = mapped_column(String(64))
     text_hash: Mapped[str] = mapped_column(String(64))
     sample_count: Mapped[int] = mapped_column(Integer)
+    alignment_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 

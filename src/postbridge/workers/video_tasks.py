@@ -147,6 +147,17 @@ def process_video_job(job_id: str):
                     if inspect_speech(path) != speech.sample_count:
                         raise video_error("VIDEO_SPEECH_ASSET_INVALID", "Speech asset failed verification")
                     speech_sources[asset_id] = path
+                    if speech.alignment_json is None:
+                        from postbridge.services.video_subtitles import align_words
+                        scene = next(s for s in scenes if s.get("speech_asset_id") == asset_id)
+                        words = align_words(path, scene.get("narration_text", ""), options.get("language", "ru"))
+                        if words:
+                            speech.alignment_json = {"words": words, "method": "whisper-small-int8"}
+                    if speech.alignment_json:
+                        for scene in scenes:
+                            if scene.get("speech_asset_id") == asset_id:
+                                scene["speech_words"] = speech.alignment_json["words"]
+                session.commit()
             output = render_montage(scenes, sources, directory, on_scene=lambda _index: set_stage("assembling"),
                                     speech_sources=speech_sources, options=options)
             set_stage("validating")

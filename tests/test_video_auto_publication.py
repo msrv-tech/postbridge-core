@@ -68,3 +68,23 @@ def test_changed_bridge_changed_caption_and_foreign_run_never_approve(automatic)
     with error('VIDEO_BRIDGE_CHANGED'):
         auto_approval(db, tenant, run.id, post_id)
     assert db.scalar(select(func.count()).select_from(VideoPublicationApprovalOrm)) == 0
+
+
+def test_language_variant_uses_only_its_reviewed_bridges(automatic):
+    from postbridge.models.domain import ChannelOrm
+    db,tenant,_,post_id,first,run,task=automatic
+    target=db.scalar(select(ChannelOrm).where(ChannelOrm.tenant_id==tenant,ChannelOrm.kind=='destination',ChannelOrm.id!=first.target_channel_id))
+    second=video_bridge(db,tenant,target)
+    second.source_channel_id=first.source_channel_id;db.commit()
+    fingerprints={b['id']:b['settings_hash'] for b in schedule_bridges(db,tenant,first.source_channel_id)['items']}
+    policy={'confirmed':True,'bridge_ids':[first.id,second.id],'expected_bridges':fingerprints,
+        'caption':'Exact approved text','language_bridge_ids':{'ru':[first.id],'en':[second.id]}}
+    config=json.loads(task.task_config_json);config['auto_publication']=policy;task.task_config_json=json.dumps(config)
+    execution=db.get(VideoAgentExecutionOrm,run.id);execution.input_snapshot={**execution.input_snapshot,'auto_publication':policy}
+    receipt=db.scalar(select(VideoPostDraftOrm).where(VideoPostDraftOrm.content_item_id==post_id))
+    revision=db.get(VideoRevisionOrm,receipt.revision_id)
+    revision.production_options={**revision.production_options,'language':'en'};db.commit()
+    approval=auto_approval(db,tenant,run.id,post_id)
+    assert approval.bridge_ids==[second.id] and approval.expected_bridges=={second.id:fingerprints[second.id]}
+    revision.production_options={**revision.production_options,'language':'ru'};db.commit()
+    assert auto_approval(db,tenant,run.id,post_id).bridge_ids==[first.id]

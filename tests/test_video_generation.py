@@ -148,3 +148,71 @@ def test_generation_price_has_no_legacy_multiplier_fallback(auto, monkeypatch):
         {"id": "veo-3.1-fast-generate-001", "billing_units_per_second": 166666}]})
     with error("VIDEO_PRICING_UNAVAILABLE"):
         video_generation.generation_price()
+
+
+def test_image_seed_is_compact_full_resolution_jpeg(native):
+    db,tenant,_,material,tmp,phase,calls=native
+    project=create_project(db,tenant,VideoCreate(brief='Animate this image',request_key=str(uuid4()),scenes=[{
+        'asset_id':material['media_asset_id'],'duration_seconds':2,'caption':'Demo','regenerate_video':True,'image_prompt':'Subtle motion'}]))
+    video_tasks.process_video_job.run(project['current']['job_id'])
+    payload=next(c[2] for c in calls if c[0]=='POST')
+    raw=base64.b64decode(payload['image']['b64_json'])
+    assert payload['image']['mime_type']=='image/jpeg' and len(raw)<=650*1024
+    frame=tmp/'submitted.jpg';frame.write_bytes(raw)
+    meta=inspect_media(frame);assert (meta['width'],meta['height'])==(1080,1920)
+
+
+def test_oversize_gateway_rejection_stops_without_paid_retry(native,monkeypatch):
+    db,tenant,*_=native
+    original=video_generation.gateway_video
+    submitted=[]
+    def gateway(method,route,payload=None):
+        if method=='POST':
+            submitted.append(payload)
+            request=httpx.Request('POST','https://gateway.example.test'+route)
+            response=httpx.Response(413,request=request)
+            raise httpx.HTTPStatusError('Too large',request=request,response=response)
+        return original(method,route,payload)
+    monkeypatch.setattr(video_generation,'gateway_video',gateway)
+    project=make(native);job=project['current']['job_id']
+    video_tasks.process_video_job.run(job);release_lease(db,job);video_tasks.process_video_job.run(job);db.expire_all()
+    current=get_project(db,tenant,project['id'])['current']
+    assert current['status']=='failed' and current['error_code']=='VIDEO_GENERATION_NOT_AUTHORIZED'
+    assert current['usage']['tokens_charged']==0 and not current['usage']['uncertain']
+    assert len(submitted)==1
+
+
+def test_failed_neighbour_keeps_paid_scene_available_for_a_new_revision(native,monkeypatch):
+    from postbridge.services.video_studio import VideoRevise,VideoScene,revise_project
+    db,tenant,_,material,tmp,phase,calls=native
+    original=video_generation.gateway_video
+    submits=[]
+    def gateway(method,route,payload=None):
+        if method=='POST':
+            submits.append(payload)
+            if len(submits)==2:
+                request=httpx.Request('POST','https://gateway.example.test'+route)
+                response=httpx.Response(422,request=request)
+                raise httpx.HTTPStatusError('Rejected',request=request,response=response)
+        return original(method,route,payload)
+    monkeypatch.setattr(video_generation,'gateway_video',gateway)
+    from postbridge.services.video_studio import store_video_material
+    seed_material=store_video_material(db,tenant,tmp/'native.mp4')
+    project=create_project(db,tenant,VideoCreate(brief='Recover a paid visual',request_key=str(uuid4()),scenes=[
+        {'asset_id':seed_material['media_asset_id'],'source_start_seconds':1,'duration_seconds':2,'caption':'Keep','regenerate_video':True,'image_prompt':'Animate the image'},
+        {'duration_seconds':2,'caption':'Replace','generation_kind':'video','image_prompt':'Abstract animation'}]))
+    job=project['current']['job_id'];video_tasks.process_video_job.run(job)
+    phase['ready']=True;release_lease(db,job);video_tasks.process_video_job.run(job);db.expire_all()
+    failed=get_project(db,tenant,project['id'])
+    assert failed['current']['status']=='failed' and failed['current']['usage']['tokens_charged']==123
+    first,second=failed['current']['scenes']
+    assert first['asset_id']!=material['media_asset_id'] and first['kind']=='video'
+    assert not first.get('regenerate_video') and not first.get('source_start_seconds') and not second.get('asset_id')
+    scenes=[{k:v for k,v in scene.items() if k in VideoScene.model_fields} for scene in [first,second]]
+    revised=revise_project(db,tenant,project['id'],VideoRevise(brief=failed['brief'],request_key=str(uuid4()),expected_version=1,scenes=scenes))
+    new_job=revised['current']['job_id'];video_tasks.process_video_job.run(new_job)
+    release_lease(db,new_job);video_tasks.process_video_job.run(new_job);db.expire_all()
+    result=get_project(db,tenant,project['id'])['current']
+    assert result['status']=='succeeded' and result['usage']['tokens_charged']==123
+    assert result['scenes'][0]['asset_id']==first['asset_id']
+    assert len(submits)==3  # two successful scenes plus one definitive rejection, no paid duplicate.

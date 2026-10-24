@@ -186,6 +186,16 @@ def _status_code_for_error(exc: PostbridgeError) -> int:
     """Resolve the HTTP response status from a Postbridge error code."""
     if exc.code in _ERROR_STATUS_BY_CODE:
         return _ERROR_STATUS_BY_CODE[exc.code]
+    if exc.code.startswith("VIDEO_"):
+        if exc.code.endswith("_NOT_FOUND"):
+            return 404
+        if any(part in exc.code for part in ("_CONFLICT", "_RECONCILIATION", "_REVOKED")):
+            return 409
+        if "_BUDGET" in exc.code:
+            return 402
+        if any(part in exc.code for part in ("_UNAVAILABLE", "_DISABLED")):
+            return 503
+        return 422
     if exc.code.startswith("VALIDATION_"):
         return 422
     if exc.code.startswith("AUTH_"):

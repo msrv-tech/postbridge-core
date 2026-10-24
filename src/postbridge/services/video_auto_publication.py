@@ -21,11 +21,15 @@ class AutoPublicationPolicy(BaseModel):
     bridge_ids: list[str] = Field(min_length=1, max_length=10)
     expected_bridges: dict[str, str]
     caption: str = Field(min_length=1, max_length=1024)
+    language_bridge_ids: dict[Literal["ru", "en"], list[str]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def reviewed(self):
         if len(set(self.bridge_ids)) != len(self.bridge_ids) or set(self.bridge_ids) != set(self.expected_bridges):
             raise ValueError("Review every unique bridge")
+        if any(not ids or len(ids) != len(set(ids)) or not set(ids).issubset(self.bridge_ids)
+               for ids in self.language_bridge_ids.values()):
+            raise ValueError("Language destinations must be selected reviewed bridges")
         if any(len(key) > 64 or len(value) != 64 or any(c not in '0123456789abcdef' for c in value)
                for key, value in self.expected_bridges.items()):
             raise ValueError("Bridge settings must have a reviewed fingerprint")
@@ -109,8 +113,13 @@ def auto_approval(db, tenant_id, run_id, content_id, *, lock=False):
     view = publication_view(db, tenant_id, content_id)
     if view['snapshot']['text'] != policy.caption:
         raise video_error('VIDEO_APPROVAL_CONFLICT', 'A post was edited after automatic publication was configured')
-    return ApproveVideoPublication(expected_snapshot=view['snapshot_hash'], bridge_ids=policy.bridge_ids,
-        expected_bridges=policy.expected_bridges)
+    revision = next(r for r in revisions if r.id == receipt.revision_id)
+    language = (revision.production_options or {}).get('language', 'ru')
+    bridges = policy.language_bridge_ids.get(language, []) if policy.language_bridge_ids else policy.bridge_ids
+    if not bridges:
+        raise video_error('VIDEO_AUTO_LANGUAGE_UNMAPPED', 'Choose destinations for this video language')
+    return ApproveVideoPublication(expected_snapshot=view['snapshot_hash'], bridge_ids=bridges,
+        expected_bridges={key: policy.expected_bridges[key] for key in bridges})
 
 
 def approve_auto_post(db, tenant_id, run_id, content_id, payload):

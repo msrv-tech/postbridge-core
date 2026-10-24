@@ -175,16 +175,21 @@ def generate_scene(engine, *, index, scene, options, directory):
                         raise video_error("VIDEO_GENERATION_SEED_INVALID", "Choose an image or clip for the first frame")
                     path = directory / f"video-seed-{index}"
                     copy_media_object_to_file(source.object_key, path)
-                seed = directory / f"video-seed-{index}.png"
-                _ffmpeg(["-protocol_whitelist", "file,pipe", "-format_whitelist", "image2,png_pipe,jpeg_pipe,webp_pipe,mov,matroska,webm", "-i", str(path), "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1",
-                    "-frames:v", "1", "-threads", "1", "-filter_threads", "1", str(seed)])
-                if seed.stat().st_size > 5 * 1024 * 1024:
+                seed = directory / f"video-seed-{index}.jpg"
+                # Keep base64 plus JSON below gateways with a 1 MiB body limit.
+                # This is local compression, never another paid generation.
+                for quality in (3, 6, 10):
+                    _ffmpeg(["-protocol_whitelist", "file,pipe", "-format_whitelist", "image2,png_pipe,jpeg_pipe,webp_pipe,mov,matroska,webm", "-i", str(path), "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1",
+                        "-frames:v", "1", "-q:v", str(quality), "-threads", "1", "-filter_threads", "1", str(seed)])
+                    if seed.stat().st_size <= 650 * 1024:
+                        break
+                if seed.stat().st_size > 650 * 1024:
                     raise video_error("VIDEO_GENERATION_SEED_INVALID", "The first frame exceeds the image size limit")
-                payload["image"] = {"mime_type": "image/png", "b64_json": base64.b64encode(seed.read_bytes()).decode()}
+                payload["image"] = {"mime_type": "image/jpeg", "b64_json": base64.b64encode(seed.read_bytes()).decode()}
             body = gateway_video("POST", "/v1/videos/generations", payload)
         finished = _record(engine, step, body)
     except httpx.HTTPStatusError as exc:
-        if exc.request.method == "POST" and exc.response.status_code in {400, 401, 402, 403, 422}:
+        if exc.request.method == "POST" and exc.response.status_code in {400, 401, 402, 403, 413, 415, 422}:
             step.update(state="received", units=0, gateway_status="rejected")
             _pending_flag(engine)
             engine.save(financial=True)
