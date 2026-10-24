@@ -182,7 +182,7 @@ def test_real_render_has_video_audio_and_idempotent_completion(state):
     assert 0.9 < metadata["duration_seconds"] < 1.2
     video_tasks.process_video_job.run(job_id)
     assert rendered["current"]["scenes"][0]["preview_url"].endswith(".jpg")
-    assert session.scalar(select(func.count()).select_from(MediaAssetOrm)) == 3
+    assert session.scalar(select(func.count()).select_from(MediaAssetOrm)) == 4
 
 
 def test_old_job_finishing_does_not_replace_current_revision(state):
@@ -353,3 +353,48 @@ def test_mixed_clip_and_screenshot_normalize_audio_and_keep_caption_literal(stat
     # Decode the complete output to catch concat errors beyond container metadata.
     subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "null", "-"],
                    check=True, capture_output=True, timeout=20)
+
+
+def test_separate_cover_is_owned_versioned_and_uses_scene_text_not_private_brief(state):
+    from postbridge.services.video_post_drafts import PrepareVideoPost, prepare_post_draft
+    from postbridge.services.postbridge_workspace_content import _load_extra
+    from postbridge.models.domain import ContentItemOrm
+    from postbridge.services.video_library import MaterialUpdate, update_material, get_material
+    session, tenant, other, material, _ = state
+    project = create_project(session, tenant, request(material))
+    video_tasks.process_video_job.run(project["current"]["job_id"])
+    session.expire_all()
+    result = get_project(session, tenant, project["id"])
+    assert result["current"]["cover_url"].endswith(".jpg")
+    assert result["current"]["cover_title"] == "Demo"
+    post = prepare_post_draft(session, tenant, project["id"], PrepareVideoPost(expected_version=1, caption="Approved text"))
+    extra = _load_extra(session.get(ContentItemOrm, post["content_item_id"]).body_structured_json)
+    assert extra["cover_image_url"] == result["current"]["cover_url"]
+    assert extra["video_origin"]["version"] == 1
+    original = get_material(session, tenant, material["media_asset_id"])
+    update_material(session, tenant, material["media_asset_id"], MaterialUpdate(name="Renamed", folder="New", expected_name=original["name"], expected_folder=""))
+    with error("VIDEO_MATERIAL_CONFLICT"):
+        update_material(session, tenant, material["media_asset_id"], MaterialUpdate(name="Other", expected_name=original["name"]))
+    session.rollback()
+    with error("VIDEO_ASSET_NOT_FOUND"):
+        get_material(session, other, material["media_asset_id"])
+
+
+def test_cancellation_after_cover_upload_cleans_unattached_media(state, monkeypatch):
+    session, tenant, _, material, tmp = state
+    project = create_project(session, tenant, request(material))
+    upload = video_tasks.upload_media_file
+    jpeg_uploads = []
+    def cancel_after_cover(key, path, content_type):
+        upload(key, path, content_type)
+        if key.endswith(".jpg"):
+            jpeg_uploads.append(key)
+            if len(jpeg_uploads) == 2:
+                cancel_project(session, tenant, project["id"], 1)
+    monkeypatch.setattr(video_tasks, "upload_media_file", cancel_after_cover)
+    video_tasks.process_video_job.run(project["current"]["job_id"])
+    session.expire_all()
+    assert get_project(session, tenant, project["id"])["current"]["status"] == "cancelled"
+    assert session.scalar(select(func.count()).select_from(MediaAssetOrm)) == 1
+    assert not list((tmp / "storage").rglob("*.jpg"))
+    assert not list((tmp / "storage").rglob("*.mp4"))

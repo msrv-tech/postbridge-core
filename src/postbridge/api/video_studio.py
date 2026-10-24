@@ -18,7 +18,7 @@ from postbridge.services.video_publication import ApproveVideoPublication, appro
 from postbridge.services.video_publication import reconcile_target
 from postbridge.services.video_delivery_time import RescheduleVideoPublication, reschedule_publication
 from postbridge.services.video_speech import VoiceVariantRequest, create_voice_variant
-from postbridge.services.video_library import MaterialUpdate, list_materials, update_material
+from postbridge.services.video_library import MaterialUpdate, list_materials, update_material, get_material
 from postbridge.services import video_batches as batches
 from postbridge.services import video_schedules as schedules
 
@@ -105,6 +105,10 @@ def build_router(prefix, tenant_dependency):
                   limit: int = Query(20, ge=1, le=50), offset: int = Query(0, ge=0),
                   tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
         return list_materials(session, tenant_id, folder=folder, search=search, limit=limit, offset=offset)
+
+    @router.get("/materials/{asset_id}")
+    def material(asset_id: UUID, tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
+        return get_material(session, tenant_id, str(asset_id))
 
     @router.patch("/materials/{asset_id}")
     def material_update(asset_id: UUID, payload: MaterialUpdate, tenant_id: str = Depends(tenant_dependency),

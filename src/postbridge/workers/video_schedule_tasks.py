@@ -30,12 +30,18 @@ def dispatch_video_agent_executions(factory=None):
             VideoAgentExecutionOrm.batch_id.is_(None),
             or_(VideoAgentExecutionOrm.lease_until.is_(None), VideoAgentExecutionOrm.lease_until < datetime.now(UTC)))
             .order_by(VideoAgentExecutionOrm.created_at).limit(20)).all() if settings.video_studio_enabled else []
+        overdue = [e.id for e in db.scalars(select(VideoAgentExecutionOrm).join(AgentRunOrm,
+            AgentRunOrm.id == VideoAgentExecutionOrm.id).where(AgentRunOrm.status.in_(["queued", "running"]),
+            VideoAgentExecutionOrm.input_snapshot["publish_at"].as_string() <= datetime.now(UTC).isoformat(),
+            or_(VideoAgentExecutionOrm.publication_json["deadline_notified"].as_boolean().is_(None),
+                VideoAgentExecutionOrm.publication_json["deadline_notified"].as_boolean().is_(False)))
+            .order_by(VideoAgentExecutionOrm.created_at).limit(20)) if e.input_snapshot.get("publish_at")]
         completed = db.scalars(select(VideoAgentExecutionOrm.id).join(AgentRunOrm,
             AgentRunOrm.id == VideoAgentExecutionOrm.id).where(VideoAgentExecutionOrm.notification_acknowledged == 0,
             AgentRunOrm.status.in_(["awaiting_review", "failed", "cancelled"])).limit(20)).all()
     for run_id in pending:
         celery_app.send_task("postbridge.video.prepare_agent_run", args=[run_id], queue="video")
-    for run_id in completed:
+    for run_id in set(completed + overdue):
         celery_app.send_task("postbridge.video.report_agent_run", args=[run_id], queue="video")
 
 
@@ -119,6 +125,11 @@ def prepare_video_agent_run(run_id):
             run.status, run.started_at = "running", run.started_at or now
             db.commit()
             return
+        due = execution.input_snapshot.get("publish_at")
+        if due and datetime.fromisoformat(due) <= now:
+            run.status, run.error_code, run.completed_at = "failed", "VIDEO_DELIVERY_MISSED", now
+            db.commit()
+            return
         if execution.attempts >= 3:
             run.status, run.error_code, run.completed_at = "failed", "VIDEO_SCHEDULE_PREPARATION_FAILED", now
             db.commit()
@@ -183,18 +194,34 @@ def report_video_agent_run(run_id):
     with SESSION_LOCAL() as db:
         execution = db.get(VideoAgentExecutionOrm, run_id)
         run = db.get(AgentRunOrm, run_id)
-        if execution is None or execution.notification_acknowledged or run.status not in {"awaiting_review", "failed", "cancelled"}:
+        if execution is None:
+            return
+        active = run.status in {"queued", "running"}
+        due = execution.input_snapshot.get("publish_at")
+        if active:
+            if not due or datetime.fromisoformat(due) > datetime.now(UTC) or (execution.publication_json or {}).get("deadline_notified"):
+                return
+        elif execution.notification_acknowledged or run.status not in {"awaiting_review", "failed", "cancelled"}:
             return
         if get_settings().postbridge_app_mode == "saas":
             try:
                 result = callback("agent-run-finished", execution)
-                execution.publication_json = result.get("auto_publication", {})
+                if active:
+                    if result.get("deadline_acknowledged"):
+                        execution.publication_json = {**(execution.publication_json or {}), "deadline_notified": True}
+                        db.commit()
+                    return
+                execution.publication_json = {**(execution.publication_json or {}), **result.get("auto_publication", {})}
                 if execution.publication_json.get("status") == "pending":
                     db.commit()
                     return
             except Exception:
                 logger.warning("Video completion notification deferred: %s", run_id)
                 return
+        elif active:
+            execution.publication_json = {**(execution.publication_json or {}), "deadline_notified": True}
+            db.commit()
+            return
         elif execution.input_snapshot.get("auto_publication") and run.status == "awaiting_review":
             from postbridge.services.video_auto_publication import prepare_auto_posts, auto_approval, approve_auto_post
             try:

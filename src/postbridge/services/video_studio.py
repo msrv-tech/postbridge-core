@@ -158,6 +158,7 @@ def project_payload(session: Session, project: VideoProjectOrm) -> dict:
         asset = session.get(MediaAssetOrm, job.output_asset_id) if job and job.output_asset_id else None
         public_scenes = []
         progress = (job.progress_json or {}) if job else {}
+        cover = session.get(MediaAssetOrm, (progress.get("cover") or {}).get("asset_id")) if progress.get("cover") else None
         planned = progress.get("steps", {}).get("storyboard", {}).get("result", {}).get("scenes", [])
         # The original manifest remains immutable. Expose verified checkpoints so
         # a failed neighbour does not make the user repay a completed visual.
@@ -188,6 +189,8 @@ def project_payload(session: Session, project: VideoProjectOrm) -> dict:
                       "job_id": job.id if job else None, "error_code": job.error_code if job else None,
                       "output_url": managed_media_url(asset.id, asset.object_key) if asset else None,
                       "output_asset_id": asset.id if asset else None,
+                      "cover_url": managed_media_url(cover.id, cover.object_key) if cover and cover.tenant_id == project.tenant_id else None,
+                      "cover_title": (progress.get("cover") or {}).get("title"),
                       "storyboard": {"schema_version": 1, "scenes": public_scenes,
                           "analyses": {key.split(":", 1)[1]: step.get("result") for key, step in progress.get("steps", {}).items()
                               if key.startswith("analysis:") and step.get("state") == "done"}},

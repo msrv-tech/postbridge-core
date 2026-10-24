@@ -371,3 +371,38 @@ Hosted video schedules use a plain-language request and review card. The page re
 The SDK assistant can create a schedule from a brief without an open project, inspect complete schedule templates, and propose an in-place edit using the current hash. Dynamic folders, original count, voice/language variants, notifications, run/month budgets and explicit language destinations use the same validated configuration as HTTP. Publication fingerprints are read by the server and the exact recipients/languages appear in the saved card. Applying a card rechecks the actor, current template and bridge policy. A paused task stays paused.
 
 Hosted MCP exposes video workspace capabilities, projects/storyboards, material folders, full schedules and eligible bridges; create/edit/voice operations and schedule creation/edit/control prepare the same persisted assistant cards. `apply_video_action` requires explicit approval of the returned preview and reserve. MCP uses workspace OAuth scopes, membership/role checks, request idempotency and the existing budget and usage services. Even free montage edits wait for review through MCP. Automatic publication additionally requires the publishing OAuth scope. No separate video price or billing multiplier is introduced. Word subtitles and bounded translated-speech shortening remain automatic implementation behavior, not user settings.
+
+
+## Agent controls, deadlines and covers (24 October 2026)
+
+The hosted SDK assistant and MCP share persisted review cards for original/voice batches,
+batch and job cancellation, library renames/moves, and exact-version delivery approval,
+rescheduling, cancellation, retry and reconciliation. Reads expose owned projects,
+batches, current publication snapshots and fresh TikTok creator options. Applying a
+saved card rechecks workspace membership, publication scope, prices and stale snapshots.
+TikTok still needs explicit per-video declarations; schedules cannot grant them.
+
+`production_lead_minutes` (5–1440, optional) makes a video's existing cron describe
+publication time. Production starts that many elapsed minutes earlier. Every occurrence
+freezes its UTC publication instant and timezone before any AI work, including across
+DST changes. A nonexistent local slot is skipped; an overlapping hour uses its first
+occurrence only. Legacy templates without a lead retain their generation-time semantics.
+Overdue unstarted occurrences incur no AI cost. A late result is retained for review,
+never automatically sent at a substituted time. Hosted notifications use the existing
+durable outbox for an overdue active production and for expired delivery targets, with
+one notice per occurrence/deadline version and current workspace membership checks.
+
+Every new completed revision also stores a separate 720×1280 JPEG cover from its first
+verified visual, scene caption and brand color. It incurs no extra provider call, is
+available as `current.cover_url`/`cover_title`, and becomes the post draft's cover. The
+private production brief is never used as cover text. Covers share managed-media
+ownership, retention and cleanup rules with previews and remain bound to their revision.
+
+Storyboard/image/speech steps now send the remaining GitSell allowance to
+`/v1/bounded/{chat/completions,images/generations,audio/generations}`. The gateway checks
+locked billing rates against a conservative input bound and an enforced provider output
+limit before egress. Unsupported models/features or an older gateway fail closed;
+known pre-provider rejections have zero charge and no unknown receipt. Actual provider
+usage still determines the GitSell charge. Native video retains its existing frozen
+payer quote and `max_units` contract. Deploy the GitSell bounded endpoints before this
+Core increment. No migration or additional end-user settings are required.

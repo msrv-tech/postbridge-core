@@ -9,7 +9,7 @@ from postbridge.agent.scheduling import next_run_at_from_cron
 from postbridge.agent.storage import create_agent_task, pause_agent_task, resume_agent_task
 from postbridge.models.domain import (AgentRunOrm, AgentTaskOrm, ChannelOrm, VideoAgentExecutionOrm,
     VideoProductionJobOrm, VideoProjectOrm)
-from postbridge.services.video_schedules import enqueue_video_agent_run, synchronize_video_agent_runs
+from postbridge.services.video_schedules import enqueue_video_agent_run, synchronize_video_agent_runs, utc
 from postbridge.services.video_studio import get_project
 from postbridge.workers import tasks, video_schedule_tasks, video_tasks
 from tests.test_video_studio import state, error
@@ -245,3 +245,48 @@ def test_core_agent_api_exposes_template_run_and_origin(scheduled):
     detail = client.get(f"/internal/service/agent/runs/{run_id}", headers=headers).json()
     assert detail["video_execution"]["project_id"]
     assert detail["video_execution"]["task_id"] == task.id
+
+
+def test_publication_slot_is_frozen_before_production_and_old_slots_do_not_spend(scheduled):
+    from postbridge.services.video_schedules import VideoTaskConfig, next_production_at
+    db, tenant, *_ = scheduled
+    task = create(scheduled)
+    config = json.loads(task.task_config_json)
+    config["production_lead_minutes"] = 60
+    task.task_config_json = json.dumps(config)
+    task.next_run_at = datetime(2026, 10, 19, 1, tzinfo=UTC)  # 08:00 local, publication 09:00
+    run = enqueue_video_agent_run(db, tenant_id=tenant, task_id=task.id, scheduled=True,
+        now=datetime(2026, 10, 19, 1, 1, tzinfo=UTC))
+    db.commit()
+    snapshot = db.get(VideoAgentExecutionOrm, run.id).input_snapshot
+    assert snapshot["publish_at"] == "2026-10-19T02:00:00+00:00"
+    assert utc(task.next_run_at) == datetime(2026, 10, 26, 1, tzinfo=UTC)
+    run.status = "failed"
+    task.next_run_at = datetime(2026, 10, 19, 1, tzinfo=UTC)
+    missed = enqueue_video_agent_run(db, tenant_id=tenant, task_id=task.id, scheduled=True,
+        now=datetime(2026, 10, 20, 1, tzinfo=UTC))
+    # Same occurrence is idempotent even when read after its deadline.
+    assert missed.id == run.id
+    task.next_run_at = datetime(2026, 10, 20, 1, tzinfo=UTC)
+    missed = enqueue_video_agent_run(db, tenant_id=tenant, task_id=task.id, scheduled=True,
+        now=datetime(2026, 10, 20, 3, tzinfo=UTC))
+    assert missed.error_code == "VIDEO_DELIVERY_MISSED" and missed.status == "failed"
+    assert snapshot["publish_at"] == "2026-10-19T02:00:00+00:00"
+    # DST is handled by the existing local cron resolver; the lead is elapsed UTC time.
+    value = VideoTaskConfig.model_validate(config)
+    at = next_production_at("0 9 * * *", "Europe/Berlin", value, datetime(2026, 10, 24, 8, tzinfo=UTC))
+    assert at == datetime(2026, 10, 25, 7, tzinfo=UTC)
+
+
+def test_publication_lead_skips_nonexistent_local_time_and_never_repeats_overlap(scheduled):
+    from postbridge.services.video_schedules import VideoTaskConfig, next_production_at
+    task = create(scheduled)
+    config = VideoTaskConfig.model_validate({**json.loads(task.task_config_json), "production_lead_minutes": 60})
+    assert next_production_at("30 2 * * *", "Europe/Berlin", config,
+        datetime(2027, 3, 27, 10, tzinfo=UTC)) == datetime(2027, 3, 28, 23, 30, tzinfo=UTC)
+    first = next_production_at("30 2 * * *", "Europe/Berlin", config,
+        datetime(2026, 10, 24, 10, tzinfo=UTC))
+    assert first == datetime(2026, 10, 24, 23, 30, tzinfo=UTC)
+    # Once the first 02:30 publication is due, a later pass cannot schedule fold=1.
+    following = next_production_at("30 2 * * *", "Europe/Berlin", config, first + timedelta(minutes=1))
+    assert following == datetime(2026, 10, 26, 0, 30, tzinfo=UTC)

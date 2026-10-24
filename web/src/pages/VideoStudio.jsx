@@ -335,11 +335,12 @@ export default function VideoStudio() {
             <h2>{project.brief}</h2>
             {project.revisions.length > 1 && <label>{t('videoVoice.version')}<select value={current.version} disabled={busy || unsavedChanges} onChange={(e) => setSelectedVersion(Number(e.target.value))}>{project.revisions.map((revision) => <option key={revision.id} value={revision.version}>{t('video.version', { version: revision.version })} · {t(`videoVoice.language.${revision.language || 'ru'}`)} · {t(`video.status.${revision.status}`)}</option>)}</select></label>}
             <p role="status">{t(`video.status.${current.status}`)}{working(viewProject) && ` · ${t(`video.stage.${current.stage}`)}`}</p>
-            {current.output_url && <video key={current.output_url} src={current.output_url} controls playsInline preload="metadata" aria-label={t('video.preview')} />}
+            {current.output_url && <video key={current.output_url} src={current.output_url} poster={current.cover_url || undefined} controls playsInline preload="metadata" aria-label={t('video.preview')} />}
             {current.status === 'draft' && <p className="muted">{t('video.draftHint')}</p>}
             {current.error_code && <p className="error">{t(failureKey(current))}</p>}
             {current.usage?.tokens_charged > 0 && <p className="muted">{t('video.usage', { units: current.usage.tokens_charged })}</p>}
             <div className="inline-actions">
+              {current.cover_url && <a className="btn secondary" href={`${current.cover_url}?download=1`} download target="_blank" rel="noreferrer">{t("video.cover")}</a>}
               {current.output_url && <a className="btn" href={`${current.output_url}?download=1`} download={`postbridge-${project.id}.mp4`} target="_blank" rel="noreferrer">{t('video.download')}</a>}
               {current.post_draft?.content_item_id && <Link className="btn" to={`/workspaces/${workspaceId}/content/${current.post_draft.content_item_id}`}>{t('videoPost.open')}</Link>}
               {capabilities.enabled && current.status === 'succeeded' && !current.post_draft && !preparingPost && <button className="btn" disabled={busy || unsavedChanges} onClick={() => setPreparingPost(true)}>{t('videoPost.prepare')}</button>}

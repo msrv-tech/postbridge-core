@@ -10,6 +10,8 @@ class MaterialUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     name: str = Field(min_length=1, max_length=180)
     folder: str = Field(default="", max_length=120)
+    expected_name: str | None = Field(default=None, max_length=180)
+    expected_folder: str | None = Field(default=None, max_length=120)
 
 
 def material_payload(row, asset):
@@ -30,12 +32,24 @@ def list_materials(session, tenant_id, *, folder=None, search="", limit=20, offs
     return {"items": [material_payload(r, a) for r, a in rows[:limit]], "has_more": len(rows) > limit, "folders": folders}
 
 
+def get_material(session, tenant_id, asset_id):
+    row = session.scalar(select(VideoMaterialOrm).where(VideoMaterialOrm.asset_id == asset_id,
+        VideoMaterialOrm.tenant_id == tenant_id))
+    asset = session.get(MediaAssetOrm, asset_id)
+    if not row or not asset or asset.tenant_id != tenant_id:
+        raise video_error("VIDEO_ASSET_NOT_FOUND", "Material not found")
+    return material_payload(row, asset)
+
+
 def update_material(session, tenant_id, asset_id, payload):
     row = session.scalar(select(VideoMaterialOrm).where(VideoMaterialOrm.asset_id == asset_id,
         VideoMaterialOrm.tenant_id == tenant_id).with_for_update())
     asset = session.get(MediaAssetOrm, asset_id)
     if not row or not asset or asset.tenant_id != tenant_id:
         raise video_error("VIDEO_ASSET_NOT_FOUND", "Material not found")
+    if payload.expected_name is not None and row.name != payload.expected_name or payload.expected_folder is not None and row.folder != payload.expected_folder:
+        if row.name != payload.name or row.folder != payload.folder:
+            raise video_error("VIDEO_MATERIAL_CONFLICT", "The material changed; review its name and folder again")
     row.name, row.folder = payload.name, payload.folder
     session.commit()
     return material_payload(row, asset)

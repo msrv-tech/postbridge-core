@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from postbridge.infrastructure.media_storage import managed_media_url
 from postbridge.models.domain import ContentItemOrm, MediaAssetOrm, VideoPostDraftOrm, VideoProductionJobOrm, VideoRevisionOrm
-from postbridge.services.postbridge_workspace_content import create_postbridge_content_item, _dump_extra
+from postbridge.services.postbridge_workspace_content import create_postbridge_content_item, _dump_extra, _load_extra
 from postbridge.services.video_media import video_error
 from postbridge.services.video_studio import _project, require_enabled
 
@@ -47,15 +47,17 @@ def prepare_post_draft(session: Session, tenant_id: str, project_id: str, payloa
     asset = session.get(MediaAssetOrm, job.output_asset_id) if job and job.output_asset_id else None
     if not job or job.status != "succeeded" or not asset or asset.tenant_id != tenant_id or asset.content_type != "video/mp4":
         raise video_error("VIDEO_NOT_READY", "Wait for the video to finish before preparing a post")
+    cover = session.get(MediaAssetOrm, (job.progress_json.get("cover") or {}).get("asset_id")) if (job.progress_json or {}).get("cover") else None
+    cover_url = managed_media_url(cover.id, cover.object_key) if cover and cover.tenant_id == tenant_id else None
     url = managed_media_url(asset.id, asset.object_key)
     origin = {"project_id": project.id, "version": revision.version, "output_asset_id": asset.id, "output_url": url}
     # The production brief can contain private instructions. Only the explicit caption
     # becomes publishable text. A later video revision never rewrites this post.
     content = create_postbridge_content_item(session, tenant_id=tenant_id, author_user_id=None,
         content_md=payload.caption, content_plain=None, title=None, media_url=url, media_urls=[url],
-        summary=None, link_url=None, cta=None, tags=None, author=None, cover_image_url=None, status="draft")
+        summary=None, link_url=None, cta=None, tags=None, author=None, cover_image_url=cover_url, status="draft")
     content.language = (revision.production_options or {}).get("language")
-    content.body_structured_json = _dump_extra({"video_origin": origin})
+    content.body_structured_json = _dump_extra({**_load_extra(content.body_structured_json), "video_origin": origin})
     receipt = VideoPostDraftOrm(id=str(uuid4()), tenant_id=tenant_id, revision_id=revision.id,
                                content_item_id=content.id, caption=payload.caption)
     session.add(receipt)

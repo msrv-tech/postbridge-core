@@ -1361,3 +1361,45 @@ test('studio delivery selects bridges and reviews receiving side settings withou
   await expect(card.getByRole('button', { name: 'Check existing upload', exact: true })).toHaveCount(0)
   await expect(card.getByRole('link', { name: 'Manage bridges', exact: true })).toBeVisible()
 })
+
+for (const kind of ['video_batch', 'video_delivery', 'material_edit', 'video_cancel', 'batch_cancel']) {
+  test(`assistant ${kind} requires a readable explicit review`, async ({ page }, testInfo) => {
+    await mockSaasBff(page)
+    const projectId = '00000000-0000-4000-8000-000000000097'
+    let applied = 0
+    const current = { version: 2, status: 'succeeded', mode: 'manual', stage: 'ready', scenes: [], language: 'en',
+      output_url: '/test-video.mp4', cover_url: '/test-cover.jpg' }
+    await page.route('**/workspaces/ws-1/videos**', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify(
+      new URL(route.request().url()).pathname.endsWith('/capabilities') ? { enabled: true } : { id: projectId, brief: 'Product demo', current_version: 2, current, revisions: [current] }) }))
+    const summary = { brief: 'Approved product caption', version: 2, count: 2, reserve_units: 20000, limit_units: 15000,
+      variants: [{ language: 'en', voice: 'Charon', voice_style: 'warm' }], action: 'approve',
+      destinations: [{ title: 'Test YouTube', platform: 'youtube' }], publish_at: '2026-12-01T09:00:00Z', timezone: 'Europe/Berlin',
+      output_url: '/test-video.mp4', previous_name: 'Screenshot', previous_folder: 'Old', folder: 'Product' }
+    await page.route('**/workspaces/ws-1/assistant/help', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      conversation_id: 'operations', message: 'Review this action.', video_action: { id: '47', kind, status: 'proposed', summary } }) }))
+    await page.route('**/workspaces/ws-1/assistant/actions/47/apply', route => {
+      applied++
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ route: `/workspaces/ws-1/content/videos/${projectId}` }) })
+    })
+    await page.addInitScript(() => { localStorage.setItem('postbridge_token', 'saas-token'); localStorage.setItem('postbridge.locale', 'en') })
+    await page.goto(`/workspaces/ws-1/content/videos/${projectId}`)
+    await expect(page.getByRole('link', { name: 'Cover', exact: true })).toHaveAttribute('href', '/test-cover.jpg?download=1')
+    await page.getByRole('button', { name: 'Assistant', exact: true }).click()
+    const card = page.locator('.support-assistant-video-card')
+    await expect(card).toContainText('Approved product caption')
+    if (kind === 'video_delivery') {
+      await expect(card).toContainText('Test YouTube')
+      await expect(card).toContainText('Europe/Berlin')
+      await expect(card).toContainText('Version 2')
+    }
+    if (kind === 'video_batch') {
+      await expect(card).toContainText('15000')
+      await expect(card).toContainText('completed results are retained')
+    }
+    expect(applied).toBe(0)
+    if (kind === 'video_delivery') await card.screenshot({ path: testInfo.outputPath('assistant-exact-video-delivery.png') })
+    await card.getByRole('button').click()
+    await expect.poll(() => applied).toBe(1)
+    await expect(card.getByRole('button', { name: 'Applied', exact: true })).toBeDisabled()
+  })
+}

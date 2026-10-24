@@ -131,7 +131,11 @@ def pause_agent_task(session: Session, *, tenant_id: str, task_id: str) -> Agent
 def resume_agent_task(session: Session, *, tenant_id: str, task_id: str) -> AgentTaskOrm:
     row = get_agent_task(session, tenant_id=tenant_id, task_id=task_id)
     row.status = "active"
-    row.next_run_at = next_run_at_from_cron(row.schedule_cron, base=datetime.now(UTC), timezone=row.timezone)
+    if row.mode == "video_autopilot":
+        from postbridge.services.video_schedules import VideoTaskConfig, next_production_at
+        row.next_run_at = next_production_at(row.schedule_cron, row.timezone, VideoTaskConfig.model_validate_json(row.task_config_json))
+    else:
+        row.next_run_at = next_run_at_from_cron(row.schedule_cron, base=datetime.now(UTC), timezone=row.timezone)
     session.flush()
     return row
 

@@ -230,3 +230,29 @@ def test_sampled_frame_anchor_moves_back_to_fit_whole_clip_fragment():
     assert result.scenes[0].source_start_seconds == 7.5
     assert result.scenes[0].duration_seconds == 4.5
     assert result.scenes[0].image_prompt is None
+
+
+def test_each_paid_step_uses_bounded_endpoint_and_remaining_budget(auto, monkeypatch):
+    session, tenant, *_ = auto
+    calls = mock_gateway(monkeypatch)
+    project = create_project(session, tenant, request())
+    video_tasks.process_video_job.run(project["current"]["job_id"])
+    assert [c[1]["max_units"] for c in calls] == [1000, 990, 970]
+    assert all("/v1/bounded/" in c[0] for c in calls)
+
+
+def test_definitive_gateway_cap_rejection_has_no_unknown_charge(auto, monkeypatch):
+    from postbridge.services.video_media import video_error
+    session, tenant, *_ = auto
+    calls = []
+    def reject(path, body, correlation):
+        calls.append(body)
+        raise video_error("VIDEO_BUDGET_EXHAUSTED", "Request exceeds its remaining cap")
+    monkeypatch.setattr(video_autopilot, "gateway_json", reject)
+    project = create_project(session, tenant, request())
+    video_tasks.process_video_job.run(project["current"]["job_id"])
+    session.expire_all()
+    result = get_project(session, tenant, project["id"])["current"]
+    assert result["error_code"] == "VIDEO_BUDGET_EXHAUSTED"
+    assert result["usage"]["tokens_charged"] == 0 and result["usage"]["uncertain"] is False
+    assert len(calls) == 1

@@ -1,5 +1,5 @@
 """Video templates and durable occurrences on the existing agent scheduler."""
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import json
 import hashlib
 from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -29,6 +29,7 @@ class VideoTaskConfig(BaseModel):
     max_units_per_run: int | None = Field(default=None, ge=1, le=100_000_000)
     max_units_per_month: int | None = Field(default=None, ge=1, le=100_000_000)
     notify: bool = True
+    production_lead_minutes: int | None = Field(default=None, ge=5, le=1440)
     auto_publication: AutoPublicationPolicy | None = None
     material_folder: str | None = Field(default=None, max_length=120)
     material_limit: int = Field(default=6, ge=1, le=8)
@@ -73,6 +74,26 @@ def validate_template(config, goal_text):
         raise video_error("VIDEO_SCHEDULE_INVALID", "Check the video task, materials and budget settings") from exc
 
 
+def next_production_at(cron, timezone, config, base=None):
+    if not cron or config.production_lead_minutes is None:
+        return next_run_at_from_cron(cron, base=base, timezone=timezone)
+    from croniter import croniter
+    lead = timedelta(minutes=config.production_lead_minutes)
+    after = utc(base or datetime.now(UTC)) + lead
+    zone = ZoneInfo(timezone)
+    # Iterate literal wall-clock slots, then resolve to UTC explicitly. A
+    # spring gap must not silently move publication to another local time.
+    iterator = croniter(cron, after.astimezone(zone).replace(tzinfo=None))
+    for _ in range(2880):
+        wall = iterator.get_next(datetime)
+        instant = wall.replace(tzinfo=zone, fold=0).astimezone(UTC)
+        if instant.astimezone(zone).replace(tzinfo=None) != wall:
+            continue  # Spring gap: that local time does not exist.
+        if instant > after:
+            return instant - lead  # Fall overlap uses its first occurrence only.
+    raise video_error("VIDEO_SCHEDULE_INVALID", "Choose a schedule with a valid local publication time")
+
+
 def create_video_agent_task(session, *, tenant_id, channel_id, goal_text, schedule_cron, timezone,
                             task_config, created_by, autonomy_mode, max_candidates_per_run):
     require_enabled()
@@ -92,7 +113,7 @@ def create_video_agent_task(session, *, tenant_id, channel_id, goal_text, schedu
         ZoneInfo(timezone or "UTC")
         if schedule_cron and (len(schedule_cron.split()) != 5 or not croniter.is_valid(schedule_cron)):
             raise ValueError("Invalid cron")
-        next_run = next_run_at_from_cron(schedule_cron, timezone=timezone)
+        next_run = next_production_at(schedule_cron, timezone, config)
     except (ImportError, ValueError, KeyError, ZoneInfoNotFoundError) as exc:
         raise video_error("VIDEO_SCHEDULE_INVALID", "Choose a valid schedule and timezone") from exc
     channel = session.get(ChannelOrm, channel_id)
@@ -152,7 +173,7 @@ def update_video_agent_task(session, *, tenant_id, task_id, expected_hash, goal_
         ZoneInfo(timezone)
         if schedule_cron and (len(schedule_cron.split()) != 5 or not croniter.is_valid(schedule_cron)):
             raise ValueError("Invalid cron")
-        next_run = next_run_at_from_cron(schedule_cron, timezone=timezone)
+        next_run = next_production_at(schedule_cron, timezone, config)
     except (ValueError, KeyError, ZoneInfoNotFoundError) as exc:
         raise video_error("VIDEO_SCHEDULE_INVALID", "Choose a valid schedule and timezone") from exc
     _check_assets(session, tenant_id, [s.model_dump() for s in config.video.scenes])
@@ -211,17 +232,26 @@ def enqueue_video_agent_run(session, *, tenant_id, task_id, occurrence_key=None,
         if not production["scenes"] and not active:
             run.status, run.error_code, run.completed_at = "failed", "VIDEO_FOLDER_EMPTY", now
     production["request_key"] = f"agent-video:{run_id}"
+    publish_at = None
+    if config.production_lead_minutes:
+        slot = utc(task.next_run_at) if scheduled else now.replace(second=0, microsecond=0) + timedelta(minutes=1)
+        publish_at = slot + timedelta(minutes=config.production_lead_minutes)
+        if publish_at <= now and not active:
+            run.status, run.error_code, run.completed_at = "failed", "VIDEO_DELIVERY_MISSED", now
+
     session.add(VideoAgentExecutionOrm(id=run_id, tenant_id=tenant_id, task_id=task.id, occurrence_key=key,
         input_snapshot={"video": production, "created_by": task.created_by,
             "count": config.count, "variants": [v.model_dump() for v in config.variants],
             "max_units_per_run": config.max_units_per_run, "max_units_per_month": config.max_units_per_month,
             "notify": config.notify, "timezone": task.timezone,
+            "publish_at": publish_at.isoformat() if publish_at else None,
+            "production_lead_minutes": config.production_lead_minutes,
             "material_folder": config.material_folder,
             "auto_publication": config.auto_publication.model_dump() if config.auto_publication else None}, notification_acknowledged=1 if active else 0))
     task.last_run_at = now
     if scheduled:
         # Advance from now: missed occurrences never produce a catch-up spending burst.
-        task.next_run_at = next_run_at_from_cron(task.schedule_cron, base=now, timezone=task.timezone)
+        task.next_run_at = next_production_at(task.schedule_cron, task.timezone, config, base=now)
     session.flush()
     return run
 

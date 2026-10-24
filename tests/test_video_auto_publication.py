@@ -88,3 +88,18 @@ def test_language_variant_uses_only_its_reviewed_bridges(automatic):
     assert approval.bridge_ids==[second.id] and approval.expected_bridges=={second.id:fingerprints[second.id]}
     revision.production_options={**revision.production_options,'language':'ru'};db.commit()
     assert auto_approval(db,tenant,run.id,post_id).bridge_ids==[first.id]
+
+
+def test_auto_approval_keeps_frozen_time_and_refuses_late_ready_video(automatic):
+    from datetime import UTC, datetime, timedelta
+    db, tenant, _, post_id, _, run, _ = automatic
+    execution = db.get(VideoAgentExecutionOrm, run.id)
+    due = (datetime.now(UTC) + timedelta(hours=2)).replace(second=0, microsecond=0)
+    execution.input_snapshot = {**execution.input_snapshot, "publish_at": due.isoformat(), "timezone": "Asia/Novosibirsk"}
+    db.commit()
+    body = auto_approval(db, tenant, run.id, post_id)
+    assert body.publish_at == due and body.timezone == "Asia/Novosibirsk"
+    execution.input_snapshot = {**execution.input_snapshot, "publish_at": (due - timedelta(days=1)).isoformat()}
+    db.commit()
+    with error("VIDEO_DELIVERY_MISSED"):
+        auto_approval(db, tenant, run.id, post_id)

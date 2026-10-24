@@ -1,5 +1,6 @@
 """Standing, revocable schedule consent uses the ordinary immutable video approval."""
 import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Literal
 from uuid import UUID
@@ -105,6 +106,9 @@ def prepare_auto_posts(db, tenant_id, run_id):
 def auto_approval(db, tenant_id, run_id, content_id, *, lock=False):
     value = execution(db, tenant_id, run_id)
     policy = assert_policy(db, tenant_id, value, lock=lock)
+    due = value.input_snapshot.get('publish_at')
+    if due and datetime.fromisoformat(due) <= datetime.now(UTC):
+        raise video_error('VIDEO_DELIVERY_MISSED', 'The production missed its publication time; review a new delivery time')
     revisions = execution_revisions(db, value)
     receipt = db.scalar(select(VideoPostDraftOrm).where(VideoPostDraftOrm.tenant_id == tenant_id,
         VideoPostDraftOrm.content_item_id == content_id, VideoPostDraftOrm.revision_id.in_([r.id for r in revisions])))
@@ -119,7 +123,8 @@ def auto_approval(db, tenant_id, run_id, content_id, *, lock=False):
     if not bridges:
         raise video_error('VIDEO_AUTO_LANGUAGE_UNMAPPED', 'Choose destinations for this video language')
     return ApproveVideoPublication(expected_snapshot=view['snapshot_hash'], bridge_ids=bridges,
-        expected_bridges={key: policy.expected_bridges[key] for key in bridges})
+        expected_bridges={key: policy.expected_bridges[key] for key in bridges},
+        publish_at=due, timezone=value.input_snapshot.get("timezone") if due else None)
 
 
 def approve_auto_post(db, tenant_id, run_id, content_id, payload):

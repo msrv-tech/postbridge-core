@@ -96,6 +96,17 @@ def gateway_json(path: str, payload: dict, correlation_id: str) -> dict:
     with httpx.Client(timeout=min(180, settings.ai_image_generation_timeout_seconds)) as client:
         with client.stream("POST", join_openai_compatible_path(settings.ai_gateway_base_url, path),
                            headers=headers, json=payload) as response:
+            if "/bounded/" in path and response.status_code in {400, 402, 404, 405}:
+                if response.status_code in {404, 405}:
+                    raise video_error("VIDEO_BUDGET_CAP_UNAVAILABLE", "The AI gateway must support bounded video requests")
+                try:
+                    detail = json.loads(response.read()).get("detail", {})
+                except (ValueError, AttributeError):
+                    detail = {}
+                if isinstance(detail, dict) and detail.get("upstream_called") is False and detail.get("code") in {
+                    "AI_REQUEST_BUDGET_EXCEEDED", "AI_REQUEST_BUDGET_UNSUPPORTED", "AI_REQUEST_BUDGET_INVALID"}:
+                    raise video_error("VIDEO_BUDGET_EXHAUSTED" if detail["code"] == "AI_REQUEST_BUDGET_EXCEEDED" else "VIDEO_BUDGET_CAP_UNAVAILABLE",
+                        "This AI call cannot run within the remaining authorized budget")
             response.raise_for_status()
             data = bytearray()
             for chunk in response.iter_bytes():
@@ -181,9 +192,15 @@ class VideoAutopilot:
         steps[name]["state"] = "started"
         self.save()
         try:
-            body = gateway_json(path, payload, correlation_id)
+            bounded = path.replace("/v1/", "/v1/bounded/", 1)
+            body = gateway_json(bounded, {**payload, "max_units": self.progress["billing"]["limit_units"] - self.spent()}, correlation_id)
             units = charged_units(body)
         except Exception as exc:
+            from postbridge.domain.errors import PostbridgeError
+            if isinstance(exc, PostbridgeError) and exc.code in {"VIDEO_BUDGET_EXHAUSTED", "VIDEO_BUDGET_CAP_UNAVAILABLE"}:
+                steps[name].update(state="rejected", units=0)
+                self.save(financial=True)
+                raise
             steps[name]["state"] = "unknown"
             self.save(financial=True)
             raise video_error("VIDEO_AI_RECONCILIATION_REQUIRED", "The external result needs reconciliation; no paid retry was made") from exc

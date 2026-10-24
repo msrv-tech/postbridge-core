@@ -77,7 +77,7 @@ def test_generated_speech_controls_scene_length_and_real_audible_output(speech):
     decoded = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:a:0", "-f", "s16le", "-"],
         check=True, capture_output=True, timeout=20).stdout
     assert len(decoded) > 24000 and max(abs(n[0]) for n in struct.iter_unpack("<h", decoded)) > 1000
-    assert len(calls) == 1 and calls[0][0] == "/v1/audio/generations"
+    assert len(calls) == 1 and calls[0][0] == "/v1/bounded/audio/generations"
     with error("VALIDATION_MEDIA_ASSET_IN_USE"):
         delete_media_asset(session, tenant_id=tenant, media_asset_id=scene["speech_asset_id"])
 

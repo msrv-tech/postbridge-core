@@ -26,13 +26,21 @@ def enqueue_publication_target_status_changed(
     """Добавляет запись outbox (без commit — вызывающий делает commit)."""
     now = datetime.now(UTC)
     cid = correlation_id or "unknown"
-    err: dict[str, str] | None = None
+    err: dict[str, object] | None = None
     if target.error_code:
         err = {
             "code": target.error_code,
             "message": (target.error_message or "")[:1024],
             "correlation_id": cid,
         }
+    if target.error_code == "VIDEO_DELIVERY_MISSED":
+        from postbridge.models.domain import VideoPublicationApprovalOrm, VideoPostDraftOrm
+        approval = session.scalar(select(VideoPublicationApprovalOrm).where(
+            VideoPublicationApprovalOrm.publication_plan_id == target.publication_plan_id,
+            VideoPublicationApprovalOrm.tenant_id == target.tenant_id))
+        receipt = session.get(VideoPostDraftOrm, approval.post_draft_id) if approval else None
+        if receipt:
+            err.update(video_content_id=receipt.content_item_id, delivery_version=approval.schedule_version)
     payload = {
         "event_id": str(uuid4()),
         "contract_version": PUBLICATION_STATUS_CONTRACT_VERSION,

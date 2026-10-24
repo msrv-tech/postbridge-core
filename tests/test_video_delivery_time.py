@@ -66,6 +66,11 @@ def test_missed_window_expires_without_sending_and_can_be_rescheduled_once(publi
     assert video_publication_tasks.dispatch_video_publications.run() == 0
     db.expire_all()
     assert {item["status"] for item in publication_view(db, tenant, post_id)["targets"]} == {"expired"}
+    import json
+    from postbridge.db import PublicationStatusEventOutboxOrm
+    missed = [json.loads(e.payload_json)["publication_target"]["error"] for e in db.scalars(select(PublicationStatusEventOutboxOrm))
+        if json.loads(e.payload_json)["publication_target"]["status"] == "expired"]
+    assert missed and all(e["video_content_id"] == post_id and e["delivery_version"] == 1 for e in missed)
     monkeypatch.setenv("VIDEO_PUBLICATION_ENABLED", "1")
     publisher = Publisher()
     for target in view["targets"]:

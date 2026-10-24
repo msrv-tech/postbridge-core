@@ -175,6 +175,14 @@ def process_video_job(job_id: str):
                 preview_uploads.append(preview_key)
                 previews.append({"asset_id": preview_id, "object_key": preview_key, "byte_size": preview_path.stat().st_size,
                     "at_seconds": round(at, 3), "scene_id": scene.get("scene_id"), "scene_number": index + 1})
+            from postbridge.services.video_media import render_cover
+            cover_path, cover_title = render_cover(scenes[0], sources[scenes[0]["asset_id"]], directory, options)
+            # Free output artifacts are attempt-specific; a stale worker cannot overwrite the accepted cover.
+            cover_id = str(uuid4())
+            cover_key = f"tenants/{tenant_id}/media/{cover_id}.jpg"
+            upload_media_file(cover_key, cover_path, "image/jpeg")
+            preview_uploads.append(cover_key)
+            cover = {"asset_id": cover_id, "object_key": cover_key, "byte_size": cover_path.stat().st_size, "title": cover_title}
             output_id = str(uuid4())
             uploaded_key = f"tenants/{tenant_id}/media/{output_id}.mp4"
             upload_media_file(uploaded_key, output, "video/mp4")
@@ -182,11 +190,11 @@ def process_video_job(job_id: str):
                 job = session.scalar(select(VideoProductionJobOrm).where(VideoProductionJobOrm.id == job_id).with_for_update())
                 if job.status != "running" or job.lease_token != token:
                     raise InterruptedError("Job cancelled or superseded")
-                for preview in previews:
+                for preview in [*previews, cover]:
                     if session.get(MediaAssetOrm, preview["asset_id"]) is None:
                         session.add(MediaAssetOrm(id=preview["asset_id"], tenant_id=tenant_id, object_key=preview["object_key"],
                             content_type="image/jpeg", byte_size=preview["byte_size"]))
-                job.progress_json = {**(job.progress_json or {}), "scenes": scenes, "previews": previews}
+                job.progress_json = {**(job.progress_json or {}), "scenes": scenes, "previews": previews, "cover": cover}
                 session.add(MediaAssetOrm(id=output_id, tenant_id=tenant_id, object_key=uploaded_key,
                                            content_type="video/mp4", byte_size=output.stat().st_size))
                 session.flush()

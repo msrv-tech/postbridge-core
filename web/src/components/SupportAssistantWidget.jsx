@@ -311,6 +311,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
             {answer.video_action.summary.version && <p>{t('video.version', { version: answer.video_action.summary.version })}</p>}
             {['schedule', 'schedule_edit'].includes(answer.video_action.kind) ? <>
               <p>{answer.video_action.summary.frequency === 'custom' ? answer.video_action.summary.schedule_cron : `${t(`topicScout.schedule.${answer.video_action.summary.frequency}`)} · ${answer.video_action.summary.time}`} · {answer.video_action.summary.timezone}</p>
+              {answer.video_action.summary.production_lead_minutes && <p>{t('videoSchedule.lead', { minutes: answer.video_action.summary.production_lead_minutes })}</p>}
               {answer.video_action.summary.frequency === 'weekly' && <p>{t(`weekday.${['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][answer.video_action.summary.weekday % 7]}`)}</p>}
               <p>{t('videoSchedule.runBudget')}: {answer.video_action.summary.max_units_per_run || t('videoSchedule.planBudget')}<br />{t('videoSchedule.monthlyBudget')}: {answer.video_action.summary.max_units_per_month || t('videoSchedule.planBudget')}</p>
               <p>{t(`videoAssistant.mode.${answer.video_action.summary.mode || 'autopilot'}`)}</p>
@@ -326,6 +327,19 @@ export default function SupportAssistantWidget({ workspaceId }) {
               </> : <p>{t('videoSchedule.draftOnly')}</p>}
               {answer.video_action.kind === 'schedule_edit' && <p>{t('videoSchedule.agentStatusKept')}</p>}
             </> : answer.video_action.kind === 'schedule_control' ? <p>{t(`videoAssistant.control.${answer.video_action.summary.action}`)} · {answer.video_action.summary.timezone}</p>
+              : answer.video_action.kind === 'video_batch' ? <>
+                <p>{t('videoSchedule.agentOutput', { count: answer.video_action.summary.count, language: '' })}</p>
+                {answer.video_action.summary.variants?.map((v, i) => <p key={i}>{v.language} · {v.voice} · {v.voice_style}</p>)}
+                <p>{t('assistant.reserve', { units: answer.video_action.summary.reserve_units })}</p>
+                <p>{t('videoSchedule.runBudget')}: {answer.video_action.summary.limit_units}</p><p>{t('videoAssistant.batchCapHint')}</p>
+              </> : answer.video_action.kind === 'video_delivery' ? <>
+                <p>{t(`videoAssistant.delivery.${answer.video_action.summary.action}`)}</p>
+                {answer.video_action.summary.output_url && <details><summary>{t("video.preview")}</summary><video src={answer.video_action.summary.output_url} controls preload="none" style={{ maxHeight: 240, maxWidth: '100%' }} /></details>}
+                {answer.video_action.summary.destinations?.map((d, i) => <p key={i}>{d.title} · {d.platform}</p>)}
+                <p>{answer.video_action.summary.publish_at ? `${new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short', timeZone: answer.video_action.summary.timezone }).format(new Date(answer.video_action.summary.publish_at))} · ${answer.video_action.summary.timezone}` : t('videoPublish.immediate')}</p>
+                {answer.video_action.summary.tiktok?.map((choice, i) => <p key={i}>TikTok · {t(`tiktok.privacy.${choice.options.privacy_level}`)} · {['comment', 'duet', 'stitch'].map(key => `${t(`tiktok.allow.${key}`)}: ${choice.options[`allow_${key}`] ? t('common.yes') : t('common.no')}`).join(' · ')}<br />{[['commercial_content', 'commercial'], ['brand_organic', 'ownBrand'], ['branded_content', 'branded']].map(([key, label]) => `${t(`tiktok.${label}`)}: ${choice.options[key] ? t('common.yes') : t('common.no')}`).join(' · ')}<br />{t('tiktok.original')}<br /><a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noreferrer">{t('tiktok.musicConfirmation')}</a></p>)}
+              </> : answer.video_action.kind === 'material_edit' ? <p>{answer.video_action.summary.previous_name} → {answer.video_action.summary.brief} · {answer.video_action.summary.previous_folder || '/'} → {answer.video_action.summary.folder || '/'}</p>
+              : ['batch_cancel', 'video_cancel'].includes(answer.video_action.kind) ? <>{answer.video_action.kind === 'batch_cancel' && <p>{t('videoAssistant.cancelBatch', { count: answer.video_action.summary.count || 0, completed: answer.video_action.summary.completed || 0 })}</p>}<p>{t('videoAssistant.cancelHint')}</p></>
               : ['video_generation', 'content_generation'].includes(answer.video_action.kind) ? <>
                 {answer.video_action.summary.task && <p>{t(`assistant.content.${answer.video_action.summary.task}`)}</p>}
                 {answer.video_action.summary.operation && <p>{t(`assistant.video.${answer.video_action.summary.operation}`)}</p>}

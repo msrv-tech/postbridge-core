@@ -4699,3 +4699,14 @@ textarea:focus {
 .video-bridge-settings fieldset, .wizard-layout .video-provider-options { min-width: 0; border: 1px solid var(--border); border-radius: .5rem; margin: 1rem 0; }
 .video-provider-options label { margin: .7rem 0; }
 .video-provider-options label:has(input[type=checkbox]) { display: flex; align-items: flex-start; gap: .5rem; }
+
+.support-assistant-video-card { border: 1px solid var(--border, #cbd5e1); padding: .7rem; border-radius: .5rem; margin: .7rem 0; overflow-wrap: anywhere; }
+
+/* Review cards need room for the version, recipients and budget before apply. */
+.support-assistant-window:has(.support-assistant-video-card) {
+  max-height: min(760px, calc(100dvh - 2rem));
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.support-assistant-body:has(.support-assistant-video-card) {
+  max-height: min(52dvh, 30rem);
+}

@@ -177,3 +177,22 @@ def _ffmpeg(args: list[str]) -> None:
                        check=True, capture_output=True, timeout=240)
     except (subprocess.SubprocessError, OSError) as exc:
         raise video_error("VIDEO_RENDER_FAILED", "Video assembly failed; your source materials are preserved") from exc
+
+
+def render_cover(scene, source, directory, options):
+    """A separate, free cover from a verified visual and publishable scene text."""
+    meta = inspect_media(source)
+    title = (scene.get("caption") or options.get("brand_name") or "")[:120]
+    text = directory / "cover-title.txt"
+    text.write_text("\n".join(textwrap.wrap(title, width=24)), encoding="utf-8")
+    color = (options.get("brand_color") or "#38bdf8").replace("#", "0x")
+    filters = ("scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1,"
+        f"drawbox=x=0:y=0:w=iw:h=12:color={color}:t=fill")
+    if title:
+        filters += (f",drawtext=textfile='{text}':expansion=none:fontcolor=white:fontsize=48:"
+            "x=(w-text_w)/2:y=h*0.62:box=1:boxcolor=black@0.72:boxborderw=22")
+    output = directory / "cover.jpg"
+    at = scene.get("source_start_seconds", 0) + min(scene["duration_seconds"] / 2, max(0, meta.get("duration_seconds", 1) / 2))
+    _ffmpeg([*(["-ss", str(at)] if meta["kind"] == "video" else []), "-protocol_whitelist", "file,pipe",
+        "-i", str(source), "-vf", filters, "-frames:v", "1", "-q:v", "3", "-threads", "1", "-filter_threads", "1", str(output)])
+    return output, title
