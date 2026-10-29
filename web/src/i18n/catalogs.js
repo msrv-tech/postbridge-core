@@ -755,6 +755,7 @@ export const catalogs = {
     'public.nav.cases.aiTelegramPosts': 'AI-посты для Telegram',
     'public.nav.cases.telegramToMax': 'Telegram -> MAX',
     'public.footer.summary': 'Postbridge — ИИ-агенты, редактура и доставка контента в каналы.',
+    'public.footer.operator': 'Оператор сервиса Postbridge.io — ООО "МАНЖЕЛА".',
     'telegram.deepLink.label':
       'Ссылка — скопируйте и откройте в Telegram на телефоне или вставьте в браузер',
     'telegram.deepLink.aria': 'Ссылка для привязки Telegram',
@@ -2991,6 +2992,7 @@ export const catalogs = {
     'public.nav.cases.aiTelegramPosts': 'AI posts for Telegram',
     'public.nav.cases.telegramToMax': 'Telegram -> MAX',
     'public.footer.summary': 'Postbridge brings AI agents, editing, and content delivery into one workspace.',
+    'public.footer.operator': 'Postbridge.io is operated by ООО "МАНЖЕЛА".',
     'telegram.deepLink.label': 'Copy this link and open it in Telegram on your phone, or paste it into a browser',
     'telegram.deepLink.aria': 'Telegram connection link',
     'telegram.deepLink.copy': 'Copy link',

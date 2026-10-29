@@ -160,6 +160,11 @@ select {
   color: var(--text-muted);
 }
 
+.public-footer .public-footer-operator {
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+}
+
 .public-footer-links {
   display: flex;
   flex-wrap: wrap;

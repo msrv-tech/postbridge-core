@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { isSelfhostMode } from '../adapters/runtime'
 import { BILLING_SUPPORT_EMAIL } from '../billingSupport'
 import { listPublicCaseLandings } from '../caseLandings'
-import { getPublicBrandName } from '../branding'
+import { getPublicBrandName, getPublicMarket } from '../branding'
 import { LanguageSelect, useI18n } from '../i18n'
 
 const brandMarkSrc = `${import.meta.env.BASE_URL}postbridge-mark.svg`
@@ -19,6 +19,7 @@ export default function PublicLayout({ children, compact = false }) {
   const { t } = useI18n()
   const selfhost = isSelfhostMode()
   const brandName = getPublicBrandName()
+  const showOperator = !selfhost && getPublicMarket() === 'io'
 
   return (
     <div className="public-shell">
@@ -58,7 +59,10 @@ export default function PublicLayout({ children, compact = false }) {
 
       <footer className="public-footer">
         <div className="container public-footer-inner">
-          <p>{t('public.footer.summary')}</p>
+          <div>
+            <p>{t('public.footer.summary')}</p>
+            {showOperator && <p className="public-footer-operator">{t('public.footer.operator')}</p>}
+          </div>
           <div className="public-footer-links">
             {!selfhost && <Link to="/news">{t('common.news')}</Link>}
             {showIoDirectory ? <a href="/cases">{t('common.cases')}</a> : <Link to="/cases/telegram-to-max">{t('common.cases')}</Link>}
