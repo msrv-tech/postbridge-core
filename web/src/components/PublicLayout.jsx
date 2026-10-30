@@ -11,18 +11,18 @@ const publicCaseLinks = listPublicCaseLandings().map((landing) => ({
   to: `/cases/${landing.slug}`,
   labelKey: landing.navLabelKey,
 }))
-const showIoDirectory = publicCaseLinks.some((item) =>
+const showIoDirectory = getPublicMarket() === 'io' && publicCaseLinks.some((item) =>
   item.to === '/cases/multi-platform-publishing' || item.to === '/cases/chatgpt-social-publishing',
 )
 
-export default function PublicLayout({ children, compact = false }) {
+export default function PublicLayout({ children, compact = false, className = '' }) {
   const { t } = useI18n()
   const selfhost = isSelfhostMode()
   const brandName = getPublicBrandName()
   const showOperator = !selfhost && getPublicMarket() === 'io'
 
   return (
-    <div className="public-shell">
+    <div className={`public-shell ${className}`.trim()}>
       <header className="public-header">
         <div className="container public-header-inner">
           <Link to="/" className="brand">
@@ -67,7 +67,7 @@ export default function PublicLayout({ children, compact = false }) {
             {!selfhost && <Link to="/news">{t('common.news')}</Link>}
             {showIoDirectory ? <a href="/cases">{t('common.cases')}</a> : <Link to="/cases/telegram-to-max">{t('common.cases')}</Link>}
             {showIoDirectory && <a href="/platforms">Platforms</a>}
-            {showIoDirectory && <a href="/docs/mcp">MCP</a>}
+            {!selfhost && <a href="/docs/mcp">MCP</a>}
             <Link to="/agents/help">{t('common.faq')}</Link>
             {!selfhost && <Link to="/pricing">{t('common.pricing')}</Link>}
             <a href="/privacy">{t('public.nav.privacy')}</a>

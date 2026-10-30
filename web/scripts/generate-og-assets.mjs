@@ -10,10 +10,11 @@ const mark = await readFile(resolve(webRoot, 'public', 'postbridge-mark.svg'), '
 const markDataUrl = `data:image/svg+xml;base64,${Buffer.from(mark).toString('base64')}`
 
 const assets = [
-  ['home.png', 'Social publishing, connected', 'Draft, schedule, bridge, and publish to global channels from one workspace.'],
+  ['home.png', 'Create posts, images, and videos with AI', 'Your AI content studio. Create, edit, schedule, and publish.'],
+  ['home-ru.png', 'Тексты, изображения и видео с ИИ', 'ИИ-студия контента. Создавайте, редактируйте и публикуйте.', 'Postbridge.ru'],
   ['platforms.png', 'Supported platforms', 'Connect global social channels, feeds, and content sources.'],
   ['cases.png', 'Publishing use cases', 'Practical workflows for teams, creators, and agencies.'],
-  ['mcp.png', 'Postbridge MCP', 'Drafts, media, schedules, bridges, and confirmed publishing from ChatGPT.'],
+  ['mcp.png', 'AI content, connected through MCP', 'Video production, editing, voice versions, drafts, and reviewed publishing.', 'Postbridge'],
   ['pricing.png', 'Postbridge.io pricing', 'Free, Pro, and Agency plans for multi-platform publishing.'],
   ['platform-telegram.png', 'Publish to Telegram', 'Plan, schedule, and deliver channel posts from one workspace.'],
   ['platform-facebook.png', 'Publish to Facebook Pages', 'Prepare and publish content through a connected Meta account.'],
@@ -40,7 +41,9 @@ const browser = await chromium.launch({ headless: true })
 const page = await browser.newPage({ viewport: { width: 1200, height: 630 }, deviceScaleFactor: 1 })
 await mkdir(outputDir, { recursive: true })
 
-for (const [filename, title, description] of assets) {
+const selectedAssets = new Set(process.argv.slice(2))
+for (const [filename, title, description, brand = 'Postbridge.io'] of assets) {
+  if (selectedAssets.size && !selectedAssets.has(filename)) continue
   await page.setContent(`<!doctype html>
     <html><head><style>
       * { box-sizing: border-box; }
@@ -57,7 +60,7 @@ for (const [filename, title, description] of assets) {
       p { max-width: 900px; margin: 0; color: #bfdbfe; font-size: 30px; line-height: 1.35; letter-spacing: 0; }
     </style></head><body><main>
       <div class="rail"></div><div class="accent"></div><div class="accent secondary"></div>
-      <div class="brand"><img src="${markDataUrl}" alt="" />Postbridge.io</div>
+      <div class="brand"><img src="${markDataUrl}" alt="" />${escapeHtml(brand)}</div>
       <div class="copy"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(description)}</p></div>
     </main></body></html>`)
   await page.screenshot({ path: resolve(outputDir, filename), type: 'png' })

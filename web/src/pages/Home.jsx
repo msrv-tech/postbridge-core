@@ -3,12 +3,9 @@ import { Link } from 'react-router-dom'
 import PublicLayout from '../components/PublicLayout'
 import { listNews } from '../adapters/news'
 import { useI18n } from '../i18n'
+import { getPublicMarket } from '../branding'
 
-function getLandingRegion() {
-  if (typeof window === 'undefined') return 'ru'
-  const host = window.location.hostname.toLowerCase()
-  return host === 'postbridge.io' || host === 'www.postbridge.io' ? 'io' : 'ru'
-}
+const demoBase = `${import.meta.env.BASE_URL}demo/`
 
 function getRegionalKey(region, key) {
   return region === 'io' ? `${key}.io` : key
@@ -19,6 +16,10 @@ function getSteps(t, region) {
   {
     title: t('home.steps.assign.title'),
     text: t('home.steps.assign.text'),
+  },
+  {
+    title: t('home.steps.create.title'),
+    text: t('home.steps.create.text'),
   },
   {
     title: t('home.steps.review.title'),
@@ -177,6 +178,10 @@ function getFaqItems(t, region) {
     question: t('home.faq.agents.question'),
     answer: t('home.faq.agents.answer'),
   },
+  ...['materials', 'channels', 'cost'].map((key) => ({
+    question: t(`home.faq.${key}.question`),
+    answer: t(`home.faq.${key}.answer`),
+  })),
   {
     question: t('home.faq.destinations.question'),
     answer: t(getRegionalKey(region, 'home.faq.destinations.answer')),
@@ -207,7 +212,7 @@ function formatNewsDate(value, locale, t) {
 
 export default function Home() {
   const { locale, t } = useI18n()
-  const landingRegion = getLandingRegion()
+  const landingRegion = getPublicMarket()
   const [newsItems, setNewsItems] = useState([])
   const [newsSourceUrl, setNewsSourceUrl] = useState('')
   const [newsLoading, setNewsLoading] = useState(true)
@@ -245,8 +250,8 @@ export default function Home() {
   const heroTextKey = getRegionalKey(landingRegion, 'home.hero.text')
 
   return (
-    <PublicLayout>
-      <section className="hero hero-ai">
+    <PublicLayout className="public-home">
+      <section className="hero hero-ai content-studio-hero">
         <div className="hero-ai-glow" aria-hidden />
         <div className="container hero-grid">
           <div>
@@ -257,59 +262,54 @@ export default function Home() {
             </p>
             <div className="hero-actions">
               <Link to="/login" className="btn">
-                {t('home.hero.startAgent')}
+                {t('home.hero.create')}
               </Link>
-              <Link to="/pricing" className="btn btn-secondary">
-                {t('common.pricing')}
-              </Link>
+              <a href="#examples" className="btn btn-secondary">{t('home.hero.examples')}</a>
             </div>
+            <p className="studio-hero-note">{t('home.hero.note')}</p>
           </div>
 
-          <div className="card hero-card hero-card-ai agent-hero-card agent-wow-card">
-            <div className="hero-card-row">
-              <span className="badge badge-running">{t('home.heroCard.badge')}</span>
+          <div className="studio-showcase" id="examples" aria-label={t('home.examples.title')}>
+            <p className="studio-showcase-label">{t('home.examples.title')}</p>
+            <div className="studio-showcase-grid">
+              <div className="studio-showcase-side">
+                <article className="card studio-post-example">
+                  <span className="studio-format-label">{t('home.examples.post.label')}</span>
+                  <h2>{t('home.examples.post.title')}</h2>
+                  <p>{t('home.examples.post.text')}</p>
+                </article>
+                <figure className="studio-image-example">
+                  <img src={`${demoBase}generated-cover.jpg`} alt={t('home.examples.image.alt')} width="720" height="1280" />
+                  <figcaption>{t('home.examples.image.label')}</figcaption>
+                </figure>
+              </div>
+              <figure className="studio-video-example">
+                <video controls playsInline preload="none" poster={`${demoBase}generated-video-poster.jpg`} width="540" height="960" aria-label={t('home.examples.video.label')}>
+                  <source src={`${demoBase}generated-video.mp4`} type="video/mp4" />
+                  <a href={`${demoBase}generated-video.mp4`}>{t('home.examples.video.download')}</a>
+                </video>
+                <figcaption>{t('home.examples.video.label')}<span>{t('home.examples.video.note')}</span></figcaption>
+              </figure>
             </div>
-            <div className="hero-metric">
-              <strong>{t('home.heroCard.promptQuote')}</strong>
-              <span>{t('home.heroCard.promptHint')}</span>
-            </div>
-            <div className="agent-wow-terminal" aria-label={t('home.heroCard.aria')}>
-              <div className="agent-wow-prompt">
-                <span>{t('home.heroCard.task')}</span>
-                <p>{t('home.heroCard.taskText')}</p>
-              </div>
-              <div className="agent-wow-status">
-                <span className="agent-wow-dot" aria-hidden />
-                {t('home.heroCard.status')}
-              </div>
-              <div className="agent-wow-line" aria-hidden />
-            </div>
-            <div className="agent-flow-preview agent-wow-steps" aria-label={t('home.heroCard.stepsAria')}>
-              <div className="agent-flow-step">
-                <span>01</span>
-                <strong>{t('home.heroCard.step1.title')}</strong>
-                <p>{t('home.heroCard.step1.text')}</p>
-              </div>
-              <div className="agent-flow-step">
-                <span>02</span>
-                <strong>{t('home.heroCard.step2.title')}</strong>
-                <p>{t('home.heroCard.step2.text')}</p>
-              </div>
-              <div className="agent-flow-step">
-                <span>03</span>
-                <strong>{t('home.heroCard.step3.title')}</strong>
-                <p>{t('home.heroCard.step3.text')}</p>
-              </div>
-            </div>
-            <div className="agent-wow-result">
-              <div>
-                <span>{t('home.heroCard.doneAt')}</span>
-                <strong>{t('home.heroCard.result')}</strong>
-              </div>
-              <Link to="/login" className="btn btn-secondary btn-small">
-                {t('home.heroCard.open')}
-              </Link>
-            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="section section-muted" id="formats">
+        <div className="container">
+          <div className="section-heading">
+            <span className="eyebrow">{t('home.formats.eyebrow')}</span>
+            <h2>{t('home.formats.title')}</h2>
+          </div>
+          <div className="feature-grid feature-grid-steps">
+            {['text', 'image', 'video'].map((format, index) => (
+              <article className="card feature-card studio-format-card" key={format}>
+                <span className="step-number">0{index + 1}</span>
+                <h3>{t(`home.formats.${format}.title`)}</h3>
+                <p>{t(`home.formats.${format}.text`)}</p>
+                <span className="studio-format-detail">{t(`home.formats.${format}.detail`)}</span>
+              </article>
+            ))}
           </div>
         </div>
       </section>
@@ -320,12 +320,46 @@ export default function Home() {
             <span className="eyebrow">{t('home.how.eyebrow')}</span>
             <h2>{t('home.how.title')}</h2>
           </div>
-          <div className="feature-grid feature-grid-steps">
+          <div className="feature-grid studio-process-grid">
             {steps.map((step, index) => (
               <article className="card feature-card" key={step.title}>
                 <span className="step-number">0{index + 1}</span>
                 <h3>{step.title}</h3>
                 <p>{step.text}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="section section-ai" id="video-studio">
+        <div className="container trust-grid studio-video-section">
+          <div className="section-heading">
+            <span className="eyebrow">{t('home.video.eyebrow')}</span>
+            <h2>{t('home.video.title')}</h2>
+            <p className="section-copy">{t('home.video.text')}</p>
+            <Link to="/login" className="btn btn-secondary">{t('home.video.cta')}</Link>
+          </div>
+          <div className="card">
+            <ul className="check-list">
+              {['script', 'visuals', 'voice', 'versions', 'export'].map((key) => <li key={key}>{t(`home.video.${key}`)}</li>)}
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section className="section section-ai">
+        <div className="container">
+          <div className="section-heading">
+            <span className="eyebrow">{t('home.ai.eyebrow')}</span>
+            <h2>{t('home.ai.title')}</h2>
+            <p className="section-copy">{t('home.ai.text')}</p>
+          </div>
+          <div className="feature-grid feature-grid-steps">
+            {aiPillars.map((item) => (
+              <article className="card feature-card feature-card-ai" key={item.title}>
+                <h3>{item.title}</h3>
+                <p>{item.text}</p>
               </article>
             ))}
           </div>
@@ -397,26 +431,6 @@ export default function Home() {
                 ))}
               </div>
             </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="section section-ai">
-        <div className="container">
-          <div className="section-heading">
-            <span className="eyebrow">{t('home.ai.eyebrow')}</span>
-            <h2>{t('home.ai.title')}</h2>
-            <p className="section-copy">
-              {t('home.ai.text')}
-            </p>
-          </div>
-          <div className="feature-grid feature-grid-steps">
-            {aiPillars.map((item) => (
-              <article className="card feature-card feature-card-ai" key={item.title}>
-                <h3>{item.title}</h3>
-                <p>{item.text}</p>
-              </article>
-            ))}
           </div>
         </div>
       </section>

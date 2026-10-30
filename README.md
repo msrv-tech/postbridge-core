@@ -3,9 +3,25 @@
 [![CI](https://github.com/msrv-tech/postbridge-core/actions/workflows/ci.yml/badge.svg)](https://github.com/msrv-tech/postbridge-core/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Open-source publishing, migration, and automation engine for Postbridge Core.
+Open-source AI content creation and publishing engine for text, images, and short videos.
 
-Postbridge Core helps teams import content, prepare publication plans, and deliver posts across connected channels from a self-hosted stack.
+Postbridge combines AI-assisted research and writing, image generation, and video production with editing, review, scheduling, and multi-channel delivery. Start from a brief, a link, or your own materials; refine the result, download a video, or publish to connected channels.
+
+Use the hosted studio at [Postbridge.io](https://postbridge.io/) or [Postbridge.ru](https://postbridge.ru/), or run Core on your own infrastructure.
+
+## Create with AI
+
+- **Text:** discover topics and sources, draft posts, and refine structure and tone with the editor agent.
+- **Images:** generate post illustrations and visuals for video scenes, alongside your own photos and screenshots.
+- **Short videos:** turn a brief into a storyboard and vertical MP4 using uploaded materials, generated images, or AI video scenes. Add narration, subtitles, covers, and Russian/English voice or language variants.
+- **Recurring work:** schedule agent tasks and video preparation, then review results or configure explicit automation policies.
+- **Publishing:** adapt supported posts, schedule delivery, connect content bridges, and track results per destination. Direct cross-posting and historical import remain available.
+
+Video creation and downloads do not require an external publishing channel. Delivery depends on each platform's supported formats and account eligibility.
+
+AI features require a configured provider gateway; video production also requires the relevant feature flags, workers, and budget settings. Provider usage is separate from the open-source license. See [AI gateway](docs/ai-gateway.md), [video studio](docs/video-studio.md), and [self-host versus hosted modes](docs/saas-vs-self-host.md).
+
+## Content workspace
 
 ![Postbridge Core content workspace](docs/assets/screenshots/postbridge-content.png)
 
@@ -13,7 +29,9 @@ Postbridge Core helps teams import content, prepare publication plans, and deliv
 
 `postbridge-core` contains the public runtime:
 
-- channel fetchers and publishers for Telegram, MAX, VK, RSS/Zen, LinkedIn publishing, Facebook Pages, Instagram Business, X, Bluesky, Mastodon, and the built-in Postbridge source;
+- research and editor agents, AI text and image generation;
+- video projects, storyboards, media assets, generation jobs, narration, and MP4 rendering;
+- channel fetchers and publishers for Telegram, MAX, VK, RSS/Zen, LinkedIn, Facebook Pages, Instagram Business, YouTube, TikTok, X, Bluesky, Mastodon, and the built-in Postbridge source;
 - batch import runs and publication targets;
 - live-sync delivery, status outbox, and worker recovery loops;
 - the shared React frontend with two runtime modes: `selfhost` and `saas`;
@@ -34,6 +52,8 @@ The service API is protected by `CORE_SERVICE_TOKEN` and is intended for trusted
 | - | `linkedin` | Organic post publishing through LinkedIn Posts API. |
 | - | `facebook` | Facebook Page text publishing through Meta Graph API. |
 | - | `instagram` | Instagram Business single-media publishing through Meta Graph API. |
+| - | `youtube` | Reviewed video publishing; Google authorization and account eligibility apply. |
+| - | `tiktok` | Reviewed video delivery with per-video consent; provider access and audit restrictions apply. |
 | - | `x` | Text and media publishing through X API v2. |
 | - | `bluesky` | Text and image publishing through AT Protocol. |
 | - | `mastodon` | Text and media publishing through a configured Mastodon instance. |
@@ -138,6 +158,9 @@ ghcr.io/msrv-tech/postbridge-core
 
 ## Documentation
 
+- [docs/ai-gateway.md](docs/ai-gateway.md)
+- [docs/video-studio.md](docs/video-studio.md)
+- [docs/agent-graphs/README.md](docs/agent-graphs/README.md)
 - [docs/quickstart.md](docs/quickstart.md)
 - [docs/demo-walkthrough.md](docs/demo-walkthrough.md)
 - [docs/configuration.md](docs/configuration.md)

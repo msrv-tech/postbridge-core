@@ -1,5 +1,12 @@
 # AGENTS.md
 
+## Product identity
+
+- Postbridge is an AI content creation and publishing platform for text, images, and short videos.
+- Lead product descriptions with research, AI writing, image generation, and video production; editing, scheduling, publishing, and cross-posting complete the workflow.
+- Core owns the reusable content/agent/video runtime and shared frontend. Hosted deployments add accounts, roles, billing, and workspace budgets.
+- Check `docs/ai-gateway.md` and `docs/video-studio.md` before describing generation capabilities. Enabled features, self-host setup, and external publishing permissions are separate concerns.
+
 ## Repo boundaries
 
 - `postbridge-core` is the public, world-facing repository.
