@@ -558,7 +558,7 @@ select {
 .studio-post-example h2 { font-size: 1.15rem; line-height: 1.25; margin: .7rem 0; }
 .studio-post-example p { font-size: .82rem; line-height: 1.5; color: var(--text-muted); margin: 0; }
 .studio-image-example, .studio-video-example { margin: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-soft); }
-.studio-image-example img { display: block; width: 100%; height: 150px; object-fit: cover; object-position: 50% 62%; }
+.studio-image-example img { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover; }
 .studio-video-example video { display: block; width: 100%; height: auto; aspect-ratio: 9 / 16; background: #071222; }
 .studio-showcase figcaption { padding: .75rem; color: var(--text); font-size: .78rem; line-height: 1.4; }
 .studio-showcase figcaption span { display: block; color: var(--text-muted); font-size: .72rem; margin-top: .35rem; }
@@ -583,7 +583,6 @@ select {
   .studio-post-example { padding: .8rem; }
   .studio-post-example h2 { font-size: 1rem; }
   .studio-post-example p { font-size: .75rem; }
-  .studio-image-example img { height: 125px; }
 }
 
 .agent-hero-card {

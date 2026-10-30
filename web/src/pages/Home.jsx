@@ -213,6 +213,7 @@ function formatNewsDate(value, locale, t) {
 export default function Home() {
   const { locale, t } = useI18n()
   const landingRegion = getPublicMarket()
+  const demoVideo = `${demoBase}coffee-video-${locale === 'en' ? 'en' : 'ru'}`
   const [newsItems, setNewsItems] = useState([])
   const [newsSourceUrl, setNewsSourceUrl] = useState('')
   const [newsLoading, setNewsLoading] = useState(true)
@@ -279,14 +280,14 @@ export default function Home() {
                   <p>{t('home.examples.post.text')}</p>
                 </article>
                 <figure className="studio-image-example">
-                  <img src={`${demoBase}generated-cover.jpg`} alt={t('home.examples.image.alt')} width="720" height="1280" />
+                  <img src={`${demoBase}coffee-cover.jpg`} alt={t('home.examples.image.alt')} width="960" height="720" />
                   <figcaption>{t('home.examples.image.label')}</figcaption>
                 </figure>
               </div>
               <figure className="studio-video-example">
-                <video controls playsInline preload="none" poster={`${demoBase}generated-video-poster.jpg`} width="540" height="960" aria-label={t('home.examples.video.label')}>
-                  <source src={`${demoBase}generated-video.mp4`} type="video/mp4" />
-                  <a href={`${demoBase}generated-video.mp4`}>{t('home.examples.video.download')}</a>
+                <video key={demoVideo} controls playsInline preload="none" poster={`${demoVideo}-poster.jpg`} width="540" height="960" aria-label={t('home.examples.video.label')}>
+                  <source src={`${demoVideo}.mp4`} type="video/mp4" />
+                  <a href={`${demoVideo}.mp4`}>{t('home.examples.video.download')}</a>
                 </video>
                 <figcaption>{t('home.examples.video.label')}<span>{t('home.examples.video.note')}</span></figcaption>
               </figure>
