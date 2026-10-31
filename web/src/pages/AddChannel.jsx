@@ -17,6 +17,7 @@ import {
   verifyMaxChannel,
 } from '../adapters/channels'
 import AppShell from '../components/AppShell'
+import { useWorkspaceSwitchGuard } from '../components/WorkspaceNavigation'
 import TelegramDeepLinkField from '../components/TelegramDeepLinkField'
 import { listInstallationSecrets, upsertInstallationSecret } from '../adapters/installationSecrets'
 import { isSelfhostMode } from '../adapters/runtime'
@@ -473,6 +474,11 @@ export default function AddChannel() {
       setValidating(false)
     }
   }
+
+  useWorkspaceSwitchGuard({
+    dirty: Boolean(channelId.trim() || title.trim() || vkAccessToken.trim() || linkedinAccessToken.trim() || telegramBotDraft.bot_token.trim() || Object.entries(globalCredential).some(([key, value]) => key === 'visibility' ? value !== 'public' : typeof value === 'string' && value.trim())),
+    busy: loading || validating || telegramBotSaving,
+  })
 
   const handleSubmit = async (e) => {
     e.preventDefault()

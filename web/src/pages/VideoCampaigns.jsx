@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import AppShell from '../components/AppShell'
+import { useWorkspaceSwitchGuard } from '../components/WorkspaceNavigation'
 import { useAuth } from '../useAuth'
 import { useI18n } from '../i18n'
 import { clearToken } from '../adapters/sessionToken'
@@ -19,6 +20,7 @@ export default function VideoCampaigns() {
   const [internal, setInternal] = useState(false), [label, setLabel] = useState(''), [promo, setPromo] = useState(''), [minutes, setMinutes] = useState('')
   const [key, setKey] = useState(null), [busy, setBusy] = useState(false), [error, setError] = useState('')
   const endpoint = `/workspaces/${workspaceId}/video-campaigns`
+  useWorkspaceSwitchGuard({ dirty: Boolean(name.trim() || landing.trim() || label.trim() || promo.trim() || minutes.trim() || internal), busy })
   const number = (value) => value == null ? t('videoCampaign.noData') : value.toLocaleString()
   const load = async () => { const result = await api(endpoint); setItems(result.items); return result.items }
   const refresh = async () => { if (selected) setReport(await api(`${endpoint}/${selected}`)) }
@@ -66,7 +68,7 @@ export default function VideoCampaigns() {
       {report && <>
         <section className="card">
           <h2>{report.name}</h2><label>{t('videoCampaign.campaignLink')}<input readOnly value={report.tracking_url} onFocus={(e) => e.target.select()} /></label>
-          <p>{t('videoCampaign.cost', { units: number(report.production.units), minutes: number(report.production.manual_minutes) })}{report.production.uncertain && ` · ${t('video.reconciliationHint')}`}</p>
+          <p>{t('videoCampaign.manualEffort', { minutes: number(report.production.manual_minutes) })}</p>
           <div className="video-funnel">{kinds.map((kind) => <div key={kind}><strong>{number(report.events[kind])}</strong><span>{t(`videoCampaign.${kind}`)}</span></div>)}</div>
           {!!report.partial_events.length && <p className="muted">{t('videoCampaign.partial')}</p>}
           <p className="muted">{t(`videoCampaign.${report.recommendation}`)}</p>

@@ -22,7 +22,8 @@ import { getWorkspaceSettings, updateWorkspaceSettings } from '../adapters/works
 import { getStoredTheme, setStoredTheme, THEMES } from '../adapters/theme'
 import { useAuth } from '../useAuth'
 import AppShell from '../components/AppShell'
-import AssistantExpenses from '../components/AssistantExpenses'
+import { useWorkspaceSwitchGuard } from '../components/WorkspaceNavigation'
+import { canManageWorkspaceBilling } from '../adapters/workspace'
 import { BILLING_SUPPORT_EMAIL, formatSubscriptionPeriod } from '../billingSupport'
 import { BillingPlanOptions, LavaPlanDialog, LavaPaymentStatus, LavaBillingDetails } from '../components/LavaBilling'
 import {
@@ -109,7 +110,7 @@ function buildAiTokenRemainder(billing, t) {
   const safeUsed = Number.isFinite(used) ? Math.max(0, used) : 0
   return {
     label: isFree ? t('settings.aiTokens.daily') : t('settings.aiTokens.monthly'),
-    percent: clampPercent(((limit - safeUsed) / limit) * 100),
+    percent: clampPercent(billing.ai_content_budget_percent_remaining ?? ((limit - safeUsed) / limit) * 100),
   }
 }
 
@@ -163,6 +164,7 @@ export default function WorkspaceSettings() {
   const [tbankSubscriptionWaiting, setTbankSubscriptionWaiting] = useState(null)
   const [lavaPlan, setLavaPlan] = useState(null)
   const lavaCheckoutId = new URLSearchParams(location.search).get('checkout')
+  const [billingEmailBusy, setBillingEmailBusy] = useState(false)
   const [billingEmailModal, setBillingEmailModal] = useState(null)
   const [tbankSubscriptionConsentModal, setTbankSubscriptionConsentModal] = useState(null)
   const [tbankSubscriptionConsentChecked, setTbankSubscriptionConsentChecked] = useState(false)
@@ -173,6 +175,8 @@ export default function WorkspaceSettings() {
     blocked_domains: [],
     blocked_url_patterns: [],
   })
+  const [savedAgentPolicy, setSavedAgentPolicy] = useState(null)
+  const [savedWorkspaceSettings, setSavedWorkspaceSettings] = useState(null)
   const [agentPolicyLoading, setAgentPolicyLoading] = useState(true)
   const [agentPolicySaving, setAgentPolicySaving] = useState(false)
   const [agentPolicyError, setAgentPolicyError] = useState('')
@@ -211,6 +215,8 @@ export default function WorkspaceSettings() {
     [workspaceAgentPolicy]
   )
   const billingEnabled = isBillingEnabled(user)
+  const canManageBilling = canManageWorkspaceBilling(user, workspaceId)
+  const workspaceName = user?.workspaces?.find((workspace) => workspace.id === workspaceId)?.name || workspaceId
   const aiTokenRemainder = buildAiTokenRemainder(billingSummary?.billing, t)
   const showAssistantSettings = Boolean(workspaceId) && !isSelfhostMode()
   const timezoneMarket = getTimezoneMarket()
@@ -239,7 +245,7 @@ export default function WorkspaceSettings() {
   useEffect(() => {
     if (user?.profile_timezone) setTimezone(user.profile_timezone)
     else setTimezone('')
-  }, [user])
+  }, [user?.profile_timezone])
 
   useEffect(() => {
     setAssistantHiddenState(isSupportAssistantHidden(workspaceId))
@@ -327,7 +333,7 @@ export default function WorkspaceSettings() {
     setWorkspaceSettingsLoading(true)
     setWorkspaceSettingsError('')
     getWorkspaceSettings(workspaceId)
-      .then((settings) => setWorkspaceSettings(normalizeWorkspaceSettings(settings)))
+      .then((settings) => { const normalized = normalizeWorkspaceSettings(settings); setWorkspaceSettings(normalized); setSavedWorkspaceSettings(normalized) })
       .catch((e) => setWorkspaceSettingsError(e.message || t('settings.workspace.loadFailed')))
       .finally(() => setWorkspaceSettingsLoading(false))
   }, [workspaceId, t])
@@ -338,13 +344,13 @@ export default function WorkspaceSettings() {
     setAgentPolicyError('')
     getWorkspaceAgentPolicy(workspaceId)
       .then((policy) =>
-        setWorkspaceAgentPolicy({
+        setWorkspaceAgentPolicy(setAndRememberPolicy({
           editor_instructions: policy.editor_instructions || '',
           search_instructions: policy.search_instructions || '',
           preferred_domains: Array.isArray(policy.preferred_domains) ? policy.preferred_domains : [],
           blocked_domains: Array.isArray(policy.blocked_domains) ? policy.blocked_domains : [],
           blocked_url_patterns: Array.isArray(policy.blocked_url_patterns) ? policy.blocked_url_patterns : [],
-        })
+        }))
       )
       .catch((e) => setAgentPolicyError(e.message || t('settings.agentPolicy.loadFailed')))
       .finally(() => setAgentPolicyLoading(false))
@@ -414,7 +420,7 @@ export default function WorkspaceSettings() {
   }
 
   const handleTimezoneSubmit = async (e) => {
-    e.preventDefault()
+    e?.preventDefault()
     setTzError('')
     setTzOk('')
     setTzSaving(true)
@@ -426,8 +432,10 @@ export default function WorkspaceSettings() {
       await updateCurrentUser(body)
       setTzOk(t('settings.saved'))
       await refreshUser()
+      return true
     } catch (err) {
       setTzError(err.message || t('settings.saveError'))
+      return false
     } finally {
       setTzSaving(false)
     }
@@ -468,8 +476,10 @@ export default function WorkspaceSettings() {
       .map((item) => item.trim())
       .filter(Boolean)
 
+  function setAndRememberPolicy(policy) { setSavedAgentPolicy(policy); return policy }
+
   const handleAgentPolicySubmit = async (e) => {
-    e.preventDefault()
+    e?.preventDefault()
     if (!workspaceId) return
     setAgentPolicySaving(true)
     setAgentPolicyError('')
@@ -491,31 +501,33 @@ export default function WorkspaceSettings() {
       ])
       if (policyResult.status === 'fulfilled') {
         const saved = policyResult.value
-        setWorkspaceAgentPolicy({
+        setWorkspaceAgentPolicy(setAndRememberPolicy({
           editor_instructions: saved.editor_instructions || '',
           search_instructions: saved.search_instructions || '',
           preferred_domains: Array.isArray(saved.preferred_domains) ? saved.preferred_domains : [],
           blocked_domains: Array.isArray(saved.blocked_domains) ? saved.blocked_domains : [],
           blocked_url_patterns: Array.isArray(saved.blocked_url_patterns) ? saved.blocked_url_patterns : [],
-        })
+        }))
       } else {
         setAgentPolicyError(policyResult.reason?.message || t('settings.saveError'))
       }
       if (settingsResult.status === 'fulfilled') {
         setWorkspaceSettings(normalizeWorkspaceSettings(settingsResult.value))
+        setSavedWorkspaceSettings(normalizeWorkspaceSettings(settingsResult.value))
       } else {
         setWorkspaceSettingsError(settingsResult.reason?.message || t('settings.saveError'))
       }
       if (policyResult.status === 'fulfilled' && settingsResult.status === 'fulfilled') {
         setAgentPolicyOk(t('settings.agentPolicy.saved'))
       }
+      return policyResult.status === 'fulfilled' && settingsResult.status === 'fulfilled'
     } finally {
       setAgentPolicySaving(false)
     }
   }
 
   const openTariffModal = (targetPlanCode = '') => {
-    if (!billingEnabled) return
+    if (!billingEnabled || !canManageBilling) return
     reachMetrikaGoal('tariff_modal_opened', {
       plan: String(targetPlanCode || '').trim().toLowerCase() || undefined,
       workspace_id: workspaceId,
@@ -535,7 +547,7 @@ export default function WorkspaceSettings() {
   useEffect(() => {
     const params = new URLSearchParams(location.search)
     const billingParam = params.get('billing')
-    if (!billingEnabled) {
+    if (!billingEnabled || !canManageBilling) {
       if (billingParam) {
         params.delete('billing')
         params.delete('plan')
@@ -567,7 +579,7 @@ export default function WorkspaceSettings() {
     params.delete('plan')
     const nextSearch = params.toString()
     navigate(location.pathname + (nextSearch ? `?${nextSearch}` : ''), { replace: true })
-  }, [billingEnabled, location.pathname, location.search, navigate])
+  }, [billingEnabled, canManageBilling, location.pathname, location.search, navigate])
 
   const openBillingEmailModalThen = (action) => {
     if (!user?.billing_email_required) {
@@ -584,6 +596,7 @@ export default function WorkspaceSettings() {
       return
     }
     setBillingEmailModal((m) => (m ? { ...m, error: '' } : m))
+    setBillingEmailBusy(true)
     try {
       const r = await requestBillingEmail({ email: em })
       setBillingEmailModal((m) =>
@@ -591,7 +604,7 @@ export default function WorkspaceSettings() {
       )
     } catch (e) {
       setBillingEmailModal((m) => (m ? { ...m, error: e.message } : m))
-    }
+    } finally { setBillingEmailBusy(false) }
   }
 
   const submitBillingEmailVerify = async () => {
@@ -601,6 +614,7 @@ export default function WorkspaceSettings() {
       return
     }
     setBillingEmailModal((m) => (m ? { ...m, error: '' } : m))
+    setBillingEmailBusy(true)
     try {
       await verifyBillingEmail({ code: raw })
       await refreshUser()
@@ -609,10 +623,11 @@ export default function WorkspaceSettings() {
       if (run) await run()
     } catch (e) {
       setBillingEmailModal((m) => (m ? { ...m, error: e.message } : m))
-    }
+    } finally { setBillingEmailBusy(false) }
   }
 
   const closeBillingEmailModal = () => {
+    if (billingEmailBusy) return
     setBillingEmailModal(null)
   }
 
@@ -656,7 +671,7 @@ export default function WorkspaceSettings() {
   }
 
   const executeSubscriptionCreate = async (plan, provider) => {
-    if (!billingEnabled) return
+    if (!billingEnabled || !canManageBilling) return
     setTariffError('')
     setTariffLoading(true)
     try {
@@ -718,8 +733,8 @@ export default function WorkspaceSettings() {
   }
 
   const handlePlanSelect = (plan, provider) => {
+    if (!billingEnabled || !canManageBilling) return
     if (provider === 'lava') { setTariffModal(false); setLavaPlan(plan); return }
-    if (!billingEnabled) return
     setTariffError('')
     reachMetrikaGoal('plan_selected', {
       plan: plan.code,
@@ -740,6 +755,19 @@ export default function WorkspaceSettings() {
     void executeSubscriptionCreate(plan, provider)
   }
 
+  const timezoneDirty = timezone !== (user?.profile_timezone || '')
+  const policyDirty = savedAgentPolicy && JSON.stringify(workspaceAgentPolicy) !== JSON.stringify(savedAgentPolicy)
+  const workspaceSettingsDirty = savedWorkspaceSettings && JSON.stringify(workspaceSettings) !== JSON.stringify(savedWorkspaceSettings)
+  useWorkspaceSwitchGuard({
+    dirty: Boolean(timezoneDirty || policyDirty || workspaceSettingsDirty),
+    busy: tariffLoading || tzSaving || agentPolicySaving || billingEmailBusy,
+    onSave: async () => {
+      if (timezoneDirty && !await handleTimezoneSubmit()) return false
+      if ((policyDirty || workspaceSettingsDirty) && !await handleAgentPolicySubmit()) return false
+      return true
+    },
+  })
+
   if (authLoading || !user) {
     return (
       <AppShell title={t('settings.title')} user={user} onLogout={handleLogout}>
@@ -753,7 +781,7 @@ export default function WorkspaceSettings() {
   return (
     <AppShell
       title={t('settings.title')}
-      subtitle=""
+      subtitle={workspaceName}
       user={user}
       onLogout={handleLogout}
       showAdminLink={user.is_platform_admin}
@@ -777,9 +805,10 @@ export default function WorkspaceSettings() {
               <span className="status-label">{t('settings.currentPlan')}</span>
               <div className="app-header-actions" style={{ justifyContent: 'flex-start' }}>
                 <span className="plan-badge">{billingSummary?.billing?.plan_code || '—'}</span>
-                <button type="button" className="btn btn-secondary btn-small" onClick={openTariffModal}>
+                {canManageBilling && <button type="button" className="btn btn-secondary btn-small" onClick={() => openTariffModal()}>
                   {t('settings.changePlan')}
-                </button>
+                </button>}
+                {!canManageBilling && <span className="muted">{t('workspace.billingReadOnly')}</span>}
               </div>
             </div>
           )}
@@ -862,7 +891,6 @@ export default function WorkspaceSettings() {
               <span className="toggle-hint">{t('settings.assistant.toggleHint')}</span>
             </span>
           </label>
-          {user?.is_platform_admin && <AssistantExpenses workspaceId={workspaceId} />}
         </div>
       )}
 
@@ -1166,7 +1194,7 @@ export default function WorkspaceSettings() {
             <div className="settings-token-meter-head">
               <span>{aiTokenRemainder.label}</span>
               <strong>
-                {aiTokenRemainder.percent == null ? t('settings.aiTokens.unlimited') : `${aiTokenRemainder.percent}%`}
+                {aiTokenRemainder.percent == null ? t('settings.aiTokens.unlimited') : t('settings.aiTokens.remaining', { percent: aiTokenRemainder.percent })}
               </strong>
             </div>
             {aiTokenRemainder.percent != null && (
@@ -1482,10 +1510,10 @@ export default function WorkspaceSettings() {
         </div>
       )}
 
-      {billingEnabled && <LavaPaymentStatus workspaceId={workspaceId} checkoutId={lavaCheckoutId} onPaid={onLavaPaid} />}
-      {billingEnabled && <LavaBillingDetails workspaceId={workspaceId} billing={billingSummary?.billing} canManage={user.is_platform_admin || ['owner', 'admin'].includes(user.workspaces?.find((workspace) => workspace.id === workspaceId)?.role)} onUpdated={loadBillingSummary} />}
+      {billingEnabled && canManageBilling && <LavaPaymentStatus workspaceId={workspaceId} checkoutId={lavaCheckoutId} onPaid={onLavaPaid} />}
+      {billingEnabled && canManageBilling && <LavaBillingDetails workspaceId={workspaceId} billing={billingSummary?.billing} canManage={canManageBilling} onUpdated={loadBillingSummary} />}
 
-      {billingEnabled && tariffModal && (
+      {billingEnabled && canManageBilling && tariffModal && (
         <div
           className="modal-overlay"
           onClick={() => {
@@ -1497,6 +1525,7 @@ export default function WorkspaceSettings() {
         >
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <h3>{t('settings.changePlan')}</h3>
+            <p>{t('billing.lava.workspace', { name: workspaceName })}</p>
             {tariffStarsWaiting && (
               <p className="muted" style={{ marginBottom: '1rem' }}>
                 {t('channels.tariff.waitingStars')}
@@ -1525,7 +1554,7 @@ export default function WorkspaceSettings() {
         </div>
       )}
 
-      {billingEnabled && lavaPlan && <LavaPlanDialog plan={lavaPlan} workspaceId={workspaceId} workspaceName={user?.workspaces?.find((workspace) => workspace.id === workspaceId)?.name} billing={billingSummary?.billing} onClose={() => setLavaPlan(null)} onUpdated={loadBillingSummary} withBillingEmail={(action) => { if (user?.billing_email_required) setLavaPlan(null); openBillingEmailModalThen(action) }} />}
+      {billingEnabled && canManageBilling && lavaPlan && <LavaPlanDialog plan={lavaPlan} workspaceId={workspaceId} workspaceName={workspaceName} billing={billingSummary?.billing} onClose={() => setLavaPlan(null)} onUpdated={loadBillingSummary} withBillingEmail={(action) => { if (user?.billing_email_required) setLavaPlan(null); openBillingEmailModalThen(action) }} />}
 
       {billingEnabled && tbankSubscriptionConsentModal && (
         <div

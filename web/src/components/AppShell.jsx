@@ -4,6 +4,7 @@ import { listMediaGenerationJobs } from '../adapters/media'
 import { getPublicBrandName } from '../branding'
 import { LanguageSelect, useI18n } from '../i18n'
 import SupportAssistantWidget from './SupportAssistantWidget'
+import WorkspaceSwitcher from './WorkspaceSwitcher'
 
 const dismissedImageJobsKey = (workspaceId) => `postbridge_dismissed_image_jobs_${workspaceId}`
 const brandMarkSrc = `${import.meta.env.BASE_URL}postbridge-mark.svg`
@@ -110,6 +111,7 @@ export default function AppShell({
                 <img src={brandMarkSrc} alt="" className="brand-mark" width="26" height="26" />
                 {brandName}
               </Link>
+              <WorkspaceSwitcher workspaceId={workspaceId} />
               <nav className="app-nav" aria-label={t('app.nav.aria')}>
                 <NavLink to={contentHref} className={navClassName(isContentActive)}>
                   {t('app.nav.content')}

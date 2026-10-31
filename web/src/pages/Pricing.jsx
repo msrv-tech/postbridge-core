@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { canManageWorkspaceBilling, preferredWorkspaceId, rememberWorkspace } from '../adapters/workspace'
 import PublicLayout from '../components/PublicLayout'
 import { useAuth } from '../useAuth'
 import { reachMetrikaGoal } from '../metrika'
@@ -117,7 +118,14 @@ function getComparisonRows(t) {
 export default function Pricing() {
   const { t } = useI18n()
   const { user } = useAuth()
-  const workspaceId = user?.workspaces?.[0]?.id || ''
+  const [query] = useSearchParams()
+  const accountId = user?.user_id || user?.id || ''
+  const [selection, setSelection] = useState(null)
+  // Keep this tab's billing target when another tab changes the saved preference.
+  const initialWorkspaceId = useMemo(() => preferredWorkspaceId(user, query.get('workspace')), [accountId, query])
+  const selectedWorkspaceId = selection?.accountId === accountId ? selection.id : ''
+  const workspaceId = preferredWorkspaceId(user, selectedWorkspaceId || initialWorkspaceId)
+  const canManageBilling = canManageWorkspaceBilling(user, workspaceId)
   const [catalog, setCatalog] = useState(null)
   const pricingRegion = catalog?.market || getPricingRegion()
   useEffect(() => { let active = true; getBillingCatalog().then((value) => { if (active) setCatalog(value) }).catch(() => {}); return () => { active = false } }, [])
@@ -130,7 +138,7 @@ export default function Pricing() {
   }, [])
   const planActionUrl = (plan) =>
     workspaceId
-      ? `/workspaces/${workspaceId}/settings?billing=change-plan&plan=${encodeURIComponent(plan.code)}`
+      ? `/workspaces/${encodeURIComponent(workspaceId)}/settings${canManageBilling ? `?billing=change-plan&plan=${encodeURIComponent(plan.code)}` : ''}`
       : `/login?plan=${encodeURIComponent(plan.code)}`
 
   return (
@@ -145,6 +153,14 @@ export default function Pricing() {
             </p>
           </div>
 
+          {workspaceId && <div className="pricing-workspace">
+            <label htmlFor="pricing-workspace">{t('workspace.billingTarget')}</label>
+            <select id="pricing-workspace" value={workspaceId} onChange={(event) => { setSelection({ accountId, id: event.target.value }); rememberWorkspace(user, event.target.value) }}>
+              {user.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
+            </select>
+            <p className="muted">{t('workspace.independentBilling')}</p>
+            {!canManageBilling && <p className="muted">{t('workspace.billingReadOnly')}</p>}
+          </div>}
           <div className="pricing-grid">
             {plans.map((plan) => (
               <article
@@ -183,7 +199,7 @@ export default function Pricing() {
                     })
                   }
                 >
-                  {plan.name === 'Free' ? t('pricing.actions.startFree') : t('pricing.actions.choosePlan')}
+                  {workspaceId && !canManageBilling ? t('workspace.viewSettings') : plan.name === 'Free' ? t('pricing.actions.startFree') : t('pricing.actions.choosePlan')}
                 </Link>
               </article>
             ))}

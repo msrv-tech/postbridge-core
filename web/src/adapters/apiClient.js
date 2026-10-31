@@ -266,11 +266,14 @@ export async function api(path, options = {}) {
 }
 
 export function setToken(token) {
+  const changed = getToken() !== token;
   localStorage.setItem('postbridge_token', token);
+  if (changed) queueMicrotask(() => window.dispatchEvent(new Event('postbridge-auth-changed')));
 }
 
 export function clearToken() {
   localStorage.removeItem('postbridge_token');
+  window.dispatchEvent(new Event('postbridge-auth-changed'));
 }
 
 export function isAuthenticated() {

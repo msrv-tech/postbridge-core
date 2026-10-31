@@ -2,11 +2,11 @@
 
 Video studio creates downloadable vertical MP4 drafts from managed screenshots, photos and clips. Optional autopilot writes a storyboard through the existing AI gateway, reuses supplied assets and generates missing illustrations. Existing agent schedules can prepare recurring video drafts. A completed revision can become an editable Postbridge post draft, with a separate exact-content approval for Telegram video delivery. Generation and delivery flags are disabled by default.
 
-The shared UI is at `/workspaces/{workspaceId}/content/videos`. Hosted requests go through the SaaS BFF; self-host requests use authenticated `/api/app/videos` endpoints. Core owns projects, immutable input revisions, checkpointed jobs and output assets. SaaS owns roles and budget reservations. Its existing SDK assistant reads and edits the selected storyboard, starts funded production, creates voice/language variants and prepares persisted schedule/post cards. See the storyboard section below.
+The shared UI is at `/workspaces/{workspaceId}/content/videos`. Hosted requests go through the SaaS BFF; self-host requests use authenticated `/api/app/videos` endpoints. Core owns projects, immutable input revisions, checkpointed jobs and output assets. SaaS owns roles, soft workspace allowance checks and actual-usage accounting. Its existing SDK assistant reads and edits the selected storyboard, starts funded production, creates voice/language variants and prepares persisted schedule/post cards. See the storyboard section below.
 
 ## Enable in a test installation
 
-1. Apply Core migrations with `alembic upgrade head`, including `20261019_video_studio`, `20261019_video_autopilot`, `20261019_video_agent_schedules`, `20261019_video_post_drafts`, `20261019_video_approvals`, `20261019_video_delivery_time`, `20261019_video_speech` and `20261020_video_materials`. Hosted installations must also apply SaaS `20261019_video_budget`, `20261019_video_schedule_budget` and `20261019_video_publication`.
+1. Apply Core migrations with `alembic upgrade head`, including `20261019_video_studio`, `20261019_video_autopilot`, `20261019_video_agent_schedules`, `20261019_video_post_drafts`, `20261019_video_approvals`, `20261019_video_delivery_time`, `20261019_video_speech` and `20261020_video_materials`. Hosted installations must also apply SaaS `20261019_video_budget`, `20261019_video_schedule_budget`, `20261019_video_publication` and `20261031_ai_soft_limits`.
 2. Set `VIDEO_STUDIO_ENABLED=1` for Core API and workers. Configure the existing `MEDIA_STORAGE_TYPE`, storage path or S3 settings, and an externally reachable `MEDIA_BASE_URL`. API and all workers must use the same bucket or a shared local volume; separate container filesystems do not share local media.
 3. Run the regular worker and one beat scheduler. Core dispatches durable video jobs every 30 seconds. Broker failures leave jobs in the database for a later attempt.
 4. Start a dedicated worker with `celery -A postbridge.workers.celery_app:celery_app worker -Q video --concurrency=1 --prefetch-multiplier=1 -l info`.
@@ -22,9 +22,9 @@ The root Compose `video` profile provides a dedicated worker and beat for local 
 | `VIDEO_IMAGE_MODEL` | Video-studio illustration model, default `gemini-2.5-flash-image`, currently the only model supported by the bounded image endpoint. Independent of the general `AI_IMAGE_GENERATION_MODEL` |
 | `VIDEO_SPEECH_ENABLED=1` | Core API and video worker; opt-in Google narration and language/voice variants, disabled by default |
 | `VIDEO_SPEECH_MODEL` | Currently only `gemini-2.5-flash-tts`; the funded gateway must expose the JSON `/v1/audio/generations` contract |
-| `POSTBRIDGE_APP_MODE=saas` | Hosted Core API and workers; every paid step requires a SaaS reservation grant |
+| `POSTBRIDGE_APP_MODE=saas` | Hosted Core API and workers; every paid step requires SaaS job authorization |
 | `SAAS_BASE_URL`, `STATUS_EVENT_WEBHOOK_TOKEN` | Hosted Core callback destination and existing event token; must match SaaS `CORE_EVENT_TOKEN` |
-| `VIDEO_AUTOPILOT_RESERVE_UNITS` | SaaS setting; positive conservative reservation per run in GitSell units. Default `0` keeps hosted autopilot unavailable |
+| `VIDEO_AUTOPILOT_RESERVE_UNITS` | Obsolete and ignored; hosted generation no longer reserves workspace allowance |
 | `VIDEO_AI_SELFHOST_BUDGET_UNITS` | Core self-host setting; positive per-job stopping threshold, default `0`. No SaaS subscription reservation |
 
 Hosted settlement also needs the regular SaaS worker/beat with working `CORE_BASE_URL` and `CORE_SERVICE_TOKEN`. Natural-language edits use the existing SaaS assistant configuration (`AI_ASSISTANT_ENABLED` and its funded gateway); there is no second assistant service.
@@ -59,13 +59,15 @@ Gateway contract: `/v1/audio/generations` accepts `{model, text, language, voice
 
 ## Paid operations and recovery
 
-SaaS locks the workspace and reserves units from its existing AI content pool before creating an autopilot revision. Pending reservations also count against subsequent content/adaptation budget checks. Core reauthorizes before each external call. SaaS periodically reconciles reported usage and releases unused holds after terminal jobs, independently of browser polling or subscription expiry.
+Hosted SaaS checks for positive remaining workspace allowance before accepting a new paid generation. It records a durable charge receipt without withholding quota. Accepted jobs may finish above the workspace limit; subsequent new generations are blocked once actual usage exhausts the allowance. Pending and unknown operations do not reduce the remaining balance. Request keys and per-job authorization still prevent duplicate paid work and cross-workspace access.
 
-This gateway reports normalized GitSell charges in `usage.total_tokens` (or an explicit charged-units field). These are neither dollars nor raw model token counts. Never guess missing usage. Reservation sizing must be measured for the selected models. The stopping threshold is checked between calls; the gateway currently cannot enforce a per-request credit ceiling, so one paid call can exceed the reserved estimate. Its actual charge is recorded and later paid steps stop. This is not a guaranteed hard provider-spend cap.
+The legacy SaaS table and Core `reservation_id` fields remain compatible charge-receipt identifiers. New receipts contain `reserved_units=0`. Their independent `limit_units` is an operation bound for the bounded gateway (100 million units by default), or an explicitly configured legacy task cap; it is never allocated from workspace quota. SaaS migration `20261031_ai_soft_limits` preserves existing job bounds and recorded charges.
 
-Paid steps persist `authorizing → started → received → done`. A timeout, missing usage or worker loss with a started request requires reconciliation; no paid retry is issued. Known usage is charged incrementally and idempotently. Unknown amounts keep the remaining hold. A platform admin may resolve them after checking the gateway ledger through `POST /workspaces/{workspaceId}/videos/budget/{reservationId}/resolve` with `actual_units` and an audited reason. This endpoint does not restart generation. A never-authorized hold with no Core request may expire after one hour; a late worker cannot authorize it.
+The gateway reports normalized GitSell charges in `usage.total_tokens` or an explicit charged-units field. These are neither dollars nor raw model token counts. Core passes the independent operation bound through the existing bounded text/image/speech/native-video contracts. Actual receipts remain authoritative. Paid steps persist `authorizing → started → received → done`; unknown outcomes are not automatically repeated. Known charges settle incrementally and idempotently through the SaaS worker even after the browser closes or the subscription expires.
 
-Only known totals are shown in the studio. Uncertain results show a reconciliation message. After manual settlement, the hosted BFF and assistant display the confirmed SaaS total while Core retains its original provider checkpoints. Operator ledger reconciliation and live gateway validation are required before general release.
+A platform admin can reconcile unknown expense through `POST /workspaces/{workspaceId}/videos/budget/{reservationId}/resolve` with actual units and an audited reason. This never starts another generation. An unused receipt with no corresponding Core job expires after one hour, preventing late unauthorized work. No workspace units are held while reconciliation is pending.
+
+Generation cards, studio results and batch history show no cost or reserve. Only workspace settings display the remaining allowance as a percentage, clamped to 0% after overage. Internal provider evidence and administrative expense APIs retain actual charges for reconciliation.
 
 ## Scheduled drafts
 

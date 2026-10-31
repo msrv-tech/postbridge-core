@@ -14,7 +14,6 @@ import { getAllTimezoneSelectOptions } from '../timezoneOptions'
 import './VideoStudio.css'
 import VideoMaterialPicker from '../components/VideoMaterialPicker'
 import VideoVariantChoices from '../components/VideoVariantChoices'
-import VideoBudgetPreview, { estimateVideoUnits } from '../components/VideoBudgetPreview'
 
 import { videoSceneInput as sceneInput } from '../videoSceneInput'
 const activeRun = (run) => ['queued', 'running'].includes(run.status)
@@ -52,8 +51,6 @@ export default function VideoSchedulesManual() {
   const [voice, setVoice] = useState('Kore')
   const [voiceStyle, setVoiceStyle] = useState('neutral')
   const [language, setLanguage] = useState(locale === 'en' ? 'en' : 'ru')
-  const [monthlyBudget, setMonthlyBudget] = useState('')
-  const [runBudget, setRunBudget] = useState('')
   const [notify, setNotify] = useState(true)
   const [count, setCount] = useState(1)
   const [extraVoices, setExtraVoices] = useState(false)
@@ -89,7 +86,7 @@ export default function VideoSchedulesManual() {
     setLoading(true)
     setError('')
     setTasks([]); setRuns([]); setBrief(''); setMaterials([])
-    setManual(false); setDuration(20); setStyle(''); setSourceSettings({}); setMonthlyBudget(''); setRunBudget(''); setNotify(true)
+    setManual(false); setDuration(20); setStyle(''); setSourceSettings({}); setNotify(true)
     setNarration(true); setVoice('Kore'); setVoiceStyle('neutral'); setLanguage(locale === 'en' ? 'en' : 'ru')
     setCount(1); setExtraVoices(false); setVariants([])
     setAutoPublish(false); setAutoSelected([]); setAutoCaption(''); setAutoConfirmed(false)
@@ -161,17 +158,16 @@ export default function VideoSchedulesManual() {
         ...(materials.some((scene) => scene.speech_asset_id) ? { voice, voice_style: voiceStyle } : {}),
         scenes: folderMode ? [] : materials.map(sceneInput) }
       const batchOptions = { count: template.mode === 'autopilot' ? Number(count) : 1, variants: extraVoices ? variants : [] }
-      const paid = template.mode === 'autopilot' || template.narration_enabled || batchOptions.variants.length > 0
       const autoPolicy = autoPublish ? { confirmed: autoConfirmed, bridge_ids: autoSelected,
         expected_bridges: Object.fromEntries(autoBridges.filter((b) => autoSelected.includes(b.id)).map((b) => [b.id, b.settings_hash])), caption: autoCaption.trim(), ...(splitLanguages ? { language_bridge_ids: Object.fromEntries(languages.map((lang) => [lang, (languageBridges[lang] || []).filter((id) => autoSelected.includes(id))])) } : {}) } : null
-      const fingerprint = JSON.stringify({ template, cron, timezone, channelId, monthlyBudget, runBudget, notify, batchOptions, autoPolicy, folderMode, folder, materialLimit })
+      const fingerprint = JSON.stringify({ template, cron, timezone, channelId, notify, batchOptions, autoPolicy, folderMode, folder, materialLimit })
       if (createKey.current?.fingerprint !== fingerprint) createKey.current = { fingerprint, key: crypto.randomUUID() }
       const key = createKey.current.key
       const taskConfig = { auto_publication: autoPolicy, request_key: key, video: { ...template, request_key: key },
         notify: !isSelfhostMode() && notify, ...batchOptions,
         material_folder: folderMode ? folder : null, material_limit: Number(materialLimit),
-        max_units_per_run: paid && runBudget ? Number(runBudget) : null,
-        max_units_per_month: paid && monthlyBudget ? Number(monthlyBudget) : null }
+        max_units_per_run: editing?.task_config?.max_units_per_run ?? null,
+        max_units_per_month: editing?.task_config?.max_units_per_month ?? null }
       if (editing) {
         await updateVideoSchedule(workspaceId, editing.id, { expected_hash: editing.template_hash,
           goal_text: template.brief, schedule_cron: cron, timezone, task_config: taskConfig,
@@ -194,7 +190,7 @@ export default function VideoSchedulesManual() {
     setNarration(!!video.narration_enabled); setVoice(video.voice || 'Kore'); setVoiceStyle(video.voice_style || 'neutral')
     setSourceSettings(Object.fromEntries(['template', 'brand_name', 'brand_color'].filter((key) => video[key] != null).map((key) => [key, video[key]])))
     setCount(config.count || 1); setVariants(config.variants || []); setExtraVoices(!!config.variants?.length)
-    setRunBudget(config.max_units_per_run || ''); setMonthlyBudget(config.max_units_per_month || ''); setNotify(config.notify)
+    setNotify(config.notify)
     setFolderMode(config.material_folder != null); setFolder(config.material_folder || ''); setMaterialLimit(config.material_limit || 6)
     setTimezone(task.timezone); setCustomCron(task.schedule_cron || '')
     const parts = (task.schedule_cron || '').split(' ')
@@ -269,11 +265,6 @@ export default function VideoSchedulesManual() {
                 <label><input type="checkbox" checked={extraVoices} onChange={(e) => setExtraVoices(e.target.checked)} />{t('videoBatch.extraVoices')}</label>
                 {extraVoices && <VideoVariantChoices value={variants} onChange={setVariants} disabled={busy} />}
               </>}
-              {(caps.autopilot_enabled && !manual || extraVoices && variants.length > 0) && <>
-                <label>{t('videoSchedule.runBudget')}<input type="number" min="1" max="100000000" value={runBudget} onChange={(e) => setRunBudget(e.target.value)} placeholder={t('videoSchedule.planBudget')} /></label>
-                <label>{t('videoSchedule.monthlyBudget')}<input type="number" min="1" max="100000000" value={monthlyBudget} onChange={(e) => setMonthlyBudget(e.target.value)} placeholder={t('videoSchedule.planBudget')} /></label>
-                <p className="muted">{t('videoSchedule.budgetHint')}</p>
-              </>}
               {!isSelfhostMode() && <label><input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />{t('videoSchedule.notify')}</label>}
             </details>
             <label><input type="checkbox" checked={autoPublish} onChange={(e) => setAutoPublish(e.target.checked)} />{t('videoAuto.toggle')}</label>
@@ -287,8 +278,6 @@ export default function VideoSchedulesManual() {
             </fieldset>}
             {(!manual && count > 1 || extraVoices && variants.length > 0) && <p>{t('videoAuto.count', { count: (!manual ? count : 1) * (extraVoices ? variants.length + 1 : 1) })}</p>}
             {!channelId && <p className="muted">{t('topicScout.errors.noChannel')}</p>}
-            <VideoBudgetPreview units={estimateVideoUnits(caps, { mode: caps.autopilot_enabled && !manual ? 'autopilot' : 'manual', generated_visuals: generatedVisuals,
-              duration_seconds: Number(duration), scenes: materials, narration_enabled: !manual && narration && caps.speech_enabled }, !manual ? count : 1, extraVoices ? variants : [])} limit={runBudget} />
             <button className="btn" disabled={busy || !brief.trim() || !channelId || autoPublish && (!autoConfirmed || !autoSelected.length || !autoCaption.trim() || unmapped) || (!(caps.autopilot_enabled && !manual) && !materials.length)}>{t(editing ? 'videoSchedule.saveChanges' : 'videoSchedule.save')}</button>{editing && <button type="button" className="btn btn-secondary" onClick={() => { setEditing(null); setExpanded(false) }}>{t('common.cancel')}</button>}
           </form>
         </details>}

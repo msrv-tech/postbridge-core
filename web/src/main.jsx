@@ -6,6 +6,8 @@ import './index.css'
 import { initMetrika } from './metrika'
 import { I18nProvider } from './i18n'
 import { applyStoredTheme } from './adapters/theme'
+import { AuthProvider } from './useAuth'
+import { WorkspaceNavigationProvider } from './components/WorkspaceNavigation'
 
 const routerBase = import.meta.env.BASE_URL && import.meta.env.BASE_URL !== '/'
   ? import.meta.env.BASE_URL.replace(/\/$/, '')
@@ -18,7 +20,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <BrowserRouter basename={routerBase}>
       <I18nProvider>
-        <App />
+        <AuthProvider>
+          <WorkspaceNavigationProvider><App /></WorkspaceNavigationProvider>
+        </AuthProvider>
       </I18nProvider>
     </BrowserRouter>
   </React.StrictMode>,

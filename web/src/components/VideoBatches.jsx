@@ -44,7 +44,6 @@ export default function VideoBatches({ workspaceId, projectId, refreshKey = 0 })
         {t('videoBatch.variant', { number: item.position + 1 })}{item.payload.language && ` · ${t(`videoVoice.language.${item.payload.language}`)}`} · {t(`video.status.${item.status}`)}{' '}
         {item.project_id && <Link to={`/workspaces/${workspaceId}/content/videos/${item.project_id}${item.version ? `?version=${item.version}` : ''}`}>{t('video.open')}</Link>}{' '}
         {item.output_url && <a href={`${item.output_url}?download=1`} target="_blank" rel="noreferrer">{t('video.download')}</a>}
-        {item.usage?.tokens_charged > 0 && <span> · {t('video.usage', { units: item.usage.tokens_charged })}</span>}
         {item.usage?.uncertain && <p className="muted">{t('video.reconciliationHint')}</p>}
       </li>)}</ul>
       {active(batch) && <button className="btn btn-secondary btn-small" disabled={busy === batch.id} onClick={async () => {

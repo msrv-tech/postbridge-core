@@ -15,6 +15,7 @@ import {
 } from '../adapters/agent'
 import { useAuth } from '../useAuth'
 import AppShell from '../components/AppShell'
+import { useWorkspaceSwitchGuard } from '../components/WorkspaceNavigation'
 import AgentSectionLayout from '../components/AgentSectionLayout'
 import { isBillingEnabled } from '../adapters/billing'
 import { useI18n } from '../i18n'
@@ -280,6 +281,11 @@ export default function TopicScout() {
     }, 50)
     return () => window.clearTimeout(timer)
   }, [location.hash, latestReviewItems.length])
+
+  useWorkspaceSwitchGuard({
+    dirty: isCreateTaskExpanded && Boolean(goalText.trim() || editorialInstructions.trim() || seedUrls.trim() || scheduleMode !== 'daily' || scheduleTime !== '07:00' || scheduleWeekday !== '1' || maxCandidatesPerRun !== 5 || autonomyMode !== 'guarded_auto_publish' || searchImageMode !== 'none'),
+    busy: saving || Boolean(runningTaskId || updatingTaskId),
+  })
 
   const handleCreateTask = async () => {
     if (!workspaceId) return

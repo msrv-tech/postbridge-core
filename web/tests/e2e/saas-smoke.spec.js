@@ -6,7 +6,7 @@ const saasUser = {
   email: 'user@example.test',
   is_platform_admin: false,
   current_workspace_id: 'ws-1',
-  workspaces: [{ id: 'ws-1', name: 'Acme Workspace' }],
+  workspaces: [{ id: 'ws-1', name: 'Acme Workspace', role: 'owner', plan_code: 'pro', subscription_status: 'active', can_manage_billing: true }],
   app_mode: 'saas',
   features: {
     billing: { enabled: true },
@@ -47,6 +47,7 @@ async function mockSaasBff(page, calls = []) {
     const url = new URL(request.url())
     const path = url.pathname
     const method = request.method()
+    if (request.isNavigationRequest()) return route.continue()
     const json = (body, status = 200) =>
       route.fulfill({
         status,
@@ -341,7 +342,7 @@ test('video autopilot accepts a task without files and exposes generated scenes 
   expect(created.language).toBe('en')
   expect(created.scenes).toEqual([])
   await expect(page.getByRole('link', { name: 'Download', exact: true })).toBeVisible()
-  await expect(page.getByText('AI units used: 50', { exact: true })).toBeVisible()
+  await expect(page.getByText('AI units used: 50', { exact: true })).toHaveCount(0)
   await page.getByText('Scenes and settings', { exact: true }).click()
   await expect(page.getByLabel('On-screen text').first()).toHaveValue('Generated scene 1')
   await expect(page.getByLabel('On-screen text')).toHaveCount(2)
@@ -1127,7 +1128,7 @@ test('assistant schedule card waits for explicit apply', async ({ page }) => {
 })
 
 for (const kind of ['video_generation', 'content_generation']) {
-  test(`assistant ${kind} shows the workspace reserve before any paid action`, async ({ page }) => {
+  test(`assistant ${kind} reviews the action without showing reserve or expense`, async ({ page }) => {
     await mockSaasBff(page)
     const projectId = '00000000-0000-4000-8000-000000000094'
     let applied = 0
@@ -1135,7 +1136,7 @@ for (const kind of ['video_generation', 'content_generation']) {
     await page.route('**/workspaces/ws-1/videos**', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(
       new URL(route.request().url()).pathname.endsWith('/capabilities') ? { enabled: true } : { id: projectId, brief: 'Product demo', current_version: 1, current, revisions: [current] }) }))
     await page.route('**/workspaces/ws-1/assistant/help', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({
-      conversation_id: 'paid-card', message: 'Review the reserve.', video_action: { id: '44', kind, status: 'proposed',
+      conversation_id: 'paid-card', message: 'Review the action.', video_action: { id: '44', kind, status: 'proposed',
         summary: { brief: 'Create a product demo', language: 'en', reserve_units: 10000, ...(kind === 'content_generation' ? { task: 'script' } : {}) } } }) }))
     await page.route('**/workspaces/ws-1/assistant/actions/44/apply', (route) => {
       applied++
@@ -1146,14 +1147,16 @@ for (const kind of ['video_generation', 'content_generation']) {
     await page.addInitScript(() => { localStorage.setItem('postbridge_token', 'saas-token'); localStorage.setItem('postbridge.locale', 'en') })
     await page.goto(`/workspaces/ws-1/content/videos/${projectId}`)
     await page.getByRole('button', { name: 'Assistant', exact: true }).click()
-    await expect(page.getByText('Generation reserve: 10000 AI units', { exact: true })).toBeVisible()
+    await expect(page.getByText(/Generation reserve:|Support replies are free|preliminary reserve/)).toHaveCount(0)
     await expect(page.getByText('Language: en', { exact: true })).toBeVisible()
-    await expect(page.getByText('This is a preliminary reserve, not an exact price.', { exact: false })).toBeVisible()
     expect(applied).toBe(0)
     await page.getByRole('button', { name: 'Generate', exact: true }).click()
     await expect.poll(() => applied).toBe(1)
     await expect(page.getByRole('button', { name: 'Applied', exact: true })).toBeDisabled()
-    if (kind === 'content_generation') await expect(page.getByText('Hook: show the finished video.', { exact: true })).toBeVisible()
+    if (kind === 'content_generation') {
+      await expect(page.getByText('Hook: show the finished video.', { exact: true })).toBeVisible()
+      await expect(page.getByText(/AI units|Usage is being reconciled|155/)).toHaveCount(0)
+    }
   })
 }
 
@@ -1393,8 +1396,8 @@ for (const kind of ['video_batch', 'video_delivery', 'material_edit', 'video_can
       await expect(card).toContainText('Version 2')
     }
     if (kind === 'video_batch') {
-      await expect(card).toContainText('15000')
-      await expect(card).toContainText('completed results are retained')
+      await expect(card).not.toContainText('15000')
+      await expect(card).not.toContainText('20000')
     }
     expect(applied).toBe(0)
     if (kind === 'video_delivery') await card.screenshot({ path: testInfo.outputPath('assistant-exact-video-delivery.png') })
@@ -1403,3 +1406,205 @@ for (const kind of ['video_batch', 'video_delivery', 'material_edit', 'video_can
     await expect(card.getByRole('button', { name: 'Applied', exact: true })).toBeDisabled()
   })
 }
+
+
+for (const percent of [36, 0]) {
+  test(`settings show only the remaining AI percentage (${percent}%)`, async ({ page }, testInfo) => {
+    await mockSaasBff(page)
+    await page.route('**/workspaces/ws-1/dashboard/summary', route => route.fulfill({ contentType: 'application/json',
+      body: JSON.stringify({ billing: { plan_code: 'pro', subscription_status: 'active',
+        ai_content_gitsell_tokens_used_month: percent ? 10 : 120,
+        ai_content_gitsell_tokens_limit_month: 100, ai_content_budget_percent_remaining: percent,
+        ai_gitsell_monthly_combined_pool: true }, totals: {} }) }))
+    await page.addInitScript(() => {
+      localStorage.setItem('postbridge_token', 'saas-token')
+      localStorage.setItem('postbridge.locale', 'ru')
+    })
+    await page.goto('/')
+    await page.locator('a[href="/workspaces/ws-1/settings"]').first().click()
+    const meter = page.locator('.settings-token-meter')
+    await expect(meter).toContainText(`Осталось ${percent}%`)
+    await expect(meter).toContainText('Использование ИИ за месяц')
+    await expect(meter.locator('.settings-token-meter-track > span')).toHaveAttribute('style', `width: ${percent}%;`)
+    await expect(page.getByText('Внутренний учёт ИИ-расходов', { exact: true })).toHaveCount(0)
+    if (percent === 36) {
+      await page.getByRole('button', { name: 'Скрыть помощника', exact: true }).click()
+      await expect(page.locator('.support-assistant-widget')).toHaveCount(0)
+      await meter.screenshot({ path: testInfo.outputPath('ai-usage-settings.png') })
+      await page.setViewportSize({ width: 390, height: 844 })
+      await expect(meter).toBeVisible()
+      await expect(meter.locator('strong')).toHaveCSS('white-space', 'nowrap')
+      expect(await meter.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true)
+      await meter.screenshot({ path: testInfo.outputPath('ai-usage-settings-mobile.png') })
+    }
+    await page.goto('/workspaces/ws-1/content')
+    await expect(page.locator('.settings-token-meter')).toHaveCount(0)
+  })
+}
+
+const multiWorkspaceUser = { ...saasUser, workspaces: [
+  saasUser.workspaces[0],
+  { id: 'ws-2', name: 'Client Studio', role: 'member', plan_code: 'agency', subscription_status: 'active', can_manage_billing: false },
+] }
+
+async function mockWorkspaceSwitching(page, calls = []) {
+  await mockSaasBff(page, calls)
+  await page.route('**/me', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify(multiWorkspaceUser) }))
+  await page.route('**/workspaces/ws-2/**', route => {
+    if (route.request().isNavigationRequest()) return route.continue()
+    const path = new URL(route.request().url()).pathname
+    calls.push({ path, method: route.request().method() })
+    let response = { items: [], total: 0 }
+    if (path.endsWith('/settings')) response = { image_style_prompt: 'Client style' }
+    if (path.endsWith('/agent/workspace-policy')) response = { editor_instructions: 'Client instructions', search_instructions: '', preferred_domains: [], blocked_domains: [], blocked_url_patterns: [] }
+    if (path.endsWith('/dashboard/summary')) response = { billing: { plan_code: 'agency', status: 'active', ai_content_tokens_limit_month: 100, ai_content_tokens_used_month: 64 }, totals: {} }
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify(response) })
+  })
+  await page.addInitScript(() => { localStorage.setItem('postbridge_token', 'saas-token'); localStorage.setItem('postbridge.locale', 'en') })
+}
+
+async function switchToClient(page) {
+  await page.locator('.workspace-switcher-trigger').click()
+  await page.locator('.workspace-option').filter({ hasText: 'Client Studio' }).click()
+}
+
+test('workspace selector preserves settings and hides member payment controls', async ({ page }, testInfo) => {
+  const calls = []
+  await mockWorkspaceSwitching(page, calls)
+  await page.goto('/workspaces/ws-1/settings?checkout=old&billing=lava_return')
+  await expect(page.getByRole('button', { name: 'Change plan', exact: true })).toBeVisible()
+  await page.locator('.workspace-switcher-trigger').click()
+  await expect(page.locator('.workspace-options')).toContainText('Pro · Owner')
+  await expect(page.locator('.workspace-options')).toContainText('Agency · Member')
+  await page.screenshot({ path: testInfo.outputPath('workspace-switcher-desktop.png') })
+  await page.locator('.workspace-option').filter({ hasText: 'Client Studio' }).click()
+  await expect(page).toHaveURL('/workspaces/ws-2/settings')
+  await expect(page.getByRole('button', { name: 'Change plan', exact: true })).toHaveCount(0)
+  await expect(page.getByText('The workspace owner or admin manages its subscription.')).toBeVisible()
+  await expect(page.locator('.settings-token-meter')).toContainText('36%')
+  expect(calls.some(call => call.path === '/workspaces/ws-2/billing/history' || call.path.includes('/ws-2/billing/checkouts/'))).toBe(false)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.locator('.workspace-switcher-trigger').click()
+  await expect(page.locator('.workspace-options')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('workspace-switcher-mobile.png') })
+})
+
+test('last workspace is account scoped while explicit payment links and other tabs keep their workspace', async ({ page, context }) => {
+  await mockWorkspaceSwitching(page)
+  let releaseCatalog
+  const catalogGate = new Promise(resolve => { releaseCatalog = resolve })
+  await page.route('**/billing/catalog', async route => {
+    await catalogGate
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ market: 'io', items: [{ code: 'pro', price_usd_minor: 12345 }] }) })
+  })
+  await page.goto('/workspaces/ws-1/content')
+  await switchToClient(page)
+  await expect(page).toHaveURL('/workspaces/ws-2/content')
+  await page.goto('/settings')
+  await expect(page).toHaveURL('/workspaces/ws-2/settings')
+  await page.goto('/pricing')
+  await expect(page.getByLabel('Subscription workspace')).toHaveValue('ws-2')
+  await expect(page.locator('.pricing-card a').first()).toHaveAttribute('href', '/workspaces/ws-2/settings')
+  const other = await context.newPage()
+  await mockWorkspaceSwitching(other)
+  await other.goto('/workspaces/ws-1/settings?checkout=payment-one&billing=lava_return')
+  await expect(other).toHaveURL('/workspaces/ws-1/settings?checkout=payment-one&billing=lava_return')
+  await expect(page).toHaveURL('/pricing')
+  releaseCatalog()
+  await expect(page.locator('.pricing-price-line').filter({ hasText: '$123.45' })).toBeVisible()
+  await expect(page.getByLabel('Subscription workspace')).toHaveValue('ws-2')
+  await other.close()
+})
+
+test('switching from an unsaved post can stay or discard and drops the original object', async ({ page }) => {
+  await mockWorkspaceSwitching(page)
+  await page.goto('/workspaces/ws-1/content/new?source=old')
+  await page.locator('#title').fill('Unsaved title')
+  await switchToClient(page)
+  const dialog = page.getByRole('dialog', { name: 'You have unsaved changes' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: 'Stay here' }).click()
+  await expect(page.locator('#title')).toHaveValue('Unsaved title')
+  await switchToClient(page)
+  await dialog.getByRole('button', { name: 'Switch without saving' }).click()
+  await expect(page).toHaveURL('/workspaces/ws-2/content')
+  await expect(page.locator('.workspace-switcher-trigger')).toContainText('Client Studio')
+})
+
+test('save and switch writes a draft only to its original workspace', async ({ page }) => {
+  const calls = []
+  await mockWorkspaceSwitching(page, calls)
+  await page.route('**/workspaces/ws-1/posts', async route => {
+    const payload = route.request().postDataJSON()
+    calls.push({ path: '/workspaces/ws-1/posts', method: route.request().method(), payload })
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...posts[0], ...payload, id: 'saved-draft' }) })
+  })
+  await page.goto('/workspaces/ws-1/content/new')
+  await page.locator('#title').fill('Save before switching')
+  await switchToClient(page)
+  await page.getByRole('dialog').getByRole('button', { name: 'Save and switch' }).click()
+  await expect(page).toHaveURL('/workspaces/ws-2/content')
+  expect(calls).toContainEqual(expect.objectContaining({ path: '/workspaces/ws-1/posts', method: 'POST', payload: expect.objectContaining({ title: 'Save before switching', status: 'draft' }) }))
+  expect(calls.some(call => call.path === '/workspaces/ws-2/posts' && call.method === 'POST')).toBe(false)
+})
+
+test('a failed draft save keeps the source workspace and the unsaved form', async ({ page }) => {
+  await mockWorkspaceSwitching(page)
+  await page.goto('/workspaces/ws-1/content/new')
+  await page.locator('#title').fill('Keep this draft')
+  await switchToClient(page)
+  await page.getByRole('dialog').getByRole('button', { name: 'Save and switch' }).click()
+  await expect(page.getByRole('dialog').getByRole('alert')).toContainText('Could not save')
+  await expect(page).toHaveURL('/workspaces/ws-1/content/new')
+  await expect(page.locator('#title')).toHaveValue('Keep this draft')
+})
+
+test('late billing responses cannot replace the destination workspace summary', async ({ page }) => {
+  await mockWorkspaceSwitching(page)
+  let release
+  const gate = new Promise(resolve => { release = resolve })
+  await page.route('**/workspaces/ws-1/dashboard/summary', async route => {
+    await gate
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ billing: { plan_code: 'pro' }, totals: {} }) }).catch(() => {})
+  })
+  await page.goto('/workspaces/ws-1/settings')
+  await switchToClient(page)
+  await expect(page).toHaveURL('/workspaces/ws-2/settings')
+  await expect(page.locator('.plan-badge')).toHaveText('agency')
+  release()
+  await expect(page.locator('.plan-badge')).toHaveText('agency')
+  await expect(page.locator('.workspace-switcher-trigger')).toContainText('Client Studio')
+})
+
+test('switching saves workspace instructions before leaving and blocks duplicate switches while saving', async ({ page }) => {
+  await mockWorkspaceSwitching(page)
+  const writes = []
+  let release
+  const gate = new Promise(resolve => { release = resolve })
+  await page.route('**/workspaces/ws-1/settings', async route => {
+    if (route.request().isNavigationRequest()) return route.continue()
+    if (route.request().method() !== 'PUT') return route.fallback()
+    writes.push({ path: new URL(route.request().url()).pathname, body: route.request().postDataJSON() })
+    await gate
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify(route.request().postDataJSON()) })
+  })
+  await page.goto('/workspaces/ws-1/settings')
+  const imageStyle = page.locator('#workspace-image-style-prompt')
+  await expect(imageStyle).toBeVisible()
+  await imageStyle.fill('Original workspace style')
+  await switchToClient(page)
+  await page.getByRole('dialog').getByRole('button', { name: 'Save and switch' }).click()
+  await expect(page.locator('.workspace-switcher-trigger')).toBeDisabled()
+  release()
+  await expect(page).toHaveURL('/workspaces/ws-2/settings')
+  expect(writes).toEqual([{ path: '/workspaces/ws-1/settings', body: { image_style_prompt: 'Original workspace style' } }])
+})
+
+test('legacy payment return overrides the remembered workspace', async ({ page }) => {
+  await mockWorkspaceSwitching(page)
+  await page.addInitScript(() => localStorage.setItem('postbridge.workspace.user-1', 'ws-2'))
+  await page.goto('/dashboard?workspace=ws-1&billing=migration_paid')
+  await expect(page).toHaveURL('/workspaces/ws-1/channels?billing=migration_paid')
+  await expect(page.locator('.workspace-switcher-trigger')).toContainText('Acme Workspace')
+})

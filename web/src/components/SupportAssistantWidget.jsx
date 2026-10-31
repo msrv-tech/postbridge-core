@@ -90,6 +90,10 @@ export default function SupportAssistantWidget({ workspaceId }) {
   const contextKey = `${workspaceId}/${location.pathname}${location.search}`
   const contextRef = useRef(contextKey)
   contextRef.current = contextKey
+  useEffect(() => {
+    contextRef.current = contextKey
+    return () => { contextRef.current = null }
+  }, [contextKey])
   const widgetRef = useRef(null)
   const requestRef = useRef(null)
   const [hidden, setHidden] = useState(() => isSupportAssistantHidden(workspaceId))
@@ -313,7 +317,6 @@ export default function SupportAssistantWidget({ workspaceId }) {
               <p>{answer.video_action.summary.frequency === 'custom' ? answer.video_action.summary.schedule_cron : `${t(`topicScout.schedule.${answer.video_action.summary.frequency}`)} · ${answer.video_action.summary.time}`} · {answer.video_action.summary.timezone}</p>
               {answer.video_action.summary.production_lead_minutes && <p>{t('videoSchedule.lead', { minutes: answer.video_action.summary.production_lead_minutes })}</p>}
               {answer.video_action.summary.frequency === 'weekly' && <p>{t(`weekday.${['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][answer.video_action.summary.weekday % 7]}`)}</p>}
-              <p>{t('videoSchedule.runBudget')}: {answer.video_action.summary.max_units_per_run || t('videoSchedule.planBudget')}<br />{t('videoSchedule.monthlyBudget')}: {answer.video_action.summary.max_units_per_month || t('videoSchedule.planBudget')}</p>
               <p>{t(`videoAssistant.mode.${answer.video_action.summary.mode || 'autopilot'}`)}</p>
               {answer.video_action.summary.generated_visuals && <p>{t(`videoGeneration.${answer.video_action.summary.generated_visuals}`)}</p>}
               <p>{t('videoSchedule.agentOutput', { count: answer.video_action.summary.count || 1, language: t(`videoVoice.language.${answer.video_action.summary.language || 'ru'}`) })}</p>
@@ -330,8 +333,6 @@ export default function SupportAssistantWidget({ workspaceId }) {
               : answer.video_action.kind === 'video_batch' ? <>
                 <p>{t('videoSchedule.agentOutput', { count: answer.video_action.summary.count, language: '' })}</p>
                 {answer.video_action.summary.variants?.map((v, i) => <p key={i}>{v.language} · {v.voice} · {v.voice_style}</p>)}
-                <p>{t('assistant.reserve', { units: answer.video_action.summary.reserve_units })}</p>
-                <p>{t('videoSchedule.runBudget')}: {answer.video_action.summary.limit_units}</p><p>{t('videoAssistant.batchCapHint')}</p>
               </> : answer.video_action.kind === 'video_delivery' ? <>
                 <p>{t(`videoAssistant.delivery.${answer.video_action.summary.action}`)}</p>
                 {answer.video_action.summary.output_url && <details><summary>{t("video.preview")}</summary><video src={answer.video_action.summary.output_url} controls preload="none" style={{ maxHeight: 240, maxWidth: '100%' }} /></details>}
@@ -351,19 +352,15 @@ export default function SupportAssistantWidget({ workspaceId }) {
                   </p>)}
                 </details>}
                 {answer.video_action.summary.source && <details><summary>{t('assistant.content.source')}</summary><p className="assistant-content-result">{answer.video_action.summary.source}</p></details>}
-                <p>{t('assistant.reserve', { units: answer.video_action.summary.reserve_units })}</p>
-                <p className="muted">{t('assistant.reserveHint')}</p>
               </> : <><p>{answer.video_action.summary.caption}</p><p>{t('videoAssistant.draftHint')}</p></>}
             <button type="button" className="btn" disabled={loading || answer.video_action.status === 'applied'} onClick={applyVideoCard}>{t(answer.video_action.status === 'applied' ? 'videoAssistant.applied' : `videoAssistant.apply.${answer.video_action.kind}`)}</button>
           </div>}
           {answer?.content_result && <div className="assistant-content-result" aria-live="polite">
             <p>{answer.content_result.text}</p>
-            <p className="muted">{answer.content_result.billing_pending ? t('assistant.billingPending') : t('video.usage', { units: answer.content_result.charged_units })}</p>
           </div>}
           {error && <p className="error">{error}</p>}
         </div>
         <form className="support-assistant-form" onSubmit={submitQuestion}>
-          <p className="muted section-copy">{t('assistant.billingHint')}</p>
           <input
             type="text"
             value={question}

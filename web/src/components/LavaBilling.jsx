@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { cancelSubscription, createSubscription, getBillingCheckout, getBillingHistory } from '../adapters/billing'
 import { useI18n } from '../i18n'
 import { BILLING_SUPPORT_EMAIL } from '../billingSupport'
+import { useWorkspaceSwitchGuard } from './WorkspaceNavigation'
 
 export const LAVA_CONSENT_VERSION = '2026-10-16'
 export const usdPrice = (minor) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(Number(minor || 0) / 100)
@@ -33,6 +34,7 @@ export function LavaPlanDialog({ plan, workspaceId, workspaceName, billing, onCl
   const [consent, setConsent] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  useWorkspaceSwitchGuard({ busy })
   const active = billing?.status === 'active' && billing?.plan_code !== 'free'
   const legacy = active && billing?.payment_provider !== 'lava'
   const free = plan.code === 'free'
@@ -127,6 +129,7 @@ export function LavaBillingDetails({ workspaceId, billing, canManage, onUpdated 
   const [history, setHistory] = useState([])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  useWorkspaceSwitchGuard({ busy })
   const stopRenewal = async () => {
     setBusy(true)
     setError('')

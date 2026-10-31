@@ -1,7 +1,7 @@
-import { Component, lazy, Suspense, useEffect, useRef } from 'react'
+import { Component, Fragment, lazy, Suspense, useEffect, useRef } from 'react'
 import { Routes, Route, Navigate, useNavigate, useLocation, useParams } from 'react-router-dom'
 import { isSelfhostMode } from './adapters/runtime'
-import { workspaceEntryPath } from './adapters/workspace'
+import { rememberWorkspace, workspaceEntryPath } from './adapters/workspace'
 
 function LegacyDeliveryStatusRedirect() {
   const { workspaceId } = useParams()
@@ -115,17 +115,31 @@ class AppErrorBoundary extends Component {
 
 function HomeRoute() {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading) return <LoadingSkeleton />;
   if (!user && isSelfhostMode()) return <Navigate to="/setup" replace />;
   if (!user) return <Home />;
-  return <Navigate to={workspaceEntryPath(user)} replace />;
+  const params = new URLSearchParams(location.search);
+  const explicitWorkspace = params.get('workspace');
+  const hasExplicitWorkspace = user.workspaces?.some((workspace) => workspace.id === explicitWorkspace);
+  if (hasExplicitWorkspace && (params.has('billing') || params.has('success'))) {
+    params.delete('workspace');
+    return <Navigate to={`/workspaces/${encodeURIComponent(explicitWorkspace)}/channels?${params}`} replace />;
+  }
+  return <Navigate to={workspaceEntryPath(user, explicitWorkspace)} replace />;
 }
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
+  const { workspaceId } = useParams();
+  const hasWorkspace = user?.workspaces?.some((workspace) => workspace.id === workspaceId);
+  useEffect(() => {
+    if (hasWorkspace) rememberWorkspace(user, workspaceId);
+  }, [user, workspaceId, hasWorkspace]);
   if (loading) return <LoadingSkeleton />;
   if (!user) return <Navigate to="/" replace />;
-  return children;
+  if (workspaceId && !hasWorkspace && !user.is_platform_admin) return <Navigate to={workspaceEntryPath(user)} replace />;
+  return <Fragment key={workspaceId || ''}>{children}</Fragment>;
 }
 
 function AdminRoute({ children }) {

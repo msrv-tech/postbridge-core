@@ -1,8 +1,10 @@
+import { canManageWorkspaceBilling, preferredWorkspaceId } from '../adapters/workspace'
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { clearToken } from '../adapters/sessionToken'
 import { useAuth } from '../useAuth'
 import AppShell from '../components/AppShell'
+import { useWorkspaceSwitchGuard } from '../components/WorkspaceNavigation'
 import { BILLING_SUPPORT_EMAIL, formatSubscriptionPeriod } from '../billingSupport'
 import { BillingPlanOptions, LavaPlanDialog } from '../components/LavaBilling'
 import {
@@ -94,6 +96,10 @@ function BridgeVideoSettings({ bridge, workspaceId, onSaved }) {
   const [value, setValue] = useState(initial || defaultVideoBridgeSettings(bridge.target_platform))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  useWorkspaceSwitchGuard({
+    dirty: enabled !== (['youtube', 'tiktok'].includes(bridge.target_platform) || Boolean(initial)) || enabled && JSON.stringify(value) !== JSON.stringify(initial || defaultVideoBridgeSettings(bridge.target_platform)),
+    busy,
+  })
   return <div className="video-bridge-settings">
     {!['youtube', 'tiktok'].includes(bridge.target_platform) && <label><input type="checkbox" checked={enabled} disabled={busy} onChange={event => setEnabled(event.target.checked)} />{t('videoBridge.videoOnly')}</label>}
     {enabled && <VideoBridgeSettings platform={bridge.target_platform} value={value} onChange={setValue} busy={busy} />}
@@ -210,8 +216,11 @@ export default function Channels() {
   /** Intermediate consent step for recurring card payments, not credits payments. */
   const [tbankSubscriptionConsentModal, setTbankSubscriptionConsentModal] = useState(null);
   const [tbankSubscriptionConsentChecked, setTbankSubscriptionConsentChecked] = useState(false);
-  const workspaceId = workspaceIdParam || user?.workspaces?.[0]?.id || '';
+  const workspaceId = workspaceIdParam || preferredWorkspaceId(user) || '';
   const billingEnabled = isBillingEnabled(user);
+  const canManageBilling = canManageWorkspaceBilling(user, workspaceId);
+  const [billingEmailBusy, setBillingEmailBusy] = useState(false);
+  useWorkspaceSwitchGuard({ busy: tariffLoading || historyLoading || billingEmailBusy });
   const canUseAiPlatformAdapt = summary?.billing?.ai_platform_adapt_enabled === true;
   const hasActiveBridge = channels.length > 0;
   const hasAnyChannel = channelRegistry.length > 0;
@@ -603,7 +612,7 @@ export default function Channels() {
   const [lavaPlan, setLavaPlan] = useState(null);
 
   const handleHistoryPaymentTbank = async () => {
-    if (!billingEnabled) return;
+    if (!billingEnabled || !canManageBilling) return;
     setHistoryError('');
     setHistoryLoading(true);
     try {
@@ -637,6 +646,7 @@ export default function Channels() {
       return;
     }
     setBillingEmailModal((m) => (m ? { ...m, error: '' } : m));
+    setBillingEmailBusy(true);
     try {
       const r = await requestBillingEmail({ email: em });
       setBillingEmailModal((m) =>
@@ -644,7 +654,7 @@ export default function Channels() {
       );
     } catch (e) {
       setBillingEmailModal((m) => (m ? { ...m, error: e.message } : m));
-    }
+    } finally { setBillingEmailBusy(false); }
   };
 
   const submitBillingEmailVerify = async () => {
@@ -654,6 +664,7 @@ export default function Channels() {
       return;
     }
     setBillingEmailModal((m) => (m ? { ...m, error: '' } : m));
+    setBillingEmailBusy(true);
     try {
       await verifyBillingEmail({ code: raw });
       await refreshUser();
@@ -663,16 +674,17 @@ export default function Channels() {
       if (run) await run();
     } catch (e) {
       setBillingEmailModal((m) => (m ? { ...m, error: e.message } : m));
-    }
+    } finally { setBillingEmailBusy(false); }
   };
 
   const closeBillingEmailModal = () => {
+    if (billingEmailBusy) return;
     pendingTbankAfterEmailRef.current = null;
     setBillingEmailModal(null);
   };
 
   const executeSubscriptionCreate = async (p, provider) => {
-    if (!billingEnabled) return;
+    if (!billingEnabled || !canManageBilling) return;
     setTariffError('');
     setTariffLoading(true);
     try {
@@ -708,8 +720,8 @@ export default function Channels() {
   };
 
   const handlePlanSelect = (p, provider) => {
+    if (!billingEnabled || !canManageBilling) return;
     if (provider === 'lava') { setTariffModal(false); setLavaPlan(p); return }
-    if (!billingEnabled) return;
     setTariffError('');
     const currentCode = summary?.billing?.plan_code || '';
     const currentPlan = plans.find((x) => x.code === currentCode);
@@ -725,7 +737,7 @@ export default function Channels() {
   };
 
   const handleHistoryPaymentStars = async () => {
-    if (!billingEnabled) return;
+    if (!billingEnabled || !canManageBilling) return;
     setHistoryError('');
     setHistoryLoading(true);
     try {
@@ -870,7 +882,7 @@ export default function Channels() {
                   {t('channels.lifecycle.runImport')}
                 </button>
               )}
-              {lifecycleAction === 'billing' && (
+              {lifecycleAction === 'billing' && canManageBilling && (
                 <button
                   type="button"
                   className="btn"
@@ -1167,7 +1179,7 @@ export default function Channels() {
                             {t('channels.adaptation.aiReview')}
                           </option>
                         </select>
-                        {aiAdaptationLocked && billingEnabled && (
+                        {aiAdaptationLocked && billingEnabled && canManageBilling && (
                           <p className="bridge-adaptation-upgrade">
                             {t('channels.adaptation.upgradeHint')}{' '}
                             <Link to={`/workspaces/${workspaceId}/settings?billing=change-plan&plan=pro`}>
@@ -1488,7 +1500,7 @@ export default function Channels() {
               <button type="button" className="btn btn-secondary" onClick={closeHistoryModal}>
                 {t('common.cancel')}
               </button>
-              {historyPaymentNeeded && billingEnabled && !historyPaymentUrl && !historyInvoiceUrl ? (
+              {historyPaymentNeeded && billingEnabled && !canManageBilling ? <p className="muted">{t('workspace.billingReadOnly')}</p> : historyPaymentNeeded && billingEnabled && !historyPaymentUrl && !historyInvoiceUrl ? (
                 <>
                   <button
                     type="button"
@@ -1594,7 +1606,7 @@ export default function Channels() {
         </div>
       )}
 
-      {billingEnabled && tariffModal && (
+      {billingEnabled && canManageBilling && tariffModal && (
         <div
           className="modal-overlay"
           onClick={() => {
@@ -1605,6 +1617,7 @@ export default function Channels() {
         >
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <h3>{t('channels.tariff.title')}</h3>
+            <p>{t('billing.lava.workspace', { name: user?.workspaces?.find((workspace) => workspace.id === workspaceId)?.name || workspaceId })}</p>
             {tariffStarsWaiting && (
               <p className="muted" style={{ marginBottom: '1rem' }}>
                 {t('channels.tariff.waitingStars')}
@@ -1632,7 +1645,7 @@ export default function Channels() {
         </div>
       )}
 
-      {billingEnabled && lavaPlan && <LavaPlanDialog plan={lavaPlan} workspaceId={workspaceId} workspaceName={user?.workspaces?.find((workspace) => workspace.id === workspaceId)?.name} billing={summary?.billing} onClose={() => setLavaPlan(null)} onUpdated={() => window.location.reload()} withBillingEmail={(action) => { if (user?.billing_email_required) setLavaPlan(null); openBillingEmailModalThen(action) }} />}
+      {billingEnabled && canManageBilling && lavaPlan && <LavaPlanDialog plan={lavaPlan} workspaceId={workspaceId} workspaceName={user?.workspaces?.find((workspace) => workspace.id === workspaceId)?.name} billing={summary?.billing} onClose={() => setLavaPlan(null)} onUpdated={() => window.location.reload()} withBillingEmail={(action) => { if (user?.billing_email_required) setLavaPlan(null); openBillingEmailModalThen(action) }} />}
 
       {billingEnabled && tbankSubscriptionConsentModal && (
         <div

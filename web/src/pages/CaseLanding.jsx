@@ -1,3 +1,4 @@
+import { preferredWorkspaceId } from '../adapters/workspace'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import PublicLayout from '../components/PublicLayout'
@@ -9,7 +10,7 @@ import { useAuth } from '../useAuth'
 
 function useCaseCtaPath(slug, landing) {
   const { user } = useAuth()
-  const workspaceId = user?.workspaces?.[0]?.id || ''
+  const workspaceId = preferredWorkspaceId(user) || ''
 
   if (landing?.ctaMode === 'mcp') {
     return '/docs/mcp'

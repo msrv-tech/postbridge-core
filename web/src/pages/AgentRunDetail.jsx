@@ -65,19 +65,6 @@ function toolSummaryLabel(key, value, t) {
       .filter(Boolean)
     return tools.length ? `top tools: ${tools.join(', ')}` : null
   }
-  if (key === 'usage_totals' && typeof value === 'object' && !Array.isArray(value)) {
-    const totalTokens =
-      typeof value.total_tokens === 'number'
-        ? value.total_tokens
-        : typeof value.prompt_tokens === 'number' || typeof value.completion_tokens === 'number'
-          ? [value.prompt_tokens, value.completion_tokens].filter((item) => typeof item === 'number').reduce((sum, item) => sum + item, 0)
-          : null
-    if (totalTokens == null) return null
-    const parts = [t('agentRun.tokens', { total: totalTokens })]
-    if (typeof value.prompt_tokens === 'number') parts.push(`prompt ${value.prompt_tokens}`)
-    if (typeof value.completion_tokens === 'number') parts.push(`completion ${value.completion_tokens}`)
-    return parts.join(' · ')
-  }
   return null
 }
 

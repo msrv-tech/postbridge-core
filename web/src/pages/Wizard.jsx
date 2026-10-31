@@ -3,6 +3,7 @@ import { Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { createChannelRegistryItem, createConnection, listChannelRegistry } from '../adapters/channels'
 import VideoBridgeSettings, { defaultVideoBridgeSettings } from '../components/VideoBridgeSettings'
 import AppShell from '../components/AppShell'
+import { useWorkspaceSwitchGuard } from '../components/WorkspaceNavigation'
 import { useI18n } from '../i18n'
 
 function platformLabel(platform, t) {
@@ -57,6 +58,10 @@ export default function Wizard() {
   }, [channels, sourceChannelId, sourceChannels, targetChannels, targetValue])
 
   const videoMode = ['youtube', 'tiktok'].includes(targetChannel?.platform) || (sourceChannel?.platform === 'postbridge' && videoEnabled)
+  useWorkspaceSwitchGuard({
+    dirty: videoEnabled || Boolean(videoSettings && JSON.stringify(videoSettings) !== JSON.stringify(defaultVideoBridgeSettings(targetChannel?.platform))),
+    busy: creating || creatingRssTarget,
+  })
   useEffect(() => { setVideoSettings(defaultVideoBridgeSettings(targetChannel?.platform)); setVideoEnabled(false) }, [targetChannel?.id])
   const handleCreate = async () => {
     if (!sourceChannel) return

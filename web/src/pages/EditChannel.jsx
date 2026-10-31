@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { getChannelRegistryItem, updateChannelRegistryItem } from '../adapters/channels'
 import AppShell from '../components/AppShell'
+import { useWorkspaceSwitchGuard } from '../components/WorkspaceNavigation'
 import { useI18n } from '../i18n'
 
 function platformLabel(platform, t) {
@@ -41,8 +42,8 @@ export default function EditChannel() {
       .finally(() => setLoading(false))
   }, [workspaceId, channelId])
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
+  const handleSubmit = async (e, { stayOnPage = false } = {}) => {
+    e?.preventDefault()
     setError('')
     setSaving(true)
     try {
@@ -51,13 +52,21 @@ export default function EditChannel() {
         can_read: canRead,
         can_write: canWrite,
       })
-      navigate(`/workspaces/${workspaceId}/channels?success=channel_updated`)
+      if (!stayOnPage) navigate(`/workspaces/${workspaceId}/channels?success=channel_updated`)
+      return true
     } catch (e) {
       setError(e.message)
+      return false
     } finally {
       setSaving(false)
     }
   }
+
+  useWorkspaceSwitchGuard({
+    dirty: Boolean(channel && (title !== (channel.title || '') || canRead !== Boolean(channel.can_read) || canWrite !== Boolean(channel.can_write))),
+    busy: saving,
+    onSave: () => handleSubmit(null, { stayOnPage: true }),
+  })
 
   if (loading) {
     return (

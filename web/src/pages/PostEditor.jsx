@@ -14,6 +14,7 @@ import { getMediaGenerationJob, startMediaGenerationJob, uploadWorkspaceMedia } 
 import { clearToken } from '../adapters/sessionToken'
 import { useAuth } from '../useAuth'
 import AppShell from '../components/AppShell'
+import { useWorkspaceSwitchGuard } from '../components/WorkspaceNavigation'
 import VideoPublicationCard from '../components/VideoPublicationCard'
 import { isBillingEnabled } from '../adapters/billing'
 import { mdEditorCommandsFilter } from '../mdEditorRu'
@@ -907,7 +908,7 @@ export default function PostEditor() {
 
   const savePost = async (
     targetStatus,
-    { redirect = true, allowEmptyDraft = false, bridgeReviewApproved = false } = {},
+    { redirect = true, allowEmptyDraft = false, bridgeReviewApproved = false, stayOnPage = false } = {},
   ) => {
     const finalStatus = targetStatus ?? status
     if (!contentMd.trim() && !(allowEmptyDraft && finalStatus === 'draft')) {
@@ -960,7 +961,7 @@ export default function PostEditor() {
       }
       if (redirect) {
         navigate(`/workspaces/${workspaceId}/content`)
-      } else if (!isEdit && savedPost?.id) {
+      } else if (!stayOnPage && !isEdit && savedPost?.id) {
         navigate(`/workspaces/${workspaceId}/content/${savedPost.id}`, { replace: true })
       }
       return savedPost
@@ -1232,6 +1233,14 @@ export default function PostEditor() {
   }
 
   const hasScheduledTime = Boolean(scheduleLocal.trim())
+
+  useWorkspaceSwitchGuard({
+    dirty: !loading && (syncedPostSnapshotRef.current
+      ? !arePostSnapshotsEqual(currentFormSnapshot(), syncedPostSnapshotRef.current)
+      : [contentMd, title, summary, linkUrl, cta, tags, author, coverImageUrl, mediaUrl, scheduleLocal, copilotPrompt, copilotSeedUrls].some((value) => value.trim())),
+    busy: saving || uploadingImage || uploadingCoverImage || uploadingMediaUrl || copilotRunning,
+    onSave: copilotPrompt.trim() || copilotSeedUrls.trim() ? undefined : () => savePost(status, { redirect: false, allowEmptyDraft: true, stayOnPage: true }),
+  })
 
   if (loading) {
     return (

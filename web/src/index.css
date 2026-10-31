@@ -3630,6 +3630,7 @@ textarea:focus {
 .settings-token-meter-head strong {
   color: var(--text);
   font-size: 1.1rem;
+  white-space: nowrap;
 }
 
 .settings-token-meter-track {
@@ -4753,4 +4754,30 @@ textarea:focus {
 }
 .support-assistant-body:has(.support-assistant-video-card) {
   max-height: min(52dvh, 30rem);
+}
+
+.workspace-switcher { position: relative; min-width: 0; }
+.workspace-switcher-trigger { display: flex; align-items: center; gap: .55rem; max-width: 260px; padding: .4rem .65rem .4rem .4rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); cursor: pointer; font: inherit; font-size: .87rem; }
+.workspace-switcher-trigger:disabled { opacity: .6; cursor: wait; }
+.workspace-avatar { display: grid; place-items: center; width: 27px; height: 27px; flex: 0 0 27px; border-radius: 7px; background: rgba(59, 130, 246, .16); color: var(--primary, #3b82f6); font-weight: 700; }
+.workspace-current-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-options { position: absolute; top: calc(100% + .5rem); left: 0; z-index: 80; width: 320px; max-width: calc(100vw - 2rem); padding: .5rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: 0 15px 45px rgba(0, 0, 0, .22); }
+.workspace-options-label { margin: .3rem .5rem .5rem; color: var(--muted); font-size: .75rem; }
+.workspace-option { display: flex; align-items: center; justify-content: space-between; gap: 1rem; width: 100%; padding: .7rem .6rem; text-align: left; font: inherit; color: var(--text); border: 0; border-radius: 8px; background: transparent; cursor: pointer; }
+.workspace-option:hover, .workspace-option.is-current { background: rgba(59, 130, 246, .1); }
+.workspace-option-copy { display: grid; gap: .2rem; min-width: 0; }
+.workspace-option-copy strong { overflow-wrap: anywhere; font-size: .9rem; }
+.workspace-option-copy > span { font-size: .78rem; color: var(--muted); }
+.workspace-settings-link { border: 0; border-top: 1px solid var(--border); background: transparent; color: var(--text); font: inherit; font-size: .82rem; cursor: pointer; padding: .8rem .6rem .4rem; width: 100%; text-align: left; margin-top: .4rem; }
+.workspace-switch-dialog { border: 1px solid var(--border); border-radius: 16px; color: var(--text); background: var(--surface); padding: 1.5rem; width: min(490px, calc(100vw - 2rem)); }
+.workspace-switch-dialog::backdrop { background: rgba(0, 0, 0, .6); }
+.workspace-switch-dialog h2 { margin-top: 0; }
+.workspace-switch-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1.2rem; }
+.pricing-workspace { max-width: 620px; margin: 0 auto 2rem; display: grid; gap: .6rem; }
+.pricing-workspace select { width: 100%; }
+@media (max-width: 640px) {
+  .workspace-switcher-trigger { max-width: min(260px, calc(100vw - 3rem)); }
+  .workspace-options { position: fixed; top: var(--workspace-menu-top); left: 1rem; right: 1rem; width: auto; max-width: none; max-height: 70vh; overflow-y: auto; }
+  .app-header-top-left .app-nav { width: 100%; }
+  .workspace-switch-actions .btn { width: 100%; }
 }
