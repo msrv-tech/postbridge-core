@@ -158,6 +158,36 @@ def test_tenant_settings_store_image_style_prompt(client: TestClient):
     assert read.json()["image_style_prompt"] == "minimal clay bridge style"
 
 
+def test_source_media_import_is_idempotent_and_tenant_scoped(client: TestClient, tmp_path, monkeypatch):
+    monkeypatch.setenv("MEDIA_STORAGE_TYPE", "local")
+    monkeypatch.setenv("MEDIA_STORAGE_PATH", str(tmp_path))
+    monkeypatch.setenv("MEDIA_BASE_URL", "http://testserver/media")
+    ids = []
+    import struct, zlib
+    def chunk(kind, data):
+        return struct.pack("!I",len(data))+kind+data+struct.pack("!I",zlib.crc32(kind+data))
+    photo=(b"\x89PNG\r\n\x1a\n"+chunk(b"IHDR",struct.pack("!2I5B",20,20,8,2,0,0,0))
+        +chunk(b"IDAT",zlib.compress((b"\0"+bytes([30,80,120])*20)*20))+chunk(b"IEND",b""))
+    for tenant in [str(uuid4()), str(uuid4())]:
+        headers = {**_headers(tenant), "X-Postbridge-Media-Deduplicate": "1"}
+        client.post("/internal/service/tenants/ensure", json={"name": "Synthetic source"}, headers=headers)
+        first = client.post("/internal/service/media/upload", headers=headers,
+            files={"file": ("source.png", photo, "image/png")})
+        second = client.post("/internal/service/media/upload", headers=headers,
+            files={"file": ("same-source.png", photo, "image/png")})
+        assert first.status_code == second.status_code == 200
+        assert first.json() == second.json()
+        ids.append(first.json()["media_asset_id"])
+        from postbridge.db import SESSION_LOCAL
+        from postbridge.services.video_library import list_materials
+        with SESSION_LOCAL() as db:
+            library=list_materials(db,tenant)["items"]
+            assert len(library)==1 and library[0]["asset_id"]==ids[-1]
+            assert library[0]["name"]=="source.png" and library[0]["width"]==20
+    assert ids[0] != ids[1]
+    assert len(list(tmp_path.rglob("*.png"))) == 2
+
+
 def test_service_media_upload_local(client: TestClient, tmp_path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MEDIA_STORAGE_TYPE", "local")
     monkeypatch.setenv("MEDIA_STORAGE_PATH", str(tmp_path))

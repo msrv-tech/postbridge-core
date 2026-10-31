@@ -515,6 +515,7 @@ export default function WorkspaceSettings() {
   }
 
   const openTariffModal = (targetPlanCode = '') => {
+    if (billingSummary?.billing?.payment_provider === 'moysklad') return
     if (!billingEnabled) return
     reachMetrikaGoal('tariff_modal_opened', {
       plan: String(targetPlanCode || '').trim().toLowerCase() || undefined,
@@ -777,9 +778,9 @@ export default function WorkspaceSettings() {
               <span className="status-label">{t('settings.currentPlan')}</span>
               <div className="app-header-actions" style={{ justifyContent: 'flex-start' }}>
                 <span className="plan-badge">{billingSummary?.billing?.plan_code || '—'}</span>
-                <button type="button" className="btn btn-secondary btn-small" onClick={openTariffModal}>
+                {billingSummary?.billing?.payment_provider === 'moysklad' ? <p className="muted">{t('settings.moyskladBilling')}</p> : <button type="button" className="btn btn-secondary btn-small" onClick={openTariffModal}>
                   {t('settings.changePlan')}
-                </button>
+                </button>}
               </div>
             </div>
           )}
@@ -1007,7 +1008,8 @@ export default function WorkspaceSettings() {
                       <span className="plan-badge">
                         {externalAppStatusLabel(app.status, t)}
                       </span>
-                      {app.free_drafts_per_month > 0 && (
+                      {app.id === 'moysklad-app' && <span className="plan-requested-badge">{t('settings.ecosystemApps.sharedWorkspaceBudget')}</span>}
+                      {app.id !== 'moysklad-app' && app.free_drafts_per_month > 0 && (
                         <span className="plan-requested-badge">
                           {t('settings.ecosystemApps.freeDrafts', { count: app.free_drafts_per_month })}
                         </span>
@@ -1021,7 +1023,8 @@ export default function WorkspaceSettings() {
                     <p className="muted post-editor-hint" style={{ marginBottom: 0 }}>
                       {app.summary}
                     </p>
-                    {app.mvp_actions?.length > 0 && (
+                    {app.id === 'moysklad-app' && <p className="muted post-editor-hint">{t('settings.ecosystemApps.moyskladConnectHint')}</p>}
+                    {app.id !== 'moysklad-app' && app.mvp_actions?.length > 0 && (
                       <p className="muted post-editor-hint" style={{ marginBottom: 0 }}>
                         {t('settings.ecosystemApps.actions')}: {app.mvp_actions.slice(0, 5).join(', ')}
                         {app.mvp_actions.length > 5 ? '...' : ''}
@@ -1049,7 +1052,8 @@ export default function WorkspaceSettings() {
                         ? t('common.loading')
                         : t('settings.ecosystemApps.connection')}
                     </button>
-                    {!app.uses_postbridge_mcp && (
+                    {app.id === 'moysklad-app' && <a className="btn btn-secondary btn-small" href="https://online.moysklad.ru/" target="_blank" rel="noreferrer">{t('settings.ecosystemApps.openMoysklad')}</a>}
+                    {!app.uses_postbridge_mcp && app.id !== 'moysklad-app' && (
                       <button
                         type="button"
                         className="btn btn-secondary btn-small"
@@ -1070,12 +1074,25 @@ export default function WorkspaceSettings() {
           {externalAppIntent && (
             <div className="empty-state" style={{ marginTop: '1rem', padding: '1rem' }}>
               <strong>{t('settings.ecosystemApps.installIntent')}</strong>
-              <p className="muted post-editor-hint" style={{ marginBottom: 0 }}>
-                {t('settings.ecosystemApps.callbackUrl')}: {externalAppIntent.postbridge_callback_url}
-              </p>
-              <p className="muted post-editor-hint" style={{ marginBottom: 0, wordBreak: 'break-all' }}>
-                state: {externalAppIntent.state}
-              </p>
+              {externalAppIntent.connection_method === 'moysklad_vendor' ? (
+                <>
+                  <p className="muted post-editor-hint">{t('settings.ecosystemApps.moyskladConnectHint')}</p>
+                  <label>
+                    {t('settings.ecosystemApps.connectCode')}
+                    <input readOnly value={externalAppIntent.state} onClick={(event) => event.currentTarget.select()} />
+                  </label>
+                  <p className="muted post-editor-hint">{t('settings.ecosystemApps.connectCodeExpiry')}</p>
+                </>
+              ) : (
+                <>
+                  <p className="muted post-editor-hint" style={{ marginBottom: 0 }}>
+                    {t('settings.ecosystemApps.callbackUrl')}: {externalAppIntent.postbridge_callback_url}
+                  </p>
+                  <p className="muted post-editor-hint" style={{ marginBottom: 0, wordBreak: 'break-all' }}>
+                    state: {externalAppIntent.state}
+                  </p>
+                </>
+              )}
               {externalAppIntent.requested_scopes?.length > 0 && (
                 <p className="muted post-editor-hint" style={{ marginBottom: 0 }}>
                   {t('settings.ecosystemApps.scopes')}: {externalAppIntent.requested_scopes.join(', ')}
@@ -1485,7 +1502,7 @@ export default function WorkspaceSettings() {
       {billingEnabled && <LavaPaymentStatus workspaceId={workspaceId} checkoutId={lavaCheckoutId} onPaid={onLavaPaid} />}
       {billingEnabled && <LavaBillingDetails workspaceId={workspaceId} billing={billingSummary?.billing} canManage={user.is_platform_admin || ['owner', 'admin'].includes(user.workspaces?.find((workspace) => workspace.id === workspaceId)?.role)} onUpdated={loadBillingSummary} />}
 
-      {billingEnabled && tariffModal && (
+      {billingEnabled && tariffModal && billingSummary?.billing?.payment_provider !== 'moysklad' && (
         <div
           className="modal-overlay"
           onClick={() => {

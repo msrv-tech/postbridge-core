@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { askSupportAssistant, applyAssistantVideoAction } from '../adapters/supportAssistant'
+import { askSupportAssistant, applyAssistantVideoAction, readAssistantAction } from '../adapters/supportAssistant'
 import {
   isSupportAssistantHidden,
   setSupportAssistantHidden,
@@ -113,6 +113,22 @@ export default function SupportAssistantWidget({ workspaceId }) {
     setLoading(false)
     setCollapsed(page === 'video')
   }, [contextKey, videoProjectId, page])
+
+  useEffect(() => {
+    const cardId = new URLSearchParams(location.search).get('assistant_card')
+    if (isSelfhostMode() || !workspaceId || !cardId || !/^\d{1,18}$/.test(cardId)) return
+    let active = true
+    setHidden(false)
+    setCollapsed(false)
+    setLoading(true)
+    readAssistantAction(workspaceId, cardId).then((response) => {
+      if (!active) return
+      setAnswer(response)
+      setConversationId(response.conversation_id || '')
+    }).catch((e) => { if (active) setError(e.message) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [workspaceId, contextKey])
 
   useEffect(() => {
     const handleVisibility = (event) => {
@@ -351,6 +367,10 @@ export default function SupportAssistantWidget({ workspaceId }) {
                   </p>)}
                 </details>}
                 {answer.video_action.summary.source && <details><summary>{t('assistant.content.source')}</summary><p className="assistant-content-result">{answer.video_action.summary.source}</p></details>}
+                {answer.video_action.summary.materials?.map((item, index) => <figure key={index}>
+                  <img src={item.url} alt={item.name} loading="lazy" style={{ maxWidth: '100%', maxHeight: 180, borderRadius: 8 }} />
+                  <figcaption>{item.name}</figcaption>
+                </figure>)}
                 <p>{t('assistant.reserve', { units: answer.video_action.summary.reserve_units })}</p>
                 <p className="muted">{t('assistant.reserveHint')}</p>
               </> : <><p>{answer.video_action.summary.caption}</p><p>{t('videoAssistant.draftHint')}</p></>}
@@ -363,7 +383,6 @@ export default function SupportAssistantWidget({ workspaceId }) {
           {error && <p className="error">{error}</p>}
         </div>
         <form className="support-assistant-form" onSubmit={submitQuestion}>
-          <p className="muted section-copy">{t('assistant.billingHint')}</p>
           <input
             type="text"
             value={question}

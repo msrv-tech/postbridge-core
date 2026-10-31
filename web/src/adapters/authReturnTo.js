@@ -8,7 +8,7 @@ export function normalizeAuthReturnTo(value) {
   }
   try {
     const parsed = new URL(value, window.location.origin)
-    if (parsed.origin !== window.location.origin || parsed.pathname !== '/oauth/authorize') {
+    if (parsed.origin !== window.location.origin || !['/oauth/authorize', '/external-apps/moysklad-app/authorize'].includes(parsed.pathname)) {
       return null
     }
     return `${parsed.pathname}${parsed.search}${parsed.hash}`
