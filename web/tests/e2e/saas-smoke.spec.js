@@ -1608,3 +1608,17 @@ test('legacy payment return overrides the remembered workspace', async ({ page }
   await expect(page).toHaveURL('/workspaces/ws-1/channels?billing=migration_paid')
   await expect(page.locator('.workspace-switcher-trigger')).toContainText('Acme Workspace')
 })
+
+test('workspace switching keeps externally managed billing separate', async ({ page }) => {
+  await mockWorkspaceSwitching(page)
+  await page.route('**/workspaces/ws-1/dashboard/summary', route => route.fulfill({ contentType: 'application/json',
+    body: JSON.stringify({ billing: { plan_code: 'pro', status: 'active', payment_provider: 'moysklad' }, totals: {} }) }))
+  await page.goto('/workspaces/ws-1/settings?billing=change-plan&plan=agency')
+  await expect(page.getByText('This workspace plan is managed in MoySklad. Change or cancel the subscription in its solutions catalog.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Change plan', exact: true })).toHaveCount(0)
+  await expect(page.locator('.plan-list')).toHaveCount(0)
+  await switchToClient(page)
+  await expect(page).toHaveURL('/workspaces/ws-2/settings')
+  await expect(page.getByText('The workspace owner or admin manages its subscription.')).toBeVisible()
+  await expect(page.getByText('This workspace plan is managed in MoySklad. Change or cancel the subscription in its solutions catalog.')).toHaveCount(0)
+})

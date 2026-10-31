@@ -1436,6 +1436,8 @@ async def service_upload_media(
         tenant_id=tenant_id,
         data=data,
         content_type=file.content_type or "",
+        deduplicate=request.headers.get("x-postbridge-media-deduplicate") == "1",
+        library_name=file.filename if request.headers.get("x-postbridge-media-deduplicate") == "1" else None,
     )
 
 
