@@ -1,6 +1,10 @@
 # Agent runtime and editorial tools
 
-Core owns the Postbridge agent definition and OpenAI Agents SDK runner in `postbridge.agent.sdk_runtime`. The editor, topic discovery API and scheduled editorial tasks use this implementation through `EditorialExecutionService`. Task modes such as `post_copilot` and `topic_scout` remain stable API and database identifiers; they do not select separate agent definitions.
+Core owns the Postbridge agent definition and OpenAI Agents SDK runner in `postbridge_agent_runtime`. The editor, topic discovery API and scheduled editorial tasks use this implementation through `EditorialExecutionService` and the `postbridge.agent.sdk_runtime` error adapter. Task modes such as `post_copilot` and `topic_scout` remain stable API and database identifiers; they do not select separate agent definitions.
+
+## Shared distribution
+
+The Core application includes the portable package directly. Hosted applications install a `postbridge-agent-runtime` wheel built from the same source by `scripts/build_agent_runtime.py`. The build stages canonical sources temporarily; no second source copy is maintained. The package has no application, database, billing or private integration imports. Application adapters retain their own authorization, history, accounting and domain error contracts.
 
 ## Editorial execution
 
@@ -22,7 +26,7 @@ Before each SDK model call, Core commits a pending `sdk_provider_call` step. The
 
 `AGENT_LLM_USAGE_FORMAT=gitsell` interprets the gateway's charged units separately from raw provider tokens. Hosted Core defaults to this format; self-host defaults to `provider_tokens`. The existing `token_usage.total_tokens` API field remains a compatibility total in the configured unit system. Each receipt retains its explicit currency/token fields and usage format. Missing cost is not represented as a zero-cost receipt; `usage_pending` marks successful runs needing reconciliation.
 
-The hosted assistant, general support and cross-service billing integration are subsequent steps of the [migration plan](unified-agent-sdk-migration.md). Media production, embeddings and direct MCP operations remain service operations, not additional agent runtimes.
+Hosted workspace tools and general help use the same portable runtime with application-owned admission and receipt callbacks. General help receives no workspace tools or private context. Media production, embeddings, adaptation and direct MCP operations remain service operations, not additional agent runtimes. Rollout and acceptance are tracked in the [migration plan](unified-agent-sdk-migration.md).
 
 ## Configuration
 

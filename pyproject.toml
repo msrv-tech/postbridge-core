@@ -56,7 +56,7 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["src/postbridge"]
+source = ["src/postbridge", "src/postbridge_agent_runtime"]
 branch = true
 
 [tool.coverage.report]

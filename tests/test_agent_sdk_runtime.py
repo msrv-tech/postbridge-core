@@ -108,6 +108,31 @@ def test_missing_required_tool_rejects_plausible_model_answer():
     assert caught.value.code == "VALIDATION_AGENT_REQUIRED_TOOLS"
 
 
+def test_adapted_sdk_tools_receive_the_current_invocation_context():
+    async def read(arguments, context):
+        assert arguments.query == "selected"
+        assert context.tool_name == "read_draft" and context.tool_call_id.startswith("call_")
+        assert context.run_config.tracing_disabled is True
+        return {"title": "Selected draft"}
+    tool = AgentTool("read_draft", "Read draft", ReadArguments, read,
+        params_json_schema=ReadArguments.model_json_schema(), with_context=True)
+    result = run(execution(tools=(tool,), stop_after_tools=frozenset({"read_draft"})),
+        lambda _: reply(None, tool=("read_draft", {"query": "selected"})))
+    assert len(result.receipts) == 1 and result.tool_events[0].status == "succeeded"
+
+
+def test_authoritative_preprovider_rejection_preserves_zero_cost_and_custom_sdk_url():
+    receipts = []
+    def handler(request):
+        assert request.url.path == "/custom/chat/completions"
+        assert request.headers["X-Gitsell-Repo"] == "test-execution"
+        return httpx.Response(402, json={"detail": {"upstream_called": False}})
+    with pytest.raises(ExternalApiError):
+        run(replace(execution(), base_url="https://gateway.example/custom", append_v1=False,
+            request_headers={"X-Gitsell-Repo": "test-execution"}), handler, on_provider_receipt=receipts.append)
+    assert receipts[0].charged_units == 0 and receipts[0].status == "failed"
+
+
 def test_admission_failure_is_preserved_and_does_not_dispatch_or_retry():
     dispatched, received = [], []
     error = ValidationError(code="BUDGET_EXHAUSTED", message="No allowance")
