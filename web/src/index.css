@@ -3745,6 +3745,10 @@ textarea:focus {
   width: auto;
 }
 
+.support-assistant-widget .btn:hover {
+  transform: none;
+}
+
 .support-assistant-window,
 .support-assistant-launcher {
   border: 1px solid rgba(59, 130, 246, 0.32);

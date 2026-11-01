@@ -5,6 +5,8 @@ import { listPublicCaseLandings } from '../caseLandings'
 import { getPublicBrandName, getPublicMarket } from '../branding'
 import { LanguageSelect, useI18n } from '../i18n'
 import HeaderNavigation from './HeaderNavigation'
+import { useAuth } from '../useAuth'
+import SupportAssistantWidget from './SupportAssistantWidget'
 
 const brandMarkSrc = `${import.meta.env.BASE_URL}postbridge-mark.svg`
 
@@ -18,6 +20,7 @@ const showIoDirectory = getPublicMarket() === 'io' && publicCaseLinks.some((item
 
 export default function PublicLayout({ children, compact = false, className = '' }) {
   const { t } = useI18n()
+  const { user } = useAuth()
   const selfhost = isSelfhostMode()
   const brandName = getPublicBrandName()
   const showOperator = !selfhost && getPublicMarket() === 'io'
@@ -78,6 +81,7 @@ export default function PublicLayout({ children, compact = false, className = ''
           </div>
         </div>
       </footer>
+      {user && !selfhost && <SupportAssistantWidget />}
     </div>
   )
 }

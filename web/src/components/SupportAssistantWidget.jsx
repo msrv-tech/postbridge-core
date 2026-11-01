@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { askSupportAssistant, applyAssistantVideoAction, readAssistantAction } from '../adapters/supportAssistant'
+import { askSupportAssistant, askGeneralSupport, applyAssistantVideoAction, readAssistantAction } from '../adapters/supportAssistant'
 import {
   isSupportAssistantHidden,
   setSupportAssistantHidden,
@@ -86,8 +86,12 @@ export default function SupportAssistantWidget({ workspaceId }) {
   const location = useLocation()
   const navigate = useNavigate()
   const { locale, t } = useI18n()
+  const widgetStorageId = workspaceId || 'general'
   const videoProjectId = location.pathname.match(/\/content\/videos\/([0-9a-f-]{36})$/i)?.[1] || ''
-  const contextKey = `${workspaceId}/${location.pathname}${location.search}`
+  const [mode, setMode] = useState(() => workspaceId && ['content', 'video', 'agents'].includes(pageFromPath(location.pathname)) ? 'generation' : 'support')
+  const [queuedQuestion, setQueuedQuestion] = useState('')
+  const [pendingCard, setPendingCard] = useState('')
+  const contextKey = mode === 'support' ? `support/${locale}` : `${workspaceId}/${location.pathname}${location.search}/generation`
   const contextRef = useRef(contextKey)
   contextRef.current = contextKey
   useEffect(() => {
@@ -96,9 +100,9 @@ export default function SupportAssistantWidget({ workspaceId }) {
   }, [contextKey])
   const widgetRef = useRef(null)
   const requestRef = useRef(null)
-  const [hidden, setHidden] = useState(() => isSupportAssistantHidden(workspaceId))
-  const [collapsed, setCollapsed] = useState(() => location.pathname.includes('/videos') || location.pathname.includes('/content/video-campaigns'))
-  const [position, setPosition] = useState(() => readPosition(workspaceId))
+  const [hidden, setHidden] = useState(() => isSupportAssistantHidden(widgetStorageId))
+  const [collapsed, setCollapsed] = useState(() => !workspaceId || location.pathname.includes('/videos') || location.pathname.includes('/content/video-campaigns'))
+  const [position, setPosition] = useState(() => readPosition(widgetStorageId))
   const [drag, setDrag] = useState(null)
   const [question, setQuestion] = useState('')
   const [answer, setAnswer] = useState(null)
@@ -108,36 +112,48 @@ export default function SupportAssistantWidget({ workspaceId }) {
   const page = useMemo(() => pageFromPath(location.pathname), [location.pathname])
 
   useEffect(() => {
-    setHidden(isSupportAssistantHidden(workspaceId))
-    setPosition(readPosition(workspaceId))
+    setHidden(isSupportAssistantHidden(widgetStorageId))
+    setPosition(readPosition(widgetStorageId))
     setQuestion('')
     setAnswer(null)
     setError('')
     setConversationId('')
     setLoading(false)
-    setCollapsed(page === 'video')
-  }, [contextKey, videoProjectId, page])
+    setCollapsed(!workspaceId || page === 'video')
+    requestRef.current = null
+  }, [contextKey])
+
+  useEffect(() => { if (!workspaceId) setMode('support') }, [workspaceId])
 
   useEffect(() => {
     const cardId = new URLSearchParams(location.search).get('assistant_card')
-    if (isSelfhostMode() || !workspaceId || !cardId || !/^\d{1,18}$/.test(cardId)) return
+    if (isSelfhostMode() || !workspaceId || !cardId || !/^\d{1,18}$/.test(cardId)) {
+      setPendingCard('')
+      return
+    }
+    setMode('generation')
+    setPendingCard(cardId)
+  }, [workspaceId, location.pathname, location.search])
+
+  useEffect(() => {
+    if (!pendingCard || mode !== 'generation') return
     let active = true
     setHidden(false)
     setCollapsed(false)
     setLoading(true)
-    readAssistantAction(workspaceId, cardId).then((response) => {
+    readAssistantAction(workspaceId, pendingCard).then((response) => {
       if (!active) return
       setAnswer(response)
       setConversationId(response.conversation_id || '')
     }).catch((e) => { if (active) setError(e.message) })
-      .finally(() => { if (active) setLoading(false) })
+      .finally(() => { if (active) { setLoading(false); setPendingCard('') } })
     return () => { active = false }
-  }, [workspaceId, contextKey])
+  }, [pendingCard, contextKey])
 
   useEffect(() => {
     const handleVisibility = (event) => {
-      if (event.detail?.workspaceId && event.detail.workspaceId !== workspaceId) return
-      setHidden(isSupportAssistantHidden(workspaceId))
+      if (event.detail?.workspaceId && event.detail.workspaceId !== widgetStorageId) return
+      setHidden(isSupportAssistantHidden(widgetStorageId))
     }
     const collapseForEditor = (event) => {
       if (event.detail?.workspaceId === workspaceId && event.detail?.route === location.pathname) setCollapsed(true)
@@ -148,7 +164,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
       window.removeEventListener(supportAssistantVisibilityEvent, handleVisibility)
       window.removeEventListener('postbridge-assistant-collapse', collapseForEditor)
     }
-  }, [workspaceId, location.pathname])
+  }, [widgetStorageId, location.pathname])
 
   useEffect(() => {
     if (!drag) return undefined
@@ -165,7 +181,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
     const handlePointerUp = () => {
       setDrag(null)
       setPosition((current) => {
-        if (current) writePosition(workspaceId, current)
+        if (current) writePosition(widgetStorageId, current)
         return current
       })
     }
@@ -175,7 +191,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
-  }, [drag, workspaceId])
+  }, [drag, widgetStorageId])
 
   const askAssistant = async (rawQuestion) => {
     const text = String(rawQuestion || '').trim() || t('assistant.defaultQuestion')
@@ -186,10 +202,14 @@ export default function SupportAssistantWidget({ workspaceId }) {
     setError('')
     try {
       const videoContext = { workspaceId, projectId: videoProjectId, hasUnsavedChanges: false }
-      window.dispatchEvent(new CustomEvent('postbridge-video-draft-context', { detail: videoContext }))
-      const fingerprint = JSON.stringify({ text, workspaceId, contextKey, videoContext })
+      if (mode === 'generation') window.dispatchEvent(new CustomEvent('postbridge-video-draft-context', { detail: videoContext }))
+      const fingerprint = JSON.stringify({ text, contextKey, mode, ...(mode === 'generation' ? { videoContext } : {}) })
       if (requestRef.current?.fingerprint !== fingerprint) requestRef.current = { fingerprint, key: crypto.randomUUID() }
-      const response = await askSupportAssistant(workspaceId, {
+      const response = mode === 'support' ? await askGeneralSupport({
+        question: text, conversation_id: conversationId || undefined,
+        request_key: requestRef.current.key, locale,
+      }) : await askSupportAssistant(workspaceId, {
+        purpose: 'generation',
         request_key: requestRef.current.key,
         page,
         question: text,
@@ -212,8 +232,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
       }
       setConversationId(response.conversation_id || conversationId)
       reachMetrikaGoal('support_assistant_answered', {
-        workspace_id: workspaceId,
-        page,
+        ...(mode === 'generation' ? { workspace_id: workspaceId, page } : { page: 'support' }),
         next_action: response.next_action || 'none',
       })
     } catch (e) {
@@ -230,11 +249,19 @@ export default function SupportAssistantWidget({ workspaceId }) {
       setSupportAssistantHidden(workspaceId, false)
       setHidden(false)
       setQuestion(event.detail.question || '')
-      void askAssistant(event.detail.question)
+      setMode('generation')
+      setQueuedQuestion(event.detail.question || t('assistant.defaultQuestion'))
     }
     window.addEventListener('postbridge-assistant-ask', handleAsk)
     return () => window.removeEventListener('postbridge-assistant-ask', handleAsk)
   }, [workspaceId, location.pathname, location.search, locale, conversationId, loading])
+
+  useEffect(() => {
+    if (!queuedQuestion || mode !== 'generation' || loading) return
+    setQueuedQuestion('')
+    setQuestion(queuedQuestion)
+    void askAssistant(queuedQuestion)
+  }, [queuedQuestion, mode, contextKey, loading])
 
   const applyVideoCard = async () => {
     if (loading || !answer?.video_action) return
@@ -271,7 +298,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
     })
   }
 
-  if (!workspaceId || isSelfhostMode() || hidden) return null
+  if (isSelfhostMode() || hidden) return null
 
   if (collapsed) {
     return (
@@ -310,7 +337,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
             <button
               type="button"
               className="support-assistant-icon-button"
-              onClick={() => setSupportAssistantHidden(workspaceId, true)}
+              onClick={() => setSupportAssistantHidden(widgetStorageId, true)}
               aria-label={t('assistant.hide')}
               title={t('assistant.hide')}
             >
@@ -319,6 +346,11 @@ export default function SupportAssistantWidget({ workspaceId }) {
           </div>
         </div>
         <div className="support-assistant-body">
+          <div className="inline-actions" role="group" aria-label={t('assistant.mode.label')}>
+            <button type="button" className={`btn btn-small${mode === 'support' ? '' : ' btn-secondary'}`} aria-pressed={mode === 'support'} disabled={loading} onClick={() => setMode('support')}>{t('assistant.mode.support')}</button>
+            {workspaceId && <button type="button" className={`btn btn-small${mode === 'generation' ? '' : ' btn-secondary'}`} aria-pressed={mode === 'generation'} disabled={loading} onClick={() => setMode('generation')}>{t('assistant.mode.generation')}</button>}
+          </div>
+          <p className="section-copy">{t(mode === 'support' ? 'assistant.mode.supportHint' : 'assistant.mode.generationHint')}</p>
           {answer?.message ? (
             <p className="support-assistant-answer">{answer.message}</p>
           ) : (
@@ -388,6 +420,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
             placeholder={t('assistant.placeholder')}
             aria-label={t('assistant.questionLabel')}
             disabled={loading}
+            maxLength={mode === 'support' ? 2000 : 8000}
           />
           <div className="inline-actions support-assistant-actions">
             <button

@@ -162,6 +162,49 @@ async function mockSaasBff(page, calls = []) {
   })
 }
 
+test('general product help has no workspace context and content dialogue declares shared billing', async ({ page }, testInfo) => {
+  await mockSaasBff(page)
+  const requests = []
+  await page.route('**/assistant/help', route => {
+    const request = route.request()
+    requests.push({ path: new URL(request.url()).pathname, body: request.postDataJSON() })
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      conversation_id: `conversation-${requests.length}`, message: 'A concise product answer.', next_action: 'no_action',
+    }) })
+  })
+  await page.addInitScript(() => {
+    localStorage.setItem('postbridge_token', 'saas-token')
+    localStorage.setItem('postbridge.locale', 'en')
+  })
+  // The public page passes no workspace, even for an authenticated account.
+  await page.goto('/home')
+  await page.getByRole('button', { name: 'Open assistant', exact: true }).click()
+  const widget = page.locator('.support-assistant-widget')
+  await expect(widget.getByRole('button', { name: 'Content creation', exact: true })).toHaveCount(0)
+  await widget.getByLabel('Question for the assistant').fill('How do channels work?')
+  await widget.getByRole('button', { name: 'Ask', exact: true }).click()
+  await expect(widget.getByText('A concise product answer.', { exact: true })).toBeVisible()
+  expect(requests[0].path).toBe('/assistant/help')
+  expect(Object.keys(requests[0].body).sort()).toEqual(['locale', 'question', 'request_key'])
+  await widget.screenshot({ path: testInfo.outputPath('general-support.png') })
+  await page.goto('/workspaces/ws-1/content')
+  await expect(widget.getByRole('button', { name: 'Content creation', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(widget).toContainText("Generation planning, discussion and follow-up use this workspace's shared AI allowance.")
+  await widget.getByLabel('Question for the assistant').fill('Help plan a product video')
+  await widget.getByRole('button', { name: 'Ask', exact: true }).click()
+  await expect.poll(() => requests.length).toBe(2)
+  expect(requests[1].path).toBe('/workspaces/ws-1/assistant/help')
+  expect(requests[1].body.purpose).toBe('generation')
+  expect(requests[1].body.conversation_id).toBeUndefined()
+  await widget.getByRole('button', { name: 'Product help', exact: true }).click()
+  await widget.getByLabel('Question for the assistant').fill('What is Postbridge?')
+  await widget.getByRole('button', { name: 'Ask', exact: true }).click()
+  await expect.poll(() => requests.length).toBe(3)
+  expect(requests[2].path).toBe('/assistant/help')
+  expect(requests[2].body.client_context).toBeUndefined()
+  expect(requests[2].body.conversation_id).toBeUndefined()
+})
+
 test('video studio keeps creation simple and sends selected materials to the BFF', async ({ page }, testInfo) => {
   await mockSaasBff(page)
   const projectId = '00000000-0000-4000-8000-000000000071'

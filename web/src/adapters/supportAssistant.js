@@ -7,6 +7,13 @@ export function askSupportAssistant(workspaceId, payload) {
   })
 }
 
+export function askGeneralSupport({ question, conversation_id, request_key, locale }) {
+  return api('/assistant/help', {
+    method: 'POST',
+    body: JSON.stringify({ question, conversation_id, request_key, locale }),
+  })
+}
+
 export const applyAssistantVideoAction = (workspaceId, cardId) => api(`/workspaces/${workspaceId}/assistant/actions/${cardId}/apply`, { method: 'POST' })
 
 export const readAssistantAction = (workspaceId, cardId) => api(`/workspaces/${workspaceId}/assistant/actions/${cardId}`)
