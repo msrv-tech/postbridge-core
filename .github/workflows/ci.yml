@@ -57,6 +57,9 @@ jobs:
       - name: Test workspace navigation
         run: npm --prefix web run test:workspace
 
+      - name: Test general assistant proxy
+        run: npm --prefix web run test:assistant-proxy
+
       - name: Install Playwright browser
         run: npm --prefix web exec playwright install --with-deps chromium
 

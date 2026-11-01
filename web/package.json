@@ -11,6 +11,7 @@
     "check:i18n": "node scripts/check-i18n-boundaries.mjs",
     "test:consent": "node --test scripts/test-analytics-consent.mjs",
     "test:workspace": "node --test scripts/test-workspace.mjs",
+    "test:assistant-proxy": "node --test scripts/test-assistant-proxy.mjs",
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:e2e:saas": "playwright test -c playwright.saas.config.js",

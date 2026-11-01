@@ -68,6 +68,7 @@ export default defineConfig({
       '/me': { target: apiProxyTarget, changeOrigin: true },
       '/api': { target: apiProxyTarget, changeOrigin: true },
       '/auth': { target: apiProxyTarget, changeOrigin: true },
+      '/assistant': { target: apiProxyTarget, changeOrigin: true },
       '/video-attribution': { target: apiProxyTarget, changeOrigin: true },
       '/billing': { target: apiProxyTarget, changeOrigin: true },
       '/admin': { target: apiProxyTarget, changeOrigin: true },
