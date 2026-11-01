@@ -38,7 +38,16 @@ Use the repository Docker Compose CI environment. Exercise actual SDK tool calli
 ## Progress
 
 - Plan recorded on 1 November 2026 against Core `b751aa8` and SaaS `d0cac28`.
-- Implementation in progress: common Core runtime and editorial migration.
+- Shared Core SDK kernel implemented and verified: 29 SDK protocol/failure tests and 134 existing editorial/provider/retrieval/AI regressions passed in Docker CI.
+- Next: migrate editorial execution and hosted adapters; production routes still use their existing implementations.
+
+## Core runtime contract
+
+`postbridge.agent.sdk_runtime.run_postbridge_agent` is the shared SDK entry point. `AgentExecution` supplies the configured model, server-owned instructions, isolated history, typed tools, required tool names, output schema and execution limits. `AgentResult` returns the output, provider receipts and tool events. The tested SDK version is pinned to `0.24.0`; its HTTP transport is `httpx2`.
+
+An adapter supplies `before_provider_call` to authorize and durably record each attempt before dispatch, and `on_provider_receipt` to persist provider facts before the SDK parses the answer. GitSell charged units and raw provider tokens remain separate. An absent receipt is unknown usage, not zero cost. Dispatch retries are disabled. Tools execute on the request's event-loop thread to preserve ownership of synchronous database sessions.
+
+The runner owns neither conversation storage nor billing tables. Adapters must persist history, enforce idempotency, authorize resources and recover interrupted executions. The initial kernel does not switch existing production routes; editorial and hosted adapter migration remain subsequent steps.
 
 ## References
 
