@@ -36,9 +36,7 @@ export function rememberWorkspace(user, workspaceId) {
 
 export function canManageWorkspaceBilling(user, workspaceId) {
   const workspace = user?.workspaces?.find((item) => item.id === workspaceId)
-  if (typeof workspace?.can_manage_billing === 'boolean') return workspace.can_manage_billing
-  if (workspace?.role) return ['owner', 'admin'].includes(workspace.role)
-  return Boolean(user?.is_platform_admin)
+  return Boolean(workspace || user?.is_platform_admin)
 }
 
 // Object IDs and payment parameters belong to their original workspace.

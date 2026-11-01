@@ -4,6 +4,7 @@ import { BILLING_SUPPORT_EMAIL } from '../billingSupport'
 import { listPublicCaseLandings } from '../caseLandings'
 import { getPublicBrandName, getPublicMarket } from '../branding'
 import { LanguageSelect, useI18n } from '../i18n'
+import HeaderNavigation from './HeaderNavigation'
 
 const brandMarkSrc = `${import.meta.env.BASE_URL}postbridge-mark.svg`
 
@@ -29,7 +30,7 @@ export default function PublicLayout({ children, compact = false, className = ''
             <img src={brandMarkSrc} alt="" className="brand-mark" width="28" height="28" />
             {brandName}
           </Link>
-          <nav className="public-nav" aria-label={t('public.nav.aria')}>
+          <HeaderNavigation navClassName="public-nav" label={t('public.nav.aria')}>
             {!selfhost && <Link to="/news">{t('common.news')}</Link>}
             {showIoDirectory && <a href="/platforms">Platforms</a>}
             <details className="public-nav-menu">
@@ -49,7 +50,7 @@ export default function PublicLayout({ children, compact = false, className = ''
             <Link to="/login" className="btn btn-secondary btn-small">
               {t('common.login')}
             </Link>
-          </nav>
+          </HeaderNavigation>
         </div>
       </header>
 

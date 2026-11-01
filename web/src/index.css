@@ -128,6 +128,7 @@ select {
 .app-nav,
 .hero-actions,
 .public-nav,
+.public-loading-nav,
 .app-header-actions,
 .toolbar-actions,
 .inline-actions {
@@ -575,8 +576,6 @@ select {
 }
 
 @media (max-width: 540px) {
-  .public-home .public-nav { flex-direction: row; flex-wrap: wrap; align-items: center; gap: .6rem .9rem; }
-  .public-home .public-nav-menu { width: auto; }
   .public-home .cta-card { flex-direction: column; align-items: flex-start; }
   .studio-process-grid { grid-template-columns: 1fr; }
   .studio-showcase-grid { gap: .65rem; }
@@ -4239,10 +4238,7 @@ textarea:focus {
     padding: 0 1rem;
   }
 
-  .public-header-inner,
   .public-footer-inner,
-  .public-nav,
-  .app-nav,
   .jobs-list-item,
   .status-row,
   .detail-row,
@@ -4780,4 +4776,160 @@ textarea:focus {
   .workspace-options { position: fixed; top: var(--workspace-menu-top); left: 1rem; right: 1rem; width: auto; max-width: none; max-height: 70vh; overflow-y: auto; }
   .app-header-top-left .app-nav { width: 100%; }
   .workspace-switch-actions .btn { width: 100%; }
+}
+
+.header-navigation {
+  display: flex;
+  align-items: center;
+}
+
+.header-menu-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.header-menu-toggle:hover,
+.header-navigation.is-open > .header-menu-toggle {
+  background: var(--surface-soft);
+}
+
+.header-menu-toggle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+@media (max-width: 960px) {
+  .public-header-inner {
+    position: relative;
+    min-height: 64px;
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .public-loading-nav {
+    display: none;
+  }
+
+  .header-navigation {
+    position: static;
+    margin-left: auto;
+  }
+
+  .header-menu-toggle {
+    display: inline-flex;
+  }
+
+  .header-navigation > .header-menu-panel {
+    display: none;
+    position: absolute;
+    top: calc(100% + .5rem);
+    left: 1rem;
+    right: 1rem;
+    z-index: 90;
+    max-height: calc(100dvh - 5.5rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    gap: .25rem;
+    padding: .65rem;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--menu-background);
+    box-shadow: var(--shadow);
+  }
+
+  .header-navigation.is-open > .header-menu-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .header-menu-panel > a,
+  .header-menu-panel .public-nav-menu summary {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: .6rem .75rem;
+    border-radius: 8px;
+  }
+
+  .header-menu-panel > .btn {
+    justify-content: center;
+  }
+
+  .header-menu-panel .language-select {
+    padding: .4rem .75rem;
+  }
+
+  .header-menu-panel .language-select select {
+    min-height: 40px;
+  }
+
+  .header-menu-panel .public-nav-menu {
+    width: 100%;
+  }
+
+  .header-menu-panel .public-nav-menu-list {
+    position: static;
+    width: 100%;
+    min-width: 0;
+    margin-top: .25rem;
+    box-shadow: none;
+  }
+
+  .app-header-top-left {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    flex-basis: 100%;
+    width: 100%;
+  }
+
+  .app-header-top-left > .header-navigation {
+    grid-column: 3;
+  }
+
+  .app-header-top-left > .workspace-switcher {
+    width: 100%;
+    max-width: 320px;
+  }
+
+  .app-header-top-left .workspace-switcher-trigger {
+    width: 100%;
+    max-width: 100%;
+    min-height: 44px;
+  }
+
+  .app-header-top-left .workspace-current-name {
+    flex: 1;
+    text-align: left;
+  }
+
+  .app-header-top-left .header-menu-panel {
+    left: 0;
+    right: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-shell-inner {
+    padding-top: .75rem;
+  }
+
+  .app-header-top-left .brand-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 }

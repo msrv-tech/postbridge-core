@@ -15,7 +15,7 @@ export default function LoadingSkeleton() {
             <img src={brandMarkSrc} alt="" className="brand-mark" width="28" height="28" />
             {brandName}
           </span>
-          <div className="public-nav" style={{ opacity: 0.6 }}>
+          <div className="public-loading-nav" style={{ opacity: 0.6 }}>
             <span>{t('loading.nav.pricing')}</span>
             <span>{t('loading.nav.login')}</span>
           </div>

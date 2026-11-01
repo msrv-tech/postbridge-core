@@ -5,6 +5,7 @@ import { getPublicBrandName } from '../branding'
 import { LanguageSelect, useI18n } from '../i18n'
 import SupportAssistantWidget from './SupportAssistantWidget'
 import WorkspaceSwitcher from './WorkspaceSwitcher'
+import HeaderNavigation from './HeaderNavigation'
 
 const dismissedImageJobsKey = (workspaceId) => `postbridge_dismissed_image_jobs_${workspaceId}`
 const brandMarkSrc = `${import.meta.env.BASE_URL}postbridge-mark.svg`
@@ -109,10 +110,10 @@ export default function AppShell({
             <div className="app-header-top-left">
               <Link to={brandHref} className="brand brand-small">
                 <img src={brandMarkSrc} alt="" className="brand-mark" width="26" height="26" />
-                {brandName}
+                <span className="brand-name">{brandName}</span>
               </Link>
               <WorkspaceSwitcher workspaceId={workspaceId} />
-              <nav className="app-nav" aria-label={t('app.nav.aria')}>
+              <HeaderNavigation navClassName="app-nav" label={t('app.nav.aria')}>
                 <NavLink to={contentHref} className={navClassName(isContentActive)}>
                   {t('app.nav.content')}
                 </NavLink>
@@ -126,11 +127,11 @@ export default function AppShell({
                   {t('app.nav.settings')}
                 </NavLink>
                 <LanguageSelect compact />
-              </nav>
+              </HeaderNavigation>
             </div>
-            <div className="app-header-top-right">
-              {actions && <div className="app-header-actions">{actions}</div>}
-            </div>
+            {actions && <div className="app-header-top-right">
+              <div className="app-header-actions">{actions}</div>
+            </div>}
           </div>
           <div className="app-header-main">
             <h1 className="page-title">{title}</h1>

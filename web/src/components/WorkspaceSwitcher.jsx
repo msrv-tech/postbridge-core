@@ -48,7 +48,7 @@ export default function WorkspaceSwitcher({ workspaceId }) {
             key={workspace.id} aria-current={workspace.id === workspaceId ? 'true' : undefined}
             onClick={() => workspace.id === workspaceId ? setOpen(false) : select(workspace)}>
             <span className="workspace-option-copy"><strong>{workspace.name}</strong>
-              <span>{workspace.plan_code ? workspace.plan_code.charAt(0).toUpperCase() + workspace.plan_code.slice(1) : 'Free'} · {t(`workspace.role.${workspace.role || 'member'}`)}</span>
+              <span>{workspace.plan_code ? workspace.plan_code.charAt(0).toUpperCase() + workspace.plan_code.slice(1) : 'Free'} · {t('workspace.role.owner')}</span>
             </span>
             {workspace.id === workspaceId && <span aria-hidden="true">✓</span>}
           </button>

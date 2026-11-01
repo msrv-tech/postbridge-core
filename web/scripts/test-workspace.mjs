@@ -22,9 +22,11 @@ test('switches to the matching section without object IDs or payment state', () 
     ['agents/runs/old', 'agents/topic-scout'], ['agents/videos', 'agents/videos'],
   ]) assert.equal(workspaceSwitchPath(`/workspaces/one/${source}`, 'two'), `/workspaces/two/${section}`)
 })
-test('billing permissions match each membership, including a platform admin with a member role', () => {
+test('every workspace membership has owner billing access, including legacy role payloads', () => {
   assert.equal(canManageWorkspaceBilling(user, 'one'), true)
-  assert.equal(canManageWorkspaceBilling(user, 'two'), false)
-  assert.equal(canManageWorkspaceBilling({ ...user, is_platform_admin: true }, 'two'), false)
-  assert.equal(canManageWorkspaceBilling({ ...user, workspaces: [{ id: 'one', role: 'owner', can_manage_billing: false }] }, 'one'), false)
+  assert.equal(canManageWorkspaceBilling(user, 'two'), true)
+  assert.equal(canManageWorkspaceBilling({ ...user, is_platform_admin: true }, 'two'), true)
+  assert.equal(canManageWorkspaceBilling({ ...user, workspaces: [{ id: 'one', role: 'member', can_manage_billing: false }] }, 'one'), true)
+  assert.equal(canManageWorkspaceBilling(user, 'outside'), false)
+  assert.equal(canManageWorkspaceBilling(null, 'one'), false)
 })
