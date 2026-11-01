@@ -5,14 +5,11 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from postbridge.agent.graphs.source_package import build_source_package_subgraph
-from postbridge.agent.providers.openai_compatible import OpenAICompatibleProvider
-from postbridge.agent.runtime import compile_linear_graph
-from postbridge.agent.state import AgentState
+from postbridge.agent.operations.sources import prepare_source_package
+from postbridge.agent.operations import public_channel_context as get_channel_context
 from postbridge.agent.tools import (
     analyze_source_quality,
     dedupe_mixed_list,
-    get_channel_context,
     get_channel_style_profile,
     list_recent_publications,
     search_similar_publications,
@@ -21,15 +18,14 @@ from postbridge.agent.tools import (
 )
 from postbridge.config import get_settings
 from postbridge.models.domain import ContentItemOrm
+from postbridge.domain.errors import ValidationError
 
 
-def build_post_copilot_graph(
+def make_post_operations(
     *,
     session: Session,
-    provider: OpenAICompatibleProvider,
 ) -> Any:
     response_language = get_settings().agent_default_response_language
-    source_package_graph = build_source_package_subgraph(session=session)
 
     def _dedupe_urls(items: list[str]) -> list[str]:
         out: list[str] = []
@@ -100,6 +96,8 @@ def build_post_copilot_graph(
         content_item_id = state.get("content_item_id")
         if isinstance(content_item_id, str) and content_item_id.strip():
             row = session.get(ContentItemOrm, content_item_id)
+            if row is None or row.tenant_id != tenant_id:
+                raise ValidationError(code="VALIDATION_CONTENT_ITEM_NOT_FOUND", message="Content item not found")
             if row is not None and row.tenant_id == tenant_id:
                 extra: dict[str, Any] = {}
                 if isinstance(row.body_structured_json, str) and row.body_structured_json.strip():
@@ -129,7 +127,7 @@ def build_post_copilot_graph(
         }
 
     def build_source_package(state: dict[str, Any]) -> dict[str, Any]:
-        substate = source_package_graph.invoke(dict(state))
+        substate = prepare_source_package(state)
         return {
             "source_bundle": substate.get("source_bundle") or [],
             "shortlisted_source_bundle": substate.get("shortlisted_source_bundle") or [],
@@ -139,7 +137,7 @@ def build_post_copilot_graph(
             "tool_trace": substate.get("tool_trace") or (state.get("tool_trace") or []),
         }
 
-    def draft_candidate(state: dict[str, Any]) -> dict[str, Any]:
+    def build_messages(state: dict[str, Any]) -> list[dict[str, str]]:
         channel = state["channel_context"]
         style = state["style_profile"]
         recent = state["recent_publications"]
@@ -190,7 +188,7 @@ def build_post_copilot_graph(
             {
                 "role": "system",
                 "content": (
-                    "You are an editorial copilot. Return strict JSON with keys: "
+                    "You are an editorial copilot. Prepare a post with keys: "
                     "topic, headline, body_markdown, summary, why_now, style_fit_summary, "
                     "source_bundle, scores, risk_flags, media_url, media_urls, cover_image_url, image_selection_notes. "
                     + (
@@ -236,7 +234,37 @@ def build_post_copilot_graph(
                 ),
             },
         ]
-        candidate, usage = provider.invoke_json(messages=messages)
+        return messages
+
+    def accept_candidates(state: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+        channel = state["channel_context"]
+        style = state["style_profile"]
+        recent = state["recent_publications"]
+        workspace_policy = state.get("workspace_policy") if isinstance(state.get("workspace_policy"), dict) else {}
+        source_package = state.get("source_package") if isinstance(state.get("source_package"), dict) else {}
+        sources = source_package.get("primary_sources_details") if isinstance(source_package.get("primary_sources_details"), list) else []
+        image_request = bool(state.get("image_request"))
+        image_candidates = (
+            source_package.get("image_candidates")
+            if isinstance(source_package.get("image_candidates"), list)
+            else []
+        )
+        current_draft = state.get("current_draft") if isinstance(state.get("current_draft"), dict) else None
+        existing_image_urls: list[str] = []
+        if current_draft:
+            if isinstance(current_draft.get("media_url"), str) and current_draft["media_url"].strip():
+                existing_image_urls.append(current_draft["media_url"].strip())
+            raw_existing_media_urls = current_draft.get("media_urls")
+            if isinstance(raw_existing_media_urls, list):
+                existing_image_urls.extend(
+                    item.strip() for item in raw_existing_media_urls if isinstance(item, str) and item.strip()
+                )
+            if (
+                isinstance(current_draft.get("cover_image_url"), str)
+                and current_draft["cover_image_url"].strip()
+            ):
+                existing_image_urls.append(current_draft["cover_image_url"].strip())
+        allowed_image_urls = set(_dedupe_urls([item["url"] for item in image_candidates] + existing_image_urls))
         dedup_summary, is_duplicate = summarize_dedup(
             recent,
             topic=candidate.get("topic"),
@@ -251,6 +279,10 @@ def build_post_copilot_graph(
             risk_flags.append("possible_duplicate")
         candidate["risk_flags"] = risk_flags
         source_bundle = candidate.get("source_bundle") if isinstance(candidate.get("source_bundle"), dict) else {}
+        # Source identifiers are evidence supplied by the server, not model claims.
+        source_bundle["primary_sources"] = list(source_package.get("primary_sources") or [])
+        source_bundle["seed_sources"] = sources
+        source_bundle["primary_sources_details"] = sources
         if sources:
             source_bundle.setdefault(
                 "primary_sources",
@@ -330,14 +362,8 @@ def build_post_copilot_graph(
         return {
             "candidate_pool": [candidate],
             "selected_candidates": [candidate],
-            "tool_trace": (state.get("tool_trace") or []) + [{"tool": "draft_candidate", "usage": usage}],
+            "tool_trace": (state.get("tool_trace") or []) + [{"tool": "draft_candidate"}],
         }
 
-    return compile_linear_graph(
-        AgentState,
-        [
-            ("load_context", load_context),
-            ("build_source_package", build_source_package),
-            ("draft_candidate", draft_candidate),
-        ],
-    )
+    return {"load_context": load_context, "sources": build_source_package,
+        "messages": build_messages, "accept": accept_candidates}

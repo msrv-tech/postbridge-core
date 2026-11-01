@@ -39,7 +39,8 @@ Use the repository Docker Compose CI environment. Exercise actual SDK tool calli
 
 - Plan recorded on 1 November 2026 against Core `b751aa8` and SaaS `d0cac28`.
 - Shared Core SDK kernel implemented and verified: 29 SDK protocol/failure tests and 134 existing editorial/provider/retrieval/AI regressions passed in Docker CI.
-- Next: migrate editorial execution and hosted adapters; production routes still use their existing implementations.
+- Editorial migration implemented: editor, topic discovery and scheduled editorial entry points use the SDK. LangGraph, graph builders and the fallback interpreter were removed. Full Docker CI passed: 811 tests, 78.69% coverage, OpenAPI export succeeded.
+- Next: connect hosted workspace tools and general help to the shared implementation and verify accounting compatibility.
 
 ## Core runtime contract
 
@@ -47,7 +48,7 @@ Use the repository Docker Compose CI environment. Exercise actual SDK tool calli
 
 An adapter supplies `before_provider_call` to authorize and durably record each attempt before dispatch, and `on_provider_receipt` to persist provider facts before the SDK parses the answer. GitSell charged units and raw provider tokens remain separate. An absent receipt is unknown usage, not zero cost. Dispatch retries are disabled. Tools execute on the request's event-loop thread to preserve ownership of synchronous database sessions.
 
-The runner owns neither conversation storage nor billing tables. Adapters must persist history, enforce idempotency, authorize resources and recover interrupted executions. The initial kernel does not switch existing production routes; editorial and hosted adapter migration remain subsequent steps.
+The runner owns neither conversation storage nor billing tables. Adapters persist history, enforce idempotency, authorize resources and recover interrupted executions. Core editorial routes and workers now use the SDK adapter; hosted adapters follow in the next step.
 
 ## References
 

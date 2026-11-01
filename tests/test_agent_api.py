@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 os.environ["AI_GATEWAY_ENABLED"] = "1"
 
 from postbridge.api.main import app  # noqa: E402
-from postbridge.agent.graphs.post_copilot import build_post_copilot_graph  # noqa: E402
+from postbridge.agent.editorial import build_post_editor  # noqa: E402
 from postbridge.agent.tools import (  # noqa: E402
     build_review_hints,
     canonical_angle_family,
@@ -60,6 +60,12 @@ from postbridge.models.domain import (
 
 TENANT = "b0000000-0000-4000-8000-000000000001"
 CHANNEL = "b0000000-0000-4000-8000-000000000002"
+
+
+@pytest.fixture(autouse=True)
+def sdk_model_boundary(monkeypatch):
+    from tests.editorial_fakes import fake_editorial_run
+    monkeypatch.setattr("postbridge.agent.editorial.EditorialAdapter._run", fake_editorial_run)
 
 
 @pytest.fixture(autouse=True)
@@ -198,11 +204,11 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         ),
     )
     monkeypatch.setattr(
-        "postbridge.agent.orchestrator.find_default_provider",
+        "postbridge.agent.service.find_default_provider",
         lambda session, tenant_id: object(),
     )
     monkeypatch.setattr(
-        "postbridge.agent.orchestrator.ensure_openai_compatible_provider",
+        "postbridge.agent.service.ensure_openai_compatible_provider",
         lambda row: __import__(
             "postbridge.agent.providers.openai_compatible",
             fromlist=["OpenAICompatibleProvider"],
@@ -230,6 +236,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
             for idx, url in enumerate(urls, start=1)
         ],
     )
+    from postbridge.agent.tools import collect_seed_sources
+    monkeypatch.setattr("postbridge.agent.retrieval.fetch_seed_sources", collect_seed_sources)
     return TestClient(app)
 
 
@@ -883,7 +891,7 @@ def test_seed_urls_are_collected_into_review_payload(client: TestClient):
 
 def test_post_copilot_uses_search_images_when_request_needs_visuals(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
-        "postbridge.agent.graphs.source_package.collect_topic_sources",
+        "postbridge.agent.operations.sources.collect_topic_sources",
         lambda topic, seed_urls=None, **kwargs: [
             {
                 "url": "https://example.com/story",
@@ -917,7 +925,7 @@ def test_post_copilot_uses_search_images_when_request_needs_visuals(monkeypatch:
     )
     session = SESSION_LOCAL()
     try:
-        graph = build_post_copilot_graph(
+        graph = build_post_editor(
             session=session,
             provider=OpenAICompatibleProvider(
                 base_url="https://example.invalid",
@@ -958,7 +966,7 @@ def test_post_copilot_creates_source_package_review_before_drafting(
 ):
     now = datetime.now(UTC)
     monkeypatch.setattr(
-        "postbridge.agent.graphs.source_package.collect_topic_sources",
+        "postbridge.agent.operations.sources.collect_topic_sources",
         lambda topic, seed_urls=None, **kwargs: [
             {
                 "url": "https://a.example.com/1",
@@ -1029,10 +1037,10 @@ def test_post_copilot_creates_source_package_review_before_drafting(
     assert "source package" in timeline["events"][-1]["content"].lower()
 
 
-def test_post_copilot_builds_source_package_subgraph(monkeypatch: pytest.MonkeyPatch):
+def test_post_copilot_builds_source_package_service(monkeypatch: pytest.MonkeyPatch):
     now = datetime.now(UTC)
     monkeypatch.setattr(
-        "postbridge.agent.graphs.source_package.collect_topic_sources",
+        "postbridge.agent.operations.sources.collect_topic_sources",
         lambda topic, seed_urls=None, **kwargs: [
             {
                 "url": "https://a.example.com/1",
@@ -1087,7 +1095,7 @@ def test_post_copilot_builds_source_package_subgraph(monkeypatch: pytest.MonkeyP
     )
     session = SESSION_LOCAL()
     try:
-        graph = build_post_copilot_graph(
+        graph = build_post_editor(
             session=session,
             provider=OpenAICompatibleProvider(
                 base_url="https://example.invalid",
@@ -1130,7 +1138,7 @@ def test_post_copilot_source_package_skips_image_candidates_without_image_reques
 ) -> None:
     now = datetime.now(UTC)
     monkeypatch.setattr(
-        "postbridge.agent.graphs.source_package.collect_topic_sources",
+        "postbridge.agent.operations.sources.collect_topic_sources",
         lambda topic, seed_urls=None, **kwargs: [
             {
                 "url": "https://a.example.com/1",
@@ -1165,7 +1173,7 @@ def test_post_copilot_source_package_skips_image_candidates_without_image_reques
     )
     session = SESSION_LOCAL()
     try:
-        graph = build_post_copilot_graph(
+        graph = build_post_editor(
             session=session,
             provider=OpenAICompatibleProvider(
                 base_url="https://example.invalid",
@@ -1252,7 +1260,7 @@ def test_workspace_policy_guides_source_collection_and_prompt(
         )
 
     monkeypatch.setattr(
-        "postbridge.agent.graphs.source_package.collect_topic_sources",
+        "postbridge.agent.operations.sources.collect_topic_sources",
         fake_collect_topic_sources,
     )
     monkeypatch.setattr(
@@ -1324,11 +1332,11 @@ def test_approving_source_package_review_item_triggers_follow_up_run(
         },
     ]
     monkeypatch.setattr(
-        "postbridge.agent.graphs.source_package.collect_topic_sources",
+        "postbridge.agent.operations.sources.collect_topic_sources",
         lambda topic, seed_urls=None, **kwargs: discovered_sources,
     )
     monkeypatch.setattr(
-        "postbridge.agent.graphs.source_package.collect_seed_sources",
+        "postbridge.agent.operations.sources.collect_seed_sources",
         lambda urls: discovered_sources if urls else [],
     )
     monkeypatch.setattr(
@@ -1765,7 +1773,7 @@ def test_collect_topic_sources_fetches_normalized_duckduckgo_target_url(monkeypa
 
 
 def test_parse_image_dimensions_reads_png_size():
-    from postbridge.agent.graphs import source_package
+    from postbridge.agent.operations import sources as source_package
 
     payload = (
         b"\x89PNG\r\n\x1a\n"
@@ -1779,7 +1787,7 @@ def test_parse_image_dimensions_reads_png_size():
 
 
 def test_collect_image_candidates_filters_small_images(monkeypatch: pytest.MonkeyPatch):
-    from postbridge.agent.graphs import source_package
+    from postbridge.agent.operations import sources as source_package
 
     monkeypatch.setattr(
         source_package,
@@ -2295,7 +2303,7 @@ def test_post_copilot_edit_prompt_includes_existing_draft_content():
                 {"total_tokens": 1},
             )
 
-    graph = build_post_copilot_graph(session=session, provider=DummyProvider())
+    graph = build_post_editor(session=session, provider=DummyProvider())
     graph.invoke(
         {
             "tenant_id": TENANT,
@@ -2557,7 +2565,7 @@ def test_topic_scout_uses_shortlisted_sources_in_review_payload(
         ),
     )
     monkeypatch.setattr(
-        "postbridge.agent.graphs.topic_scout.collect_topic_evidence",
+        "postbridge.agent.operations.topics.collect_topic_evidence",
         lambda session, tenant_id, channel_id, topic, seed_urls=None, workspace_policy=None: [
             {
                 "url": "https://a.example.com/1",
@@ -2674,7 +2682,7 @@ def test_run_and_candidate_detail_endpoints(client: TestClient):
     steps_payload = steps.json()
     step_names = [item["step_name"] for item in steps_payload]
     assert "run_started" in step_names
-    assert "graph_invoke" in step_names
+    assert "sdk_invoke" in step_names
     assert "candidate_saved" in step_names
     assert "review_item_created" in step_names
     assert "run_completed" in step_names
@@ -2704,6 +2712,7 @@ def test_agent_task_run_and_review_resolve(client: TestClient):
             "channel_id": CHANNEL,
             "mode": "topic_scout",
             "goal_text": "Find fresh Novosibirsk news",
+            "seed_urls": ["https://example.com/1"],
             "max_candidates_per_run": 3,
             "autonomy_mode": "plan_approval",
             "created_by": "user-1",
@@ -2859,7 +2868,7 @@ def test_topic_scout_task_retrieval_uses_goal_text_without_editorial_instruction
         ]
 
     monkeypatch.setattr(
-        "postbridge.agent.graphs.source_package.collect_topic_sources",
+        "postbridge.agent.operations.sources.collect_topic_sources",
         fake_collect_topic_sources,
     )
     monkeypatch.setattr("postbridge.workers.tasks.process_publication_target_task.delay", lambda *a, **k: None)
@@ -2892,11 +2901,11 @@ def test_topic_scout_task_auto_publish_blocks_when_sources_and_images_are_missin
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
-        "postbridge.agent.graphs.topic_scout.collect_topic_evidence",
+        "postbridge.agent.operations.topics.collect_topic_evidence",
         lambda session, tenant_id, channel_id, topic, seed_urls=None, workspace_policy=None: [],
     )
     monkeypatch.setattr(
-        "postbridge.agent.graphs.source_package.collect_topic_sources",
+        "postbridge.agent.operations.sources.collect_topic_sources",
         lambda *args, **kwargs: [],
     )
     monkeypatch.setattr(
@@ -3088,7 +3097,7 @@ def test_topic_scout_task_auto_materializes_public_image_when_sources_exist(
         },
     ]
     monkeypatch.setattr(
-        "postbridge.agent.graphs.topic_scout.collect_topic_evidence",
+        "postbridge.agent.operations.topics.collect_topic_evidence",
         lambda session, tenant_id, channel_id, topic, seed_urls=None, workspace_policy=None: list(seeded_sources),
     )
     monkeypatch.setattr("postbridge.workers.tasks.process_publication_target_task.delay", lambda *a, **k: None)
@@ -3748,6 +3757,7 @@ def test_agent_quality_analytics_endpoint(client: TestClient):
             "channel_id": CHANNEL,
             "mode": "topic_scout",
             "topic_definition": "Find fresh Novosibirsk news",
+            "seed_urls": ["https://example.com/1"],
             "max_candidates": 3,
             "autonomy_mode": "draft_approval",
         },
@@ -4097,7 +4107,7 @@ def test_topic_scout_auto_materializes_first_public_image_when_requested(
         ),
     )
     monkeypatch.setattr(
-        "postbridge.agent.graphs.topic_scout.collect_topic_evidence",
+        "postbridge.agent.operations.topics.collect_topic_evidence",
         lambda session, tenant_id, channel_id, topic, seed_urls=None, workspace_policy=None: [
             {
                 "url": "https://example.com/story",
@@ -4171,7 +4181,7 @@ def test_topic_scout_task_config_can_disable_images(
         ),
     )
     monkeypatch.setattr(
-        "postbridge.agent.graphs.topic_scout.collect_topic_evidence",
+        "postbridge.agent.operations.topics.collect_topic_evidence",
         lambda session, tenant_id, channel_id, topic, seed_urls=None, workspace_policy=None: [
             {
                 "url": "https://example.com/story",
@@ -4262,7 +4272,7 @@ def test_topic_scout_task_config_generate_images_queues_media_job(
         ),
     )
     monkeypatch.setattr(
-        "postbridge.agent.graphs.topic_scout.collect_topic_evidence",
+        "postbridge.agent.operations.topics.collect_topic_evidence",
         lambda session, tenant_id, channel_id, topic, seed_urls=None, workspace_policy=None: [
             {
                 "url": "https://example.com/story",
@@ -4403,7 +4413,7 @@ def test_topic_scout_review_approval_applies_selected_public_image(
         ),
     )
     monkeypatch.setattr(
-        "postbridge.agent.graphs.topic_scout.collect_topic_evidence",
+        "postbridge.agent.operations.topics.collect_topic_evidence",
         lambda session, tenant_id, channel_id, topic, seed_urls=None, workspace_policy=None: [
             {
                 "url": "https://example.com/story",

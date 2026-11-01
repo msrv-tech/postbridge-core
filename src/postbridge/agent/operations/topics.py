@@ -5,16 +5,13 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from postbridge.agent.graphs.source_package import build_source_package_subgraph
-from postbridge.agent.providers.openai_compatible import OpenAICompatibleProvider
-from postbridge.agent.runtime import compile_linear_graph
-from postbridge.agent.state import AgentState
+from postbridge.agent.operations.sources import prepare_source_package
+from postbridge.agent.operations import public_channel_context as get_channel_context
 from postbridge.agent.tools import (
     analyze_source_quality,
     canonical_angle_family,
     collect_topic_evidence,
     dedupe_mixed_list,
-    get_channel_context,
     get_channel_style_profile,
     list_recent_publications,
     score_candidate_against_angles,
@@ -27,14 +24,12 @@ from postbridge.agent.tools import (
 from postbridge.config import get_settings
 
 
-def build_topic_scout_graph(
+def make_topic_operations(
     *,
     session: Session,
-    provider: OpenAICompatibleProvider,
     max_candidates: int,
 ) -> Any:
     response_language = get_settings().agent_default_response_language
-    source_package_graph = build_source_package_subgraph(session=session)
 
     def _dedupe_urls(items: list[str]) -> list[str]:
         out: list[str] = []
@@ -121,7 +116,7 @@ def build_topic_scout_graph(
         }
 
     def build_source_package(state: dict[str, Any]) -> dict[str, Any]:
-        substate = source_package_graph.invoke(dict(state))
+        substate = prepare_source_package(state)
         shortlisted = substate.get("shortlisted_source_bundle") or []
         summary = substate.get("source_shortlist_summary") or {}
         return {
@@ -145,7 +140,7 @@ def build_topic_scout_graph(
             "tool_trace": (state.get("tool_trace") or []) + [{"tool": "shortlist_angles", "summary": summary}],
         }
 
-    def generate_candidates(state: dict[str, Any]) -> dict[str, Any]:
+    def build_messages(state: dict[str, Any]) -> list[dict[str, str]]:
         topic_definition = state.get("topic_definition") or state.get("user_request") or "Find fresh topics"
         editorial_instructions = state.get("editorial_instructions")
         sources = state.get("shortlisted_source_bundle") or state.get("source_bundle") or []
@@ -167,7 +162,7 @@ def build_topic_scout_graph(
             {
                 "role": "system",
                 "content": (
-                    "You are a topic scout for editorial teams. Return strict JSON with key candidates. "
+                    "You research topics for editorial teams. Prepare candidates. "
                     "Candidates must be a list of objects with keys: topic, headline, body_markdown, summary, "
                     "why_now, style_fit_summary, source_bundle, scores, risk_flags, media_url, media_urls, cover_image_url. "
                     "body_markdown must contain only the publishable post draft itself. "
@@ -230,13 +225,35 @@ def build_topic_scout_graph(
                 ),
             },
         ]
-        payload, usage = provider.invoke_json(messages=messages)
-        raw_candidates = payload.get("candidates")
-        candidates = raw_candidates if isinstance(raw_candidates, list) else []
+        return messages
+
+    def accept_candidates(state: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, Any]:
+        topic_definition = state.get("topic_definition") or state.get("user_request") or "Find fresh topics"
+        editorial_instructions = state.get("editorial_instructions")
+        sources = state.get("shortlisted_source_bundle") or state.get("source_bundle") or []
+        angles = state.get("shortlisted_angles") or []
+        source_package = state.get("source_package") if isinstance(state.get("source_package"), dict) else {}
+        image_mode = str(state.get("search_image_mode") or "").strip().lower()
+        if image_mode not in {"none", "web_search", "generate"}:
+            image_mode = "web_search" if state.get("image_request") else "none"
+        image_request = bool(state.get("image_request")) and image_mode == "web_search"
+        image_generation_request = image_mode == "generate"
+        image_candidates = (
+            source_package.get("image_candidates")
+            if isinstance(source_package.get("image_candidates"), list)
+            else []
+        )
+        allowed_image_urls = set(_dedupe_urls([item["url"] for item in image_candidates if isinstance(item, dict) and isinstance(item.get("url"), str)]))
+        workspace_policy = state.get("workspace_policy") if isinstance(state.get("workspace_policy"), dict) else {}
         normalized: list[dict[str, Any]] = []
         for candidate in candidates[:max_candidates]:
             if not isinstance(candidate, dict):
                 continue
+            source_bundle = candidate.get("source_bundle") if isinstance(candidate.get("source_bundle"), dict) else {}
+            source_bundle["primary_sources"] = [item["url"] for item in sources if isinstance(item.get("url"), str)]
+            source_bundle["seed_sources"] = sources
+            source_bundle["primary_sources_details"] = sources
+            candidate["source_bundle"] = source_bundle
             dedup_summary, is_duplicate = summarize_dedup(
                 state["recent_publications"],
                 topic=candidate.get("topic"),
@@ -354,39 +371,20 @@ def build_topic_scout_graph(
         return {
             "candidate_pool": normalized,
             "selected_candidates": normalized,
-            "tool_trace": (state.get("tool_trace") or []) + [{"tool": "generate_candidates", "usage": usage}],
+            "tool_trace": (state.get("tool_trace") or []) + [{"tool": "generate_candidates"}],
         }
 
-    def rerank_candidates(state: dict[str, Any]) -> dict[str, Any]:
+    def rerank_candidates(state: dict[str, Any], ranked: list[dict[str, Any]]) -> dict[str, Any]:
         candidates = list(state.get("candidate_pool") or [])
         if len(candidates) <= 1:
             return {
                 "selected_candidates": candidates,
                 "tool_trace": (state.get("tool_trace") or []) + [{"tool": "rerank_candidates", "skipped": True}],
             }
-        query = state.get("topic_definition") or state.get("user_request") or "Find fresh topics"
-        rerank_items = [
-            {
-                "headline": candidate.get("headline"),
-                "topic": candidate.get("topic"),
-                "summary": candidate.get("summary"),
-                "dedup_summary": candidate.get("dedup_summary"),
-                "style_fit_summary": candidate.get("style_fit_summary"),
-                "risk_flags": candidate.get("risk_flags"),
-                "source_quality_summary": candidate.get("source_quality_summary"),
-                "scores": candidate.get("scores"),
-            }
-            for candidate in candidates
-        ]
-        ranked, usage = provider.invoke_rerank(
-            query=query,
-            items=rerank_items,
-            top_k=len(candidates),
-        )
         if not ranked:
             return {
                 "selected_candidates": candidates,
-                "tool_trace": (state.get("tool_trace") or []) + [{"tool": "rerank_candidates", "usage": usage, "empty": True}],
+                "tool_trace": (state.get("tool_trace") or []) + [{"tool": "rerank_candidates", "empty": True}],
             }
         reordered: list[dict[str, Any]] = []
         seen: set[int] = set()
@@ -456,16 +454,9 @@ def build_topic_scout_graph(
                 reordered.append(candidate)
         return {
             "selected_candidates": reordered,
-            "tool_trace": (state.get("tool_trace") or []) + [{"tool": "rerank_candidates", "usage": usage}],
+            "tool_trace": (state.get("tool_trace") or []) + [{"tool": "rerank_candidates"}],
         }
 
-    return compile_linear_graph(
-        AgentState,
-        [
-            ("load_context", load_context),
-            ("build_source_package", build_source_package),
-            ("shortlist_angles", shortlist_angles),
-            ("generate_candidates", generate_candidates),
-            ("rerank_candidates", rerank_candidates),
-        ],
-    )
+    return {"load_context": load_context, "sources": build_source_package,
+        "messages": build_messages, "accept": accept_candidates,
+        "angles": shortlist_angles, "rank": rerank_candidates}

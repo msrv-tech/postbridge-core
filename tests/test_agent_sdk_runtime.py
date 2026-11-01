@@ -2,6 +2,7 @@
 import asyncio
 import json
 from dataclasses import replace
+from uuid import uuid4
 
 import httpx2 as httpx
 import pytest
@@ -25,7 +26,7 @@ def execution(**changes):
 def reply(content="Done", *, tool=None, units=7, status=200):
     message = {"role": "assistant", "content": content}
     if tool:
-        message["tool_calls"] = [{"id": "call_read", "type": "function",
+        message["tool_calls"] = [{"id": "call_" + uuid4().hex, "type": "function",
             "function": {"name": tool[0], "arguments": json.dumps(tool[1])}}]
     return httpx.Response(status, json={"id": "provider-1", "object": "chat.completion", "created": 1,
         "model": "test-model", "choices": [{"index": 0, "message": message,
@@ -188,6 +189,8 @@ def test_turn_limit_does_not_retry_completed_tools():
 
 
 @pytest.mark.parametrize("change", [{"max_turns": 0}, {"required_tools": frozenset({"absent"})},
+    {"stop_after_tools": frozenset({"absent"})},
+    {"finish_when": "untrusted string"},
     {"tools": (AgentTool("bad.name", "Read", ReadArguments, lambda _: {}),)}, {"usage_format": "unknown"}])
 def test_invalid_execution_fails_before_contacting_provider(change):
     with pytest.raises(ValidationError):

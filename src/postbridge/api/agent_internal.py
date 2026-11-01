@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from postbridge.agent.orchestrator import AgentOrchestrator
+from postbridge.agent.service import EditorialExecutionService
 from postbridge.agent.embeddings import (
     compact_embeddings,
     get_embedding_lifecycle_overview,
@@ -426,7 +426,7 @@ def create_service_agent_task(
         "status": row.status,
         "goal_text": row.goal_text,
         "editorial_instructions": row.editorial_instructions,
-        "task_config": AgentOrchestrator.parse_task_config(row.task_config_json),
+        "task_config": EditorialExecutionService.parse_task_config(row.task_config_json),
         "next_run_at": row.next_run_at, "last_run_at": row.last_run_at,
         "schedule_cron": row.schedule_cron,
         "timezone": row.timezone,
@@ -449,7 +449,7 @@ def list_service_agent_tasks(
             "status": row.status,
             "goal_text": row.goal_text,
             "editorial_instructions": row.editorial_instructions,
-            "task_config": AgentOrchestrator.parse_task_config(row.task_config_json),
+            "task_config": EditorialExecutionService.parse_task_config(row.task_config_json),
             "next_run_at": row.next_run_at, "last_run_at": row.last_run_at,
             "schedule_cron": row.schedule_cron,
             "timezone": row.timezone,
@@ -475,7 +475,7 @@ def pause_service_agent_task(
         "status": row.status,
         "goal_text": row.goal_text,
         "editorial_instructions": row.editorial_instructions,
-        "task_config": AgentOrchestrator.parse_task_config(row.task_config_json),
+        "task_config": EditorialExecutionService.parse_task_config(row.task_config_json),
         "next_run_at": row.next_run_at, "last_run_at": row.last_run_at,
         "schedule_cron": row.schedule_cron,
         "timezone": row.timezone,
@@ -499,7 +499,7 @@ def resume_service_agent_task(
         "status": row.status,
         "goal_text": row.goal_text,
         "editorial_instructions": row.editorial_instructions,
-        "task_config": AgentOrchestrator.parse_task_config(row.task_config_json),
+        "task_config": EditorialExecutionService.parse_task_config(row.task_config_json),
         "next_run_at": row.next_run_at, "last_run_at": row.last_run_at,
         "schedule_cron": row.schedule_cron,
         "timezone": row.timezone,
@@ -523,7 +523,7 @@ def delete_service_agent_task(
         "status": row.status,
         "goal_text": row.goal_text,
         "editorial_instructions": row.editorial_instructions,
-        "task_config": AgentOrchestrator.parse_task_config(row.task_config_json),
+        "task_config": EditorialExecutionService.parse_task_config(row.task_config_json),
         "next_run_at": row.next_run_at, "last_run_at": row.last_run_at,
         "schedule_cron": row.schedule_cron,
         "timezone": row.timezone,
@@ -659,7 +659,7 @@ def run_service_agent_task(
             tenant_id=tenant_id,
             content_item_id=task.content_item_id,
         )
-    orchestrator = AgentOrchestrator(session)
+    orchestrator = EditorialExecutionService(session)
     task_config = orchestrator.parse_task_config(task.task_config_json)
     result = orchestrator.run_once(
         tenant_id=tenant_id,
@@ -701,7 +701,7 @@ def create_service_agent_run(
             tenant_id=tenant_id,
             content_item_id=body.content_item_id,
         )
-    orchestrator = AgentOrchestrator(session)
+    orchestrator = EditorialExecutionService(session)
     result = orchestrator.run_once(
         tenant_id=tenant_id,
         channel_id=body.channel_id,
@@ -740,7 +740,7 @@ def create_service_agent_editor_message(
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
     require_content_item_for_tenant(session, tenant_id=tenant_id, content_item_id=content_item_id)
-    orchestrator = AgentOrchestrator(session)
+    orchestrator = EditorialExecutionService(session)
     result = orchestrator.run_once(
         tenant_id=tenant_id,
         channel_id=body.channel_id,
@@ -833,7 +833,7 @@ def resolve_service_review_queue_item(
                 body_payload["approved_seed_urls"] = approved_seed_urls
                 body_payload["approved_image_urls"] = selected_image_urls
                 row.decision_json = json.dumps(body_payload, ensure_ascii=True)
-            orchestrator = AgentOrchestrator(session)
+            orchestrator = EditorialExecutionService(session)
             follow_up_run = orchestrator.run_once(
                 tenant_id=tenant_id,
                 channel_id=str(review_payload.get("channel_id") or row.channel_id),

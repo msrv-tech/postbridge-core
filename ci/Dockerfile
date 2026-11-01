@@ -19,13 +19,18 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY pyproject.toml README.md alembic.ini /app/
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core tzdata && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml /app/
+# Cache dependencies separately from application and test sources. The resolved
+# requirements are identical to the dev/video extras installed below.
+RUN python -c 'import subprocess,sys,tomllib; p=tomllib.load(open("pyproject.toml","rb"))["project"]; subprocess.check_call([sys.executable,"-m","pip","install","--no-cache-dir",*p["dependencies"],*p["optional-dependencies"]["dev"],*p["optional-dependencies"]["video"]])'
+
+COPY README.md alembic.ini /app/
 COPY src /app/src
 COPY alembic /app/alembic
 COPY tests /app/tests
 COPY scripts /app/scripts
 COPY --from=web-build /web/dist /app/web/dist
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core tzdata && rm -rf /var/lib/apt/lists/*
-
-RUN pip install --no-cache-dir ".[dev,video]"
+RUN pip install --no-cache-dir --no-deps ".[dev,video]"

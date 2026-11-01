@@ -15,7 +15,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 import httpx2 as httpx
-from agents import Agent, AgentOutputSchema, FunctionTool, ModelSettings, OpenAIChatCompletionsModel, RunConfig, Runner
+from agents import Agent, AgentOutputSchema, FunctionTool, ModelSettings, OpenAIChatCompletionsModel, RunConfig, Runner, ToolsToFinalOutputResult
 from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field, ValidationError as ModelValidationError
 
@@ -42,6 +42,7 @@ class ProviderReceipt(BaseModel):
     charged_units: int | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    total_tokens: int | None = None
 
 
 class ToolEvent(BaseModel):
@@ -68,6 +69,8 @@ class AgentExecution:
     history: tuple[AgentMessage, ...] = ()
     tools: tuple[AgentTool, ...] = ()
     required_tools: frozenset[str] = frozenset()
+    stop_after_tools: frozenset[str] = frozenset()
+    finish_when: Callable[[], Any | None] | None = field(default=None, repr=False)
     output_type: type[BaseModel] | None = None
     max_turns: int = 8
     max_output_tokens: int = 2000
@@ -121,7 +124,8 @@ def _receipt(response: httpx.Response, call_id: str, usage_format: str) -> Provi
         provider_request_id=str(response.headers.get("x-request-id") or body.get("id") or "")[:128] or None,
         charged_units=units,
         input_tokens=_nonnegative_int(usage.get("prompt_tokens")) if usage_format == "provider_tokens" else None,
-        output_tokens=_nonnegative_int(usage.get("completion_tokens")) if usage_format == "provider_tokens" else None)
+        output_tokens=_nonnegative_int(usage.get("completion_tokens")) if usage_format == "provider_tokens" else None,
+        total_tokens=_nonnegative_int(usage.get("total_tokens")) if usage_format == "provider_tokens" else None)
 
 
 def _validate(execution: AgentExecution) -> None:
@@ -131,8 +135,9 @@ def _validate(execution: AgentExecution) -> None:
             or not 16 <= execution.max_output_tokens <= 32000 or execution.timeout_seconds <= 0
             or execution.usage_format not in {"gitsell", "provider_tokens"}
             or (execution.max_units is not None and execution.max_units <= 0)
+            or (execution.finish_when is not None and not callable(execution.finish_when))
             or len(names) != len(set(names)) or any(not _TOOL_NAME.fullmatch(name) for name in names)
-            or not execution.required_tools.issubset(names)):
+            or not execution.required_tools.issubset(names) or not execution.stop_after_tools.issubset(names)):
         raise ValidationError(code="VALIDATION_AGENT_EXECUTION", message="Invalid agent execution configuration")
 
 
@@ -213,6 +218,17 @@ async def run_postbridge_agent(
         pending.pop(call_id)
         await _notify(on_provider_receipt, receipt)
 
+    async def finish_after_success(context: Any, results: list[Any]) -> ToolsToFinalOutputResult:
+        if execution.finish_when is not None:
+            final_output = execution.finish_when()
+            if final_output is not None:
+                return ToolsToFinalOutputResult(is_final_output=True, final_output=final_output)
+        succeeded = {event.tool_name for event in events if event.status == "succeeded"}
+        for item in results:
+            if item.tool.name in execution.stop_after_tools & succeeded:
+                return ToolsToFinalOutputResult(is_final_output=True, final_output=item.output)
+        return ToolsToFinalOutputResult(is_final_output=False, final_output=None)
+
     # Convert /api or /v1 to the versioned root without duplicating /v1.
     completion_url = join_openai_compatible_path(execution.base_url, "/v1/chat/completions")
     sdk_base = completion_url.removesuffix("/chat/completions")
@@ -224,6 +240,7 @@ async def run_postbridge_agent(
             agent = Agent(name=AGENT_NAME, instructions=execution.instructions,
                 model=OpenAIChatCompletionsModel(model=execution.model, openai_client=client),
                 tools=[_sdk_tool(tool, events, tool_lock, tools_stopped) for tool in execution.tools],
+                tool_use_behavior=finish_after_success if execution.stop_after_tools or execution.finish_when else "run_llm_again",
                 output_type=AgentOutputSchema(execution.output_type, strict_json_schema=False) if execution.output_type else None,
                 model_settings=ModelSettings(max_tokens=execution.max_output_tokens,
                     parallel_tool_calls=False,

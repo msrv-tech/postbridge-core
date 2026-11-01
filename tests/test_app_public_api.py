@@ -4503,6 +4503,8 @@ def test_app_content_ai_saas_mode_is_not_served_by_core(monkeypatch):
 
 
 def _patch_agent_provider(monkeypatch):
+    from tests.editorial_fakes import fake_editorial_run
+    monkeypatch.setattr("postbridge.agent.editorial.EditorialAdapter._run", fake_editorial_run)
     def fake_invoke_json(self, *, messages, temperature=0.2):
         _ = self, temperature
         return (
@@ -4535,9 +4537,9 @@ def _patch_agent_provider(monkeypatch):
             {"total_tokens": 7},
         ),
     )
-    monkeypatch.setattr("postbridge.agent.orchestrator.find_default_provider", lambda session, tenant_id: object())
+    monkeypatch.setattr("postbridge.agent.service.find_default_provider", lambda session, tenant_id: object())
     monkeypatch.setattr(
-        "postbridge.agent.orchestrator.ensure_openai_compatible_provider",
+        "postbridge.agent.service.ensure_openai_compatible_provider",
         lambda row: __import__(
             "postbridge.agent.providers.openai_compatible",
             fromlist=["OpenAICompatibleProvider"],

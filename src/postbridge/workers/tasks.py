@@ -11,7 +11,7 @@ from postbridge.agent.embeddings import (
     reindex_content_item_embedding,
     rotate_channel_content_embeddings,
 )
-from postbridge.agent import AgentOrchestrator
+from postbridge.agent import EditorialExecutionService
 from postbridge.agent.storage import (
     cleanup_agent_runtime,
     get_agent_run,
@@ -316,7 +316,7 @@ def run_agent_task_task(task_id: str, tenant_id: str) -> dict:
             run = enqueue_video_agent_run(session, tenant_id=tenant_id, task_id=task_id, scheduled=True)
             session.commit()
             return {"agent_run_id": run.id} if run else {}
-        orchestrator = AgentOrchestrator(session)
+        orchestrator = EditorialExecutionService(session)
         task_config = orchestrator.parse_task_config(task.task_config_json)
         result = orchestrator.run_once(
             tenant_id=tenant_id,

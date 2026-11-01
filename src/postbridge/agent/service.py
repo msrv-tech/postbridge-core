@@ -6,9 +6,9 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from postbridge.agent.graphs.post_copilot import build_post_copilot_graph
+from postbridge.agent.editorial import build_post_editor, build_topic_researcher, receipt_usage
+from postbridge.agent.sdk_runtime import ProviderReceipt
 from postbridge.agent.policies import evaluate_policy_guardrails
-from postbridge.agent.graphs.topic_scout import build_topic_scout_graph
 from postbridge.agent.providers.openai_compatible import ensure_openai_compatible_provider
 from postbridge.agent.storage import (
     append_run_step,
@@ -79,7 +79,7 @@ def _normalize_search_image_mode(value: Any, *, fallback_image_request: bool) ->
     return "web_search" if fallback_image_request else "none"
 
 
-class AgentOrchestrator:
+class EditorialExecutionService:
     def __init__(self, session: Session) -> None:
         self._session = session
 
@@ -150,6 +150,32 @@ class AgentOrchestrator:
                 user_request=user_request,
             )
         run_started_at = datetime.now(UTC)
+        provider_steps = {}
+        provider_trace = []
+
+        def record_provider_start(call_id: str) -> None:
+            # Publish the running record and pending call before dispatch. A
+            # lost response must remain distinguishable from a free request.
+            provider_steps[call_id] = append_run_step(self._session,
+                agent_run_id=run.id, tenant_id=tenant_id, step_name="sdk_provider_call",
+                status="pending", output_payload={"call_id": call_id, "status": "pending"})
+            self._session.commit()
+
+        def record_provider_receipt(receipt: ProviderReceipt) -> None:
+            provider_trace.append({"tool": "sdk.provider_call", "usage": receipt_usage(receipt),
+                "receipt": receipt.model_dump(), "usage_format": get_settings().agent_llm_usage_format})
+            step = provider_steps.get(receipt.call_id)
+            if step is None:
+                step = append_run_step(self._session, agent_run_id=run.id, tenant_id=tenant_id,
+                    step_name="sdk_provider_call", status="pending")
+            step.status = "error" if receipt.status == "failed" else "ok" if receipt.status == "succeeded" else "warning"
+            step.output_json = json.dumps(receipt.model_dump(), ensure_ascii=True)
+            step.completed_at = datetime.now(UTC)
+            summary = summarize_tool_trace(provider_trace)
+            run.token_usage_json = json.dumps(summary["usage_totals"], ensure_ascii=True)
+            run.trace_json = json.dumps({"runtime": "openai_agents_sdk", "trace": provider_trace,
+                "tool_summary": summary}, ensure_ascii=True)
+            self._session.commit()
         log_agent_run_started(run.id, tenant_id=tenant_id, channel_id=channel_id, mode=mode)
         inc_agent_run_started(mode)
         append_run_step(
@@ -172,17 +198,18 @@ class AgentOrchestrator:
             started_at=run_started_at,
             completed_at=run_started_at,
         )
+        materialization_scope = None
         try:
-            graph_started_at = datetime.now(UTC)
+            sdk_started_at = datetime.now(UTC)
             if mode == "post_copilot":
-                compiled = build_post_copilot_graph(session=self._session, provider=provider)
+                adapter = build_post_editor(session=self._session, provider=provider)
             else:
-                compiled = build_topic_scout_graph(
+                adapter = build_topic_researcher(
                     session=self._session,
                     provider=provider,
                     max_candidates=max_candidates,
                 )
-            state = compiled.invoke(
+            state = adapter.invoke(
                 {
                     "tenant_id": tenant_id,
                     "channel_id": channel_id,
@@ -202,9 +229,12 @@ class AgentOrchestrator:
                     "workspace_policy": workspace_policy,
                     "tool_trace": [],
                     "errors": [],
-                }
+                },
+                on_provider_start=record_provider_start,
+                on_provider_receipt=record_provider_receipt,
             )
-            graph_completed_at = datetime.now(UTC)
+            materialization_scope = self._session.begin_nested()
+            sdk_completed_at = datetime.now(UTC)
             if record_editor_timeline:
                 append_agent_editor_context_loaded(
                     self._session,
@@ -216,22 +246,22 @@ class AgentOrchestrator:
                 self._session,
                 agent_run_id=run.id,
                 tenant_id=tenant_id,
-                step_name="graph_invoke",
+                step_name="sdk_invoke",
                 status="ok",
                 output_payload={"selected_candidates": len(state.get("selected_candidates") or [])},
-                started_at=graph_started_at,
-                completed_at=graph_completed_at,
+                started_at=sdk_started_at,
+                completed_at=sdk_completed_at,
             )
             log_agent_step_completed(
                 run.id,
                 tenant_id=tenant_id,
-                step_name="graph_invoke",
+                step_name="sdk_invoke",
                 status="ok",
-                duration_ms=int((graph_completed_at - graph_started_at).total_seconds() * 1000),
+                duration_ms=int((sdk_completed_at - sdk_started_at).total_seconds() * 1000),
             )
             observe_agent_step_duration_seconds(
-                "graph_invoke",
-                max((graph_completed_at - graph_started_at).total_seconds(), 0.0),
+                "sdk_invoke",
+                max((sdk_completed_at - sdk_started_at).total_seconds(), 0.0),
             )
             review_items: list[dict[str, Any]] = []
             source_package_review_items: list[dict[str, Any]] = []
@@ -380,6 +410,8 @@ class AgentOrchestrator:
                     "auto_materialized": [],
                     "guardrail_blocks": [],
                     "tool_trace": state.get("tool_trace") or [],
+                    "runtime": "openai_agents_sdk",
+                    "usage_pending": False,
                 }
                 append_run_step(
                     self._session,
@@ -428,6 +460,7 @@ class AgentOrchestrator:
                 observe_agent_token_usage(mode, int(tool_summary["usage_totals"]["total_tokens"]))
                 observe_agent_tool_calls(int(tool_summary["tool_call_count"]))
                 self._session.flush()
+                materialization_scope.commit()
                 return result
             for candidate in state.get("selected_candidates") or []:
                 candidate_started_at = datetime.now(UTC)
@@ -767,6 +800,8 @@ class AgentOrchestrator:
                 "auto_materialized": auto_materialized,
                 "guardrail_blocks": guardrail_blocks,
                 "tool_trace": state.get("tool_trace") or [],
+                "runtime": "openai_agents_sdk",
+                "usage_pending": bool(state.get("usage_pending")),
             }
             if mode == "post_copilot" and not timeline_content_item_id:
                 for item in auto_materialized:
@@ -847,8 +882,11 @@ class AgentOrchestrator:
             observe_agent_token_usage(mode, int(tool_summary["usage_totals"]["total_tokens"]))
             observe_agent_tool_calls(int(tool_summary["tool_call_count"]))
             self._session.flush()
+            materialization_scope.commit()
             return result
         except PostbridgeError as exc:
+            if materialization_scope is not None:
+                materialization_scope.rollback()
             if record_editor_timeline:
                 append_ai_chat_error(
                     self._session,
@@ -867,6 +905,7 @@ class AgentOrchestrator:
                 output_payload={"error_code": exc.code, "error_message": exc.message},
             )
             mark_run_failed(self._session, run, error_code=exc.code, error_message=exc.message)
+            self._session.commit()
             log_agent_run_failed(
                 run.id,
                 tenant_id=tenant_id,
@@ -877,6 +916,8 @@ class AgentOrchestrator:
             inc_agent_run_failed(mode)
             raise
         except Exception as exc:
+            if materialization_scope is not None:
+                materialization_scope.rollback()
             if record_editor_timeline:
                 append_ai_chat_error(
                     self._session,
@@ -906,6 +947,7 @@ class AgentOrchestrator:
                 error_code="INTERNAL_AGENT_RUN_FAILED",
                 error_message=f"{type(exc).__name__}: {exc}",
             )
+            self._session.commit()
             log_agent_run_failed(
                 run.id,
                 tenant_id=tenant_id,

@@ -1,5 +1,5 @@
 """Agent runtime for editorial workflows."""
 
-from postbridge.agent.orchestrator import AgentOrchestrator
+from postbridge.agent.service import EditorialExecutionService
 
-__all__ = ["AgentOrchestrator"]
+__all__ = ["EditorialExecutionService"]

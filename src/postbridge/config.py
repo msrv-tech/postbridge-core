@@ -113,6 +113,9 @@ class Settings:
     agent_llm_default_model: str | None
     agent_llm_embedding_model: str | None
     agent_llm_max_tokens: int
+    agent_sdk_max_turns: int
+    agent_sdk_max_output_tokens: int
+    agent_llm_usage_format: str
     agent_default_response_language: str | None
     agent_search_backends: tuple[str, ...]
     agent_search_max_results: int
@@ -390,6 +393,10 @@ def get_settings() -> Settings:
             os.getenv("AGENT_LLM_EMBEDDING_MODEL")
         ),
         agent_llm_max_tokens=int(os.getenv("AGENT_LLM_MAX_TOKENS", "2048")),
+        agent_sdk_max_turns=int(os.getenv("AGENT_SDK_MAX_TURNS", "6")),
+        agent_sdk_max_output_tokens=int(os.getenv("AGENT_SDK_MAX_OUTPUT_TOKENS") or os.getenv("AGENT_LLM_MAX_TOKENS") or "8192"),
+        agent_llm_usage_format=(os.getenv("AGENT_LLM_USAGE_FORMAT") or (
+            "gitsell" if os.getenv("POSTBRIDGE_APP_MODE", "selfhost").strip().lower() == "saas" else "provider_tokens")),
         agent_default_response_language=_strip_optional_env(
             os.getenv("AGENT_DEFAULT_RESPONSE_LANGUAGE")
             or os.getenv("AI_GATEWAY_DEFAULT_RESPONSE_LANGUAGE")
