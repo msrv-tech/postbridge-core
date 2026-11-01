@@ -161,6 +161,7 @@ ghcr.io/msrv-tech/postbridge-core
 - [docs/ai-gateway.md](docs/ai-gateway.md)
 - [docs/video-studio.md](docs/video-studio.md)
 - [docs/agent-graphs/README.md](docs/agent-graphs/README.md)
+- [Unified Agents SDK migration plan](docs/unified-agent-sdk-migration.md)
 - [docs/quickstart.md](docs/quickstart.md)
 - [docs/demo-walkthrough.md](docs/demo-walkthrough.md)
 - [docs/configuration.md](docs/configuration.md)
