@@ -1,0 +1,36 @@
+name: deploy
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  deploy:
+    if: github.repository == 'msrv-tech/postbridge-core' && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success'))
+    strategy:
+      fail-fast: false
+      matrix:
+        region: [ru, io]
+    name: deploy-${{ matrix.region }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - name: Dispatch the private release and track its CD result
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          CORE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          DEPLOY_REGION: ${{ matrix.region }}
+        run: |
+          python3 scripts/request_ru_deploy.py --check-access
+          python3 scripts/request_ru_deploy.py

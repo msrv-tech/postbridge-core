@@ -29,6 +29,7 @@ services:
       retries: 5
 
   test:
+    image: postbridge-core-ci-test:latest
     build:
       context: ..
       dockerfile: ci/Dockerfile

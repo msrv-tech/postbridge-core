@@ -5,26 +5,25 @@ on:
     branches: ["main"]
   pull_request:
 
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  deployment-access:
-    if: github.repository == 'msrv-tech/postbridge-core' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Verify access to the private RU workflow
-        env:
-          GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
-        run: python3 scripts/request_ru_deploy.py --check-access
-
   secret-scan:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Run gitleaks
@@ -43,15 +42,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Create output dir
         run: mkdir -p ci/out
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: "24"
+          node-version: "26"
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -79,157 +80,52 @@ jobs:
           npm --prefix web run test:e2e
           npm --prefix web run test:e2e:saas
 
-      - name: Build and run tests (Docker Compose)
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Cache the canonical CI image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: ci/Dockerfile
+          load: true
+          tags: postbridge-core-ci-test:latest
+          cache-from: type=gha,scope=core-ci
+          cache-to: type=gha,mode=max,scope=core-ci
+      - name: Run canonical tests
+        run: docker compose -f ci/docker-compose.yml run --no-build --rm test
+      - name: Record reusable CI evidence
         run: |
-          docker compose --progress=plain -f ci/docker-compose.yml build
-          docker compose -f ci/docker-compose.yml run --rm test
+          python3 - <<'PYTHON'
+          import json, os
+          from pathlib import Path
+          Path('ci/out/proof.json').write_text(json.dumps({'sha': os.environ['GITHUB_SHA'], 'python': '3.14', 'node': '26'}))
+          PYTHON
 
       - name: Enforce core line coverage >= 80%
         run: python scripts/check_line_coverage.py --coverage ci/out/coverage-core.xml --min 80 --label core
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: failure()
         with:
+          overwrite: true
           name: playwright-report
           path: web/playwright-report
           if-no-files-found: ignore
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
         with:
+          overwrite: true
           name: openapi-core
           path: ci/out/openapi-core.json
           if-no-files-found: warn
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
         with:
+          overwrite: true
           name: coverage-core
           path: |
+            ci/out/proof.json
             ci/out/coverage-core.xml
             ci/out/htmlcov-core
           if-no-files-found: warn
-
-  deployment-scope:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    outputs:
-      io_changed: ${{ steps.scope.outputs.io_changed }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - id: scope
-        env:
-          BEFORE: ${{ github.event.before }}
-        run: |
-          python - <<'PYTHON'
-          import os, subprocess
-          from pathlib import PurePosixPath
-          before = os.environ['BEFORE']
-          changed = subprocess.check_output(['git', 'diff', '--name-only', before, os.environ['GITHUB_SHA']], text=True).splitlines()
-          prefixes = ('src/', 'web/', 'alembic/')
-          files = ['Dockerfile', 'pyproject.toml', 'scripts/deploy-prod.sh']
-          deploy = any(path.startswith(prefixes) or path in files for path in changed)
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write(f'io_changed={str(deploy).lower()}\n')
-          PYTHON
-
-  deploy-ru:
-    needs: [secret-scan, test, deployment-access]
-    if: github.repository == 'msrv-tech/postbridge-core' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v6
-      - name: Trigger RU release immediately and await deployment
-        env:
-          GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
-        run: python3 scripts/request_ru_deploy.py
-
-  deploy-io:
-    needs:
-      - secret-scan
-      - test
-      - deployment-scope
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.deployment-scope.outputs.io_changed == 'true'
-    concurrency:
-      group: postbridge-io-core-deploy
-      cancel-in-progress: false
-    runs-on:
-      - self-hosted
-      - prod-io-core
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          path: postbridge-core
-          fetch-depth: 0
-
-      - name: Deploy postbridge-core IO
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          REPOSITORY: ${{ github.repository }}
-          WORKFLOW: ${{ github.workflow }}
-          RUN_ID: ${{ github.run_id }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
-          SERVER_URL: ${{ github.server_url }}
-          BRANCH: ${{ github.ref_name }}
-          SHA: ${{ github.sha }}
-          EVENT_NAME: ${{ github.event_name }}
-          ACTOR: ${{ github.actor }}
-        run: |
-          notify() {
-            code=$?
-            if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then exit "$code"; fi
-            SHORT_SHA="$(printf '%s' "$SHA" | cut -c1-7)"
-            RUN_URL="${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}"
-            if [ "$code" -eq 0 ]; then
-              DEPLOY_STATUS="success"
-              TITLE="Postbridge Core IO deploy completed"
-            else
-              DEPLOY_STATUS="failure"
-              TITLE="Postbridge Core IO deploy failed"
-            fi
-            MSG="$(printf '%s\nStatus: %s\nRepo: %s\nBranch: %s\nCommit: %s\nWorkflow: %s #%s.%s\nEvent: %s\nActor: %s\nRun: %s' \
-              "$TITLE" "$DEPLOY_STATUS" "$REPOSITORY" "$BRANCH" "$SHORT_SHA" "$WORKFLOW" "$RUN_ID" "$RUN_ATTEMPT" "$EVENT_NAME" "$ACTOR" "$RUN_URL")"
-            curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-              -d "chat_id=${TELEGRAM_CHAT_ID}" \
-              --data-urlencode "text=${MSG}" \
-              -d "disable_web_page_preview=true" || true
-            exit "$code"
-          }
-          trap notify EXIT
-
-          sudo mkdir -p /opt
-          sudo cp /opt/postbridge-core/.env /tmp/postbridge-core-env.bak 2>/dev/null || true
-          sudo rsync -a --delete postbridge-core/ /opt/postbridge-core/
-          sudo cp /tmp/postbridge-core-env.bak /opt/postbridge-core/.env 2>/dev/null || true
-          sudo env \
-            POSTBRIDGE_DEPLOY_COMPOSE_DIR=/opt/postbridge-saas/environments/production \
-            POSTBRIDGE_DEPLOY_COMPOSE_FILE=docker-compose.yml \
-            POSTBRIDGE_DEPLOY_ENV_FILE=/opt/postbridge-saas/environments/production/.env \
-            POSTBRIDGE_DEPLOY_COMPOSE_PROJECT=postbridge_io \
-            POSTBRIDGE_DEPLOY_SERIAL_BUILD=1 \
-            POSTBRIDGE_BIND_POSTGRES=127.0.0.1:15432 \
-            POSTBRIDGE_BIND_CORE_API=127.0.0.1:18000 \
-            POSTBRIDGE_BIND_SAAS_API=127.0.0.1:18001 \
-            POSTBRIDGE_BIND_PROMETHEUS=127.0.0.1:19090 \
-            POSTBRIDGE_BIND_ALERTMANAGER=127.0.0.1:19093 \
-            POSTBRIDGE_BIND_GRAFANA=127.0.0.1:13000 \
-            flock /tmp/postbridge-io-deploy.lock bash /opt/postbridge-core/scripts/deploy-prod.sh
-          wait_for_url() {
-            url="$1"
-            for attempt in $(seq 1 30); do
-              if curl -fsS "$url"; then
-                return 0
-              fi
-              if [ "$attempt" -eq 30 ]; then
-                return 1
-              fi
-              sleep 2
-            done
-          }
-          wait_for_url https://postbridge.io/health
-          wait_for_url https://postbridge.io/api/app/runtime-config

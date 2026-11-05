@@ -1,4 +1,4 @@
-FROM node:26-slim AS web-build
+FROM node:26-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS web-build
 
 WORKDIR /web
 COPY web/package*.json /web/
@@ -22,7 +22,7 @@ ENV VITE_POSTBRIDGE_DISABLED_PLATFORMS=${VITE_POSTBRIDGE_DISABLED_PLATFORMS}
 ENV VITE_POSTBRIDGE_PUBLIC_BASE_URL=${VITE_POSTBRIDGE_PUBLIC_BASE_URL}
 RUN npm run build
 
-FROM python:3.14-slim AS runtime-base
+FROM python:3.14-slim@sha256:f1b121a95d6295f7291a0fda8280f747efd657bd055e7c1f156936ed2dc5a112 AS runtime-base
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -43,12 +43,12 @@ RUN if [ -n "$POSTBRIDGE_DEBIAN_MIRROR" ]; then \
 
 FROM runtime-base AS runtime
 
-COPY pyproject.toml README.md alembic.ini /app/
+COPY pyproject.toml requirements-runtime.txt README.md alembic.ini /app/
 COPY src /app/src
 COPY alembic /app/alembic
 COPY --from=web-build /web/dist /app/web/dist
 
-RUN pip install --no-cache-dir ".[video]"
+RUN pip install --no-cache-dir -r requirements-runtime.txt && pip install --no-cache-dir --no-deps ".[video]"
 COPY deploy/licenses/whisper-LICENSE.txt /opt/postbridge-models/whisper-small/LICENSE
 RUN python /app/src/postbridge/services/video_subtitles.py --download-model
 

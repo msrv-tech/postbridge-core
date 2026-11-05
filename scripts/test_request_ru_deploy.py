@@ -30,6 +30,16 @@ class DispatchTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             trigger_and_wait("main", lambda *args: self.fail("Must validate SHA before dispatch"))
 
+    def test_io_uses_the_private_io_workflow(self):
+        calls = []
+        def fetch(path, method="GET", body=None):
+            calls.append(path)
+            return {"workflow_run_id": 43} if method == "POST" else {"status": "completed", "conclusion": "success"}
+        self.assertEqual(trigger_and_wait(SHA, fetch, region="io"), 43)
+        self.assertTrue(calls[0].endswith("/deploy-io.yml/dispatches"))
+        with self.assertRaises(ValueError):
+            trigger_and_wait(SHA, fetch, region="../../other")
+
 
 if __name__ == "__main__":
     unittest.main()
