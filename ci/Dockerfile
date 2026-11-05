@@ -33,4 +33,4 @@ COPY tests /app/tests
 COPY scripts /app/scripts
 COPY --from=web-build /web/dist /app/web/dist
 
-RUN pip install --no-cache-dir --no-deps ".[dev,video]"
+RUN pip install --no-cache-dir --no-deps ".[dev,video]" && pip check

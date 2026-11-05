@@ -48,7 +48,7 @@ COPY src /app/src
 COPY alembic /app/alembic
 COPY --from=web-build /web/dist /app/web/dist
 
-RUN pip install --no-cache-dir -r requirements-runtime.txt && pip install --no-cache-dir --no-deps ".[video]"
+RUN pip install --no-cache-dir -r requirements-runtime.txt && pip install --no-cache-dir --no-deps ".[video]" && pip check
 COPY deploy/licenses/whisper-LICENSE.txt /opt/postbridge-models/whisper-small/LICENSE
 RUN python /app/src/postbridge/services/video_subtitles.py --download-model
 
