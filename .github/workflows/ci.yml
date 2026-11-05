@@ -100,73 +100,37 @@ jobs:
             ci/out/htmlcov-core
           if-no-files-found: warn
 
-  deploy:
-    needs:
-      - secret-scan
-      - test
+  deployment-scope:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on:
-      - self-hosted
-      - prod-core
+    runs-on: ubuntu-latest
+    outputs:
+      io_changed: ${{ steps.scope.outputs.io_changed }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
-          path: postbridge-core
           fetch-depth: 0
-
-      - name: Deploy postbridge-core
+      - id: scope
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          REPOSITORY: ${{ github.repository }}
-          WORKFLOW: ${{ github.workflow }}
-          RUN_ID: ${{ github.run_id }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
-          SERVER_URL: ${{ github.server_url }}
-          BRANCH: ${{ github.ref_name }}
-          SHA: ${{ github.sha }}
-          EVENT_NAME: ${{ github.event_name }}
-          ACTOR: ${{ github.actor }}
+          BEFORE: ${{ github.event.before }}
         run: |
-          notify() {
-            code=$?
-            if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then exit "$code"; fi
-            SHORT_SHA="$(printf '%s' "$SHA" | cut -c1-7)"
-            RUN_URL="${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}"
-            if [ "$code" -eq 0 ]; then
-              DEPLOY_STATUS="success"
-              TITLE="Postbridge Core deploy completed"
-            else
-              DEPLOY_STATUS="failure"
-              TITLE="Postbridge Core deploy failed"
-            fi
-            MSG="$(printf '%s\nStatus: %s\nRepo: %s\nBranch: %s\nCommit: %s\nWorkflow: %s #%s.%s\nEvent: %s\nActor: %s\nRun: %s' \
-              "$TITLE" "$DEPLOY_STATUS" "$REPOSITORY" "$BRANCH" "$SHORT_SHA" "$WORKFLOW" "$RUN_ID" "$RUN_ATTEMPT" "$EVENT_NAME" "$ACTOR" "$RUN_URL")"
-            curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-              -d "chat_id=${TELEGRAM_CHAT_ID}" \
-              --data-urlencode "text=${MSG}" \
-              -d "disable_web_page_preview=true" || true
-            exit "$code"
-          }
-          trap notify EXIT
-
-          sudo mkdir -p /opt
-          sudo cp /opt/postbridge-core/.env /tmp/postbridge-core-env.bak 2>/dev/null || true
-          sudo rsync -a --delete postbridge-core/ /opt/postbridge-core/
-          sudo cp /tmp/postbridge-core-env.bak /opt/postbridge-core/.env 2>/dev/null || true
-          sudo env \
-            POSTBRIDGE_DEPLOY_COMPOSE_DIR=/opt/postbridge-saas/environments/production \
-            POSTBRIDGE_DEPLOY_COMPOSE_FILE=docker-compose.yml \
-            POSTBRIDGE_DEPLOY_ENV_FILE=/opt/postbridge-saas/environments/production/.env \
-            POSTBRIDGE_DEBIAN_MIRROR=https://mirror.yandex.ru \
-            bash /opt/postbridge-core/scripts/deploy-prod.sh
+          python - <<'PYTHON'
+          import os, subprocess
+          from pathlib import PurePosixPath
+          before = os.environ['BEFORE']
+          changed = subprocess.check_output(['git', 'diff', '--name-only', before, os.environ['GITHUB_SHA']], text=True).splitlines()
+          prefixes = ('src/', 'web/', 'alembic/')
+          files = ['Dockerfile', 'pyproject.toml', 'scripts/deploy-prod.sh']
+          deploy = any(path.startswith(prefixes) or path in files for path in changed)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'io_changed={str(deploy).lower()}\n')
+          PYTHON
 
   deploy-io:
     needs:
       - secret-scan
       - test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - deployment-scope
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.deployment-scope.outputs.io_changed == 'true'
     concurrency:
       group: postbridge-io-core-deploy
       cancel-in-progress: false
