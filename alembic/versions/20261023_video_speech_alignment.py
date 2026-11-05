@@ -8,7 +8,8 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column('video_speech_assets', sa.Column('alignment_json', sa.JSON(), nullable=True))
+    if 'alignment_json' not in {column['name'] for column in sa.inspect(op.get_bind()).get_columns('video_speech_assets')}:
+        op.add_column('video_speech_assets', sa.Column('alignment_json', sa.JSON(), nullable=True))
 
 
 def downgrade():

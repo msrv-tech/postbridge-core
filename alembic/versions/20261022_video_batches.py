@@ -27,8 +27,8 @@ def upgrade():
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("completed_at", sa.DateTime(timezone=True)),
         sa.UniqueConstraint("tenant_id", "request_key", name="uq_video_batch_request"),
-        sa.CheckConstraint("status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')", name="ck_video_batch_status"))
-    op.create_index("ix_video_batches_tenant_id", "video_batches", ["tenant_id"])
+        sa.CheckConstraint("status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')", name="ck_video_batch_status"), if_not_exists=True)
+    op.create_index("ix_video_batches_tenant_id", "video_batches", ["tenant_id"], if_not_exists=True)
     op.create_table("video_batch_items",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("batch_id", sa.String(36), sa.ForeignKey("video_batches.id", ondelete="CASCADE"), nullable=False),
@@ -39,11 +39,17 @@ def upgrade():
         sa.Column("revision_id", sa.String(36), sa.ForeignKey("video_revisions.id")),
         sa.Column("status", sa.String(16), nullable=False),
         sa.Column("error_code", sa.String(64)),
-        sa.UniqueConstraint("batch_id", "position", name="uq_video_batch_position"))
-    op.create_index("ix_video_batch_items_batch_id", "video_batch_items", ["batch_id"])
+        sa.UniqueConstraint("batch_id", "position", name="uq_video_batch_position"), if_not_exists=True)
+    op.create_index("ix_video_batch_items_batch_id", "video_batch_items", ["batch_id"], if_not_exists=True)
+    inspector = sa.inspect(op.get_bind())
+    columns = {column["name"] for column in inspector.get_columns("video_agent_executions")}
+    has_reference = any(fk["constrained_columns"] == ["batch_id"] and fk["referred_table"] == "video_batches"
+                        for fk in inspector.get_foreign_keys("video_agent_executions"))
     with op.batch_alter_table("video_agent_executions") as batch:
-        batch.add_column(sa.Column("batch_id", sa.String(36)))
-        batch.create_foreign_key("fk_video_execution_batch", "video_batches", ["batch_id"], ["id"])
+        if "batch_id" not in columns:
+            batch.add_column(sa.Column("batch_id", sa.String(36)))
+        if not has_reference:
+            batch.create_foreign_key("fk_video_execution_batch", "video_batches", ["batch_id"], ["id"])
 
 
 def downgrade():

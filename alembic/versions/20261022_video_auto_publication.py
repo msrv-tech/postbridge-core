@@ -8,10 +8,17 @@ depends_on = None
 
 
 def upgrade():
+    inspector = sa.inspect(op.get_bind())
+    approval_columns = {column['name'] for column in inspector.get_columns('video_publication_approvals')}
+    has_reference = any(fk['constrained_columns'] == ['auto_agent_run_id'] and fk['referred_table'] == 'agent_runs'
+                        for fk in inspector.get_foreign_keys('video_publication_approvals'))
     with op.batch_alter_table('video_publication_approvals') as batch:
-        batch.add_column(sa.Column('auto_agent_run_id', sa.String(36)))
-        batch.create_foreign_key('fk_video_auto_publication_run', 'agent_runs', ['auto_agent_run_id'], ['id'], ondelete='RESTRICT')
-    op.add_column('video_agent_executions', sa.Column('publication_json', sa.JSON(), nullable=False, server_default='{}'))
+        if 'auto_agent_run_id' not in approval_columns:
+            batch.add_column(sa.Column('auto_agent_run_id', sa.String(36)))
+        if not has_reference:
+            batch.create_foreign_key('fk_video_auto_publication_run', 'agent_runs', ['auto_agent_run_id'], ['id'], ondelete='RESTRICT')
+    if 'publication_json' not in {column['name'] for column in inspector.get_columns('video_agent_executions')}:
+        op.add_column('video_agent_executions', sa.Column('publication_json', sa.JSON(), nullable=False, server_default='{}'))
 
 
 def downgrade():
