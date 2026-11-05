@@ -9,6 +9,16 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  deployment-access:
+    if: github.repository == 'msrv-tech/postbridge-core' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify access to the private RU workflow
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: python3 scripts/request_ru_deploy.py --check-access
+
   secret-scan:
     runs-on: ubuntu-latest
     steps:
@@ -124,6 +134,18 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write(f'io_changed={str(deploy).lower()}\n')
           PYTHON
+
+  deploy-ru:
+    needs: [secret-scan, test, deployment-access]
+    if: github.repository == 'msrv-tech/postbridge-core' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - name: Trigger RU release immediately and await deployment
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: python3 scripts/request_ru_deploy.py
 
   deploy-io:
     needs:
