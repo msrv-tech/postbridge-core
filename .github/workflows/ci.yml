@@ -30,11 +30,11 @@ jobs:
         run: |
           docker run --rm \
             -v "$PWD:/repo" \
-            ghcr.io/gitleaks/gitleaks:latest \
+            ghcr.io/gitleaks/gitleaks:latest@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
             detect --source /repo --config /repo/.gitleaks.toml --redact --verbose
           docker run --rm \
             -v "$PWD:/repo" \
-            ghcr.io/gitleaks/gitleaks:latest \
+            ghcr.io/gitleaks/gitleaks:latest@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
             detect --source /repo --config /repo/.gitleaks.toml --redact --verbose --no-git
 
   test:
@@ -91,7 +91,7 @@ jobs:
           cache-from: type=gha,scope=core-ci
           cache-to: type=gha,mode=max,scope=core-ci
       - name: Run canonical tests
-        run: docker compose -f ci/docker-compose.yml run --no-build --rm test
+        run: docker compose -f ci/docker-compose.yml run --rm test
       - name: Record reusable CI evidence
         run: |
           python3 - <<'PYTHON'
