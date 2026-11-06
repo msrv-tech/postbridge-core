@@ -70,6 +70,7 @@ class AgentExecution:
     api_key: str | None = field(default=None, repr=False)
     history: tuple[AgentMessage, ...] = ()
     tools: tuple[AgentTool, ...] = ()
+    require_initial_tool: bool = False
     required_tools: frozenset[str] = frozenset()
     stop_after_tools: frozenset[str] = frozenset()
     finish_when: Callable[[], Any | None] | None = field(default=None, repr=False)
@@ -144,6 +145,7 @@ def _validate(execution: AgentExecution) -> None:
             or (execution.max_units is not None and execution.max_units <= 0)
             or (execution.finish_when is not None and not callable(execution.finish_when))
             or len(names) != len(set(names)) or any(not _TOOL_NAME.fullmatch(name) for name in names)
+            or (execution.require_initial_tool and not names)
             or not execution.required_tools.issubset(names) or not execution.stop_after_tools.issubset(names)):
         raise ValidationError(code="VALIDATION_AGENT_EXECUTION", message="Invalid agent execution configuration")
 
@@ -253,6 +255,7 @@ async def run_postbridge_agent(
                 tool_use_behavior=finish_after_success if execution.stop_after_tools or execution.finish_when else "run_llm_again",
                 output_type=AgentOutputSchema(execution.output_type, strict_json_schema=False) if execution.output_type else None,
                 model_settings=ModelSettings(max_tokens=execution.max_output_tokens,
+                    tool_choice="required" if execution.require_initial_tool else None,
                     parallel_tool_calls=False,
                     extra_body={"max_units": execution.max_units} if execution.max_units is not None else None))
             messages = [message.model_dump() for message in execution.history]
@@ -262,6 +265,9 @@ async def run_postbridge_agent(
                     result = await Runner.run(agent, messages, max_turns=execution.max_turns,
                         run_config=RunConfig(tracing_disabled=True))
                 called = {event.tool_name for event in events if event.status == "succeeded"}
+                if execution.require_initial_tool and not events:
+                    raise ValidationError(code="VALIDATION_AGENT_REQUIRED_TOOLS",
+                        message="Agent did not execute a source tool")
                 if not execution.required_tools.issubset(called):
                     raise ValidationError(code="VALIDATION_AGENT_REQUIRED_TOOLS",
                         message="Agent did not execute the required tools",

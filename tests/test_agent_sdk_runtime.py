@@ -82,6 +82,24 @@ def test_sdk_does_not_share_history_or_tools_between_executions():
     assert "test-secret" not in repr(first)
 
 
+def test_initial_source_read_is_required_then_final_answer_is_allowed():
+    requests = []
+    def handler(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        if len(requests) == 1:
+            assert body["tool_choice"] == "required"
+            return reply(None, tool=("read_draft", {"query": ""}))
+        assert body.get("tool_choice") != "required"
+        assert "Verified source" in str(body["messages"])
+        return reply("Verified answer")
+    tool = AgentTool("read_draft", "Browse the source", ReadArguments, lambda _: {"title": "Verified source"})
+    result = run(execution(tools=(tool,), require_initial_tool=True), handler)
+    assert result.output == "Verified answer" and len(requests) == 2
+    with pytest.raises(ValidationError):
+        run(execution(tools=(tool,), require_initial_tool=True), lambda _: reply("I have no access"))
+
+
 def test_sdk_validates_tool_arguments_without_executing_side_effect():
     seen, executed = [], []
     def handler(request):
@@ -214,6 +232,7 @@ def test_turn_limit_does_not_retry_completed_tools():
 
 
 @pytest.mark.parametrize("change", [{"max_turns": 0}, {"required_tools": frozenset({"absent"})},
+    {"require_initial_tool": True},
     {"stop_after_tools": frozenset({"absent"})},
     {"finish_when": "untrusted string"},
     {"tools": (AgentTool("bad.name", "Read", ReadArguments, lambda _: {}),)}, {"usage_format": "unknown"}])
