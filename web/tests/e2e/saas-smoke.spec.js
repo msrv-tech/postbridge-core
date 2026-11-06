@@ -162,7 +162,7 @@ async function mockSaasBff(page, calls = []) {
   })
 }
 
-test('general product help has no workspace context and content dialogue declares shared billing', async ({ page }, testInfo) => {
+test('general product help and content dialogue keep separate request contexts', async ({ page }, testInfo) => {
   await mockSaasBff(page)
   const requests = []
   await page.route('**/assistant/help', route => {
@@ -189,7 +189,6 @@ test('general product help has no workspace context and content dialogue declare
   await widget.screenshot({ path: testInfo.outputPath('general-support.png') })
   await page.goto('/workspaces/ws-1/content')
   await expect(widget.getByRole('button', { name: 'Content creation', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await expect(widget).toContainText("Generation planning, discussion and follow-up use this workspace's shared AI allowance.")
   await widget.getByLabel('Question for the assistant').fill('Help plan a product video')
   await widget.getByRole('button', { name: 'Ask', exact: true }).click()
   await expect.poll(() => requests.length).toBe(2)

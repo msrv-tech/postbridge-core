@@ -350,7 +350,6 @@ export default function SupportAssistantWidget({ workspaceId }) {
             <button type="button" className={`btn btn-small${mode === 'support' ? '' : ' btn-secondary'}`} aria-pressed={mode === 'support'} disabled={loading} onClick={() => setMode('support')}>{t('assistant.mode.support')}</button>
             {workspaceId && <button type="button" className={`btn btn-small${mode === 'generation' ? '' : ' btn-secondary'}`} aria-pressed={mode === 'generation'} disabled={loading} onClick={() => setMode('generation')}>{t('assistant.mode.generation')}</button>}
           </div>
-          {mode === 'generation' && <p className="section-copy">{t('assistant.mode.generationHint')}</p>}
           {answer?.message ? (
             <p className="support-assistant-answer">{answer.message}</p>
           ) : (
