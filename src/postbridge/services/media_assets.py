@@ -90,12 +90,10 @@ def store_media_asset(
         if metadata is not None:
             session.add(VideoMaterialOrm(asset_id=asset_id, tenant_id=tenant_id, name=library_name[:180],
                 folder="", metadata_json=metadata))
-    if existing is not None:
-        register_material()
-        session.commit()
-        return {"media_asset_id": asset_id, "url": managed_media_url(asset_id, existing.object_key)}
-    object_key = f"tenants/{tenant_id}/media/{asset_id}.{ext}"
+    object_key = existing.object_key if existing else f"tenants/{tenant_id}/media/{asset_id}.{ext}"
     try:
+        # The caller supplied the same content-addressed bytes. Replenish the
+        # object even when its DB record survived a storage loss or migration.
         storage_url = upload_media_object(object_key, data, content_type)
     except RuntimeError as exc:
         raise ValidationError(
@@ -104,6 +102,10 @@ def store_media_asset(
             message_key="error.validation.media_storage_not_configured",
             details={},
         ) from exc
+    if existing is not None:
+        register_material()
+        session.commit()
+        return {"media_asset_id": asset_id, "url": managed_media_url(asset_id, object_key)}
     url = _public_media_url(asset_id=asset_id, storage_url=storage_url)
     now = datetime.now(UTC)
     session.add(

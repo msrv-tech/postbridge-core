@@ -158,7 +158,7 @@ def test_tenant_settings_store_image_style_prompt(client: TestClient):
     assert read.json()["image_style_prompt"] == "minimal clay bridge style"
 
 
-def test_source_media_import_is_idempotent_and_tenant_scoped(client: TestClient, tmp_path, monkeypatch):
+def test_source_media_import_is_idempotent_tenant_scoped_and_restores_lost_object(client: TestClient, tmp_path, monkeypatch):
     monkeypatch.setenv("MEDIA_STORAGE_TYPE", "local")
     monkeypatch.setenv("MEDIA_STORAGE_PATH", str(tmp_path))
     monkeypatch.setenv("MEDIA_BASE_URL", "http://testserver/media")
@@ -178,6 +178,12 @@ def test_source_media_import_is_idempotent_and_tenant_scoped(client: TestClient,
         assert first.status_code == second.status_code == 200
         assert first.json() == second.json()
         ids.append(first.json()["media_asset_id"])
+        stored_path = tmp_path / f"tenants/{tenant}/media/{ids[-1]}.png"
+        stored_path.unlink()  # The database survived, but the storage object did not.
+        restored = client.post("/internal/service/media/upload", headers=headers,
+            files={"file": ("source.png", photo, "image/png")})
+        assert restored.status_code == 200 and restored.json() == first.json()
+        assert stored_path.read_bytes() == photo
         from postbridge.db import SESSION_LOCAL
         from postbridge.services.video_library import list_materials
         with SESSION_LOCAL() as db:
@@ -186,6 +192,13 @@ def test_source_media_import_is_idempotent_and_tenant_scoped(client: TestClient,
             assert library[0]["name"]=="source.png" and library[0]["width"]==20
     assert ids[0] != ids[1]
     assert len(list(tmp_path.rglob("*.png"))) == 2
+    def unavailable(*args):
+        raise RuntimeError("Synthetic storage outage")
+    monkeypatch.setattr("postbridge.services.media_assets.upload_media_object", unavailable)
+    failed = client.post("/internal/service/media/upload", headers=headers,
+        files={"file": ("source.png", photo, "image/png")})
+    assert failed.status_code == 503
+    assert failed.json()["code"] == "MEDIA_STORAGE_NOT_CONFIGURED"
 
 
 def test_service_media_upload_local(client: TestClient, tmp_path, monkeypatch: pytest.MonkeyPatch):
