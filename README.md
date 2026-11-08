@@ -146,7 +146,11 @@ Core deployments should:
 4. restart Core API and worker services;
 5. serve the bundled frontend from the Core API image or from a separate static host.
 
-The provided GitHub Actions workflow deploys only after CI passes on `main` and targets a trusted self-hosted runner labeled `prod-core`.
+The separate GitHub Actions deployment workflow runs after successful Core CI on
+`main` and requests one private production release. The hosted layer verifies the
+exact Core/SaaS pair once, then builds and checks the regional Core images and
+delivers RU and IO through their restricted production runners. The public Core
+repository has no production or LAN CI runner.
 
 ## Releases
 

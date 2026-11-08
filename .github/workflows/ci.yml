@@ -46,6 +46,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Test the production release dispatch contract
+        run: python3 scripts/test_request_ru_deploy.py
+
       - name: Create output dir
         run: mkdir -p ci/out
 

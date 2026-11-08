@@ -1,4 +1,4 @@
-"""Contract tests for the cross-repository RU deployment trigger."""
+"""Contract tests for the shared cross-repository deployment trigger."""
 
 import unittest
 from request_ru_deploy import WORKFLOW, trigger_and_wait
@@ -15,7 +15,7 @@ class DispatchTests(unittest.TestCase):
             calls.append((path, method, body))
             return next(replies)
         self.assertEqual(trigger_and_wait(SHA, fetch, sleeps.append), 42)
-        self.assertEqual(calls[0], (WORKFLOW + "/dispatches", "POST", {"ref": "main", "inputs": {"core_sha": SHA}}))
+        self.assertEqual(calls[0], (WORKFLOW + "/dispatches", "POST", {"ref": "main", "inputs": {"core_sha": SHA, "target": "both"}}))
         self.assertEqual(sleeps, [10])
         self.assertTrue(all(call[0].endswith("/actions/runs/42") for call in calls[1:]))
 
@@ -30,13 +30,13 @@ class DispatchTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             trigger_and_wait("main", lambda *args: self.fail("Must validate SHA before dispatch"))
 
-    def test_io_uses_the_private_io_workflow(self):
+    def test_io_selects_one_region_of_the_shared_workflow(self):
         calls = []
         def fetch(path, method="GET", body=None):
-            calls.append(path)
+            calls.append((path, method, body))
             return {"workflow_run_id": 43} if method == "POST" else {"status": "completed", "conclusion": "success"}
         self.assertEqual(trigger_and_wait(SHA, fetch, region="io"), 43)
-        self.assertTrue(calls[0].endswith("/deploy-io.yml/dispatches"))
+        self.assertEqual(calls[0], (WORKFLOW + "/dispatches", "POST", {"ref": "main", "inputs": {"core_sha": SHA, "target": "io"}}))
         with self.assertRaises(ValueError):
             trigger_and_wait(SHA, fetch, region="../../other")
 

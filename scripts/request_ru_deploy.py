@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start a private regional release after Core CI and track its separate CD result."""
+"""Start one shared private release after Core CI and track its CD result."""
 
 import json
 import os
@@ -9,19 +9,19 @@ import time
 import urllib.error
 import urllib.request
 
-WORKFLOW = "repos/msrv-tech/postbridge-saas/actions/workflows/deploy-ru.yml"
+WORKFLOW = "repos/msrv-tech/postbridge-saas/actions/workflows/deploy.yml"
 
 
 def workflow(region):
-    if region not in {"ru", "io"}:
+    if region not in {"both", "ru", "io"}:
         raise ValueError("Unknown production region")
-    return WORKFLOW.replace("deploy-ru.yml", "deploy-" + region + ".yml")
+    return WORKFLOW
 
 
 def api(path, method="GET", body=None):
     token = os.environ.get("GH_TOKEN", "")
     if not token:
-        raise RuntimeError("The RU dispatch credential is not configured")
+        raise RuntimeError("The production dispatch credential is not configured")
     request = urllib.request.Request(
         "https://api.github.com/" + path,
         method=method,
@@ -47,13 +47,13 @@ def api(path, method="GET", body=None):
         time.sleep(min(2 ** attempt, 15))
 
 
-def trigger_and_wait(sha, fetch=api, pause=time.sleep, attempts=1350, region="ru"):
+def trigger_and_wait(sha, fetch=api, pause=time.sleep, attempts=1350, region="both"):
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise ValueError("A full Core commit SHA is required")
-    dispatched = fetch(workflow(region) + "/dispatches", "POST", {"ref": "main", "inputs": {"core_sha": sha}})
+    dispatched = fetch(workflow(region) + "/dispatches", "POST", {"ref": "main", "inputs": {"core_sha": sha, "target": region}})
     run_id = dispatched.get("workflow_run_id")
     if not isinstance(run_id, int) or isinstance(run_id, bool) or run_id <= 0:
-        raise RuntimeError("GitHub did not return the dispatched RU workflow run ID")
+        raise RuntimeError("GitHub did not return the dispatched production workflow run ID")
     print(f"{region.upper()} release: https://github.com/msrv-tech/postbridge-saas/actions/runs/{run_id}", flush=True)
     last = None
     for attempt in range(attempts):
@@ -74,13 +74,13 @@ def trigger_and_wait(sha, fetch=api, pause=time.sleep, attempts=1350, region="ru
 if __name__ == "__main__":
     try:
         if "--check-access" in sys.argv:
-            for region in ("ru", "io"):
+            for region in ("both",):
                 if api(workflow(region)).get("state") != "active":
                     raise RuntimeError("A private deployment workflow is not active")
-            print("Private RU workflow access verified")
+            print("Private production workflow access verified")
         else:
             trigger_and_wait(os.environ.get("CORE_SHA", os.environ.get("GITHUB_SHA", "")),
-                             region=os.environ.get("DEPLOY_REGION", "ru"))
+                             region=os.environ.get("DEPLOY_REGION", "both"))
     except (RuntimeError, ValueError, urllib.error.URLError) as error:
         print(str(error), file=sys.stderr)
         raise SystemExit(1)

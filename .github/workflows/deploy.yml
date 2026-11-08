@@ -14,11 +14,6 @@ permissions:
 jobs:
   deploy:
     if: github.repository == 'msrv-tech/postbridge-core' && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success'))
-    strategy:
-      fail-fast: false
-      matrix:
-        region: [ru, io]
-    name: deploy-${{ matrix.region }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
@@ -30,7 +25,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
           CORE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-          DEPLOY_REGION: ${{ matrix.region }}
+          DEPLOY_REGION: both
         run: |
           python3 scripts/request_ru_deploy.py --check-access
           python3 scripts/request_ru_deploy.py
