@@ -22,7 +22,7 @@ dependencies = [
   "httpx2>=2.12.0,<3",
   "PySocks>=1.7.1",
   "feedparser>=6.0.14",
-  "pydantic>=2.13.5",
+  "pydantic>=2.14.2",
   "cryptography>=50.0.2",
   "croniter>=6.2.4",
   "sentry-sdk[celery,fastapi]>=2.71.0",
@@ -34,14 +34,14 @@ dependencies = [
 postbridge-telegram-bot = "postbridge.botkit.platforms.telegram.runtime:main"
 
 [project.optional-dependencies]
-video = ["faster-whisper==1.2.1", "av>=11,<16"]
+video = ["faster-whisper==1.2.1", "av>=18.1.0,<19"]
 dev = [
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
 ]
 
 [build-system]
-requires = ["setuptools>=84.0.0", "wheel"]
+requires = ["setuptools>=84.2.1", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
