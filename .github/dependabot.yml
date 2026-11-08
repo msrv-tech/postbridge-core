@@ -5,8 +5,12 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-      time: "08:00"
-      timezone: "Etc/UTC"
+      time: "03:00"
+      timezone: "Asia/Novosibirsk"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
     labels:
       - "dependencies"
       - "github-actions"
@@ -16,8 +20,8 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-      time: "08:00"
-      timezone: "Etc/UTC"
+      time: "03:00"
+      timezone: "Asia/Novosibirsk"
     groups:
       frontend:
         patterns:
@@ -31,8 +35,8 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-      time: "08:00"
-      timezone: "Etc/UTC"
+      time: "03:00"
+      timezone: "Asia/Novosibirsk"
     groups:
       python:
         patterns:
@@ -46,8 +50,8 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-      time: "08:00"
-      timezone: "Etc/UTC"
+      time: "03:00"
+      timezone: "Asia/Novosibirsk"
     labels:
       - "dependencies"
       - "docker"
