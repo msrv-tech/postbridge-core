@@ -490,7 +490,8 @@ class EditorialExecutionService:
                     x for x in [row.headline or "", row.body_markdown or "", row.summary or ""] if x
                 ).strip()
                 if embedding_text:
-                    vector, _ = provider.invoke_embedding(text=embedding_text)
+                    vector, embedding_usage = provider.invoke_embedding(text=embedding_text)
+                    state.setdefault("tool_trace", []).append({"tool": "candidate_embedding", "usage": embedding_usage})
                     upsert_content_embedding(
                         self._session,
                         tenant_id=tenant_id,

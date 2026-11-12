@@ -2689,6 +2689,22 @@ def test_run_and_candidate_detail_endpoints(client: TestClient):
     assert all(item["duration_ms"] is not None for item in steps_payload)
 
 
+def test_editorial_run_usage_includes_candidate_embedding(client: TestClient):
+    response = client.post(
+        "/internal/service/agent/runs",
+        headers=_svc_headers(),
+        json={"channel_id": CHANNEL, "mode": "post_copilot", "user_request": "Manual only",
+              "autonomy_mode": "full_manual"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["token_usage"]["total_tokens"] == 47
+    saved = client.get(
+        f"/internal/service/agent/runs/{response.json()['id']}", headers=_svc_headers()
+    )
+    assert saved.status_code == 200
+    assert saved.json()["token_usage"]["total_tokens"] == 47
+
+
 def test_semantic_dedup_summary_detects_near_duplicate():
     summary, is_duplicate = summarize_dedup(
         [
