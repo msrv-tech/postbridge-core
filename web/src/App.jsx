@@ -21,6 +21,7 @@ const News = lazy(() => import('./pages/News'))
 const NewsDetail = lazy(() => import('./pages/NewsDetail'))
 const Landing = lazy(() => import('./pages/Landing'))
 const CaseLanding = lazy(() => import('./pages/CaseLanding'))
+const YandexMarket = lazy(() => import('./pages/YandexMarket'))
 const Pricing = lazy(() => import('./pages/Pricing'))
 const LegalPage = lazy(() => import('./pages/LegalPage'))
 const Channels = lazy(() => import('./pages/Channels'))
@@ -240,6 +241,7 @@ export default function App() {
           <Route path="/news" element={isSelfhostMode() ? <Navigate to="/" replace /> : <News />} />
           <Route path="/news/:slug" element={isSelfhostMode() ? <Navigate to="/" replace /> : <NewsDetail />} />
           <Route path="/cases/:slug" element={<CaseLanding />} />
+          <Route path="/integrations/yandex-market" element={<YandexMarket />} />
           <Route path="/agents/help" element={<AgentFaq publicView />} />
           <Route path="/pricing" element={isSelfhostMode() ? <Navigate to="/" replace /> : <Pricing />} />
           <Route path="/privacy" element={<LegalPage />} />
