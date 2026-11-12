@@ -5,5 +5,7 @@ globalThis.window = { location: { origin: 'https://postbridge.ru' } }
 test('auth returns only to approved same-origin authorization pages', () => {
   assert.equal(normalizeAuthReturnTo('/external-apps/moysklad-app/authorize?request=abc'), '/external-apps/moysklad-app/authorize?request=abc')
   assert.equal(normalizeAuthReturnTo('/oauth/authorize?state=123'), '/oauth/authorize?state=123')
+  assert.equal(normalizeAuthReturnTo('/external-apps/amocrm-widget/authorize?nonce=abc'), '/external-apps/amocrm-widget/authorize?nonce=abc')
+  assert.equal(normalizeAuthReturnTo('/external-apps/amocrm-widget/authorize/evil'), null)
   for (const unsafe of ['//evil.example/oauth/authorize', '/\\evil.example/oauth/authorize', 'https://evil.example', '/workspaces/anything', '/external-apps/moysklad-app/authorize/evil', 'javascript:alert(1)']) assert.equal(normalizeAuthReturnTo(unsafe), null)
 })
