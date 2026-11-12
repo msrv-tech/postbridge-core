@@ -573,6 +573,7 @@ def get_service_publication_target(
             message_key="error.validation.publication_target_not_found",
             details={"target_id": target_id},
         )
+    from postbridge.services.publication_delivery_state import delivery_view
     return {
         "id": row.id,
         "tenant_id": row.tenant_id,
@@ -588,6 +589,7 @@ def get_service_publication_target(
         "error_code": row.error_code,
         "error_message": row.error_message,
         "retry_count": row.retry_count,
+        **delivery_view(session, row),
     }
 
 
@@ -610,6 +612,8 @@ def dispatch_service_publication_target(
             message_key="error.validation.publication_target_not_found",
             details={"target_id": target_id},
         )
+    from postbridge.services.publication_delivery_state import prepare_manual_dispatch
+    prepare_manual_dispatch(session, row, correlation_id=correlation_id)
     process_publication_target_task.delay(target_id, correlation_id)
     return {"status": "enqueued", "target_id": target_id}
 

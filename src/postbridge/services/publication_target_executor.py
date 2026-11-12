@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -21,6 +22,11 @@ from postbridge.domain.models import PostPayload
 from postbridge.integrations.base import TargetPublisher
 from postbridge.integrations.channel_credentials import load_channel_credential_row
 from postbridge.integrations.registry import decode_publish_credentials_for_platform, get_publisher
+from postbridge.services.publication_delivery_state import (
+    SAFE_OUTCOMES, UNKNOWN_CODE, UNKNOWN_MESSAGE, begin_text_dispatch,
+    mark_text_failure, retry_is_proven_safe, text_delivery_state,
+    text_failure_outcome, write_text_delivery,
+)
 from postbridge.observability.failure_class import classify_publication_failure
 from postbridge.observability.metrics import inc_publication_failure
 from postbridge.storage.publication_status_event_outbox import (
@@ -68,12 +74,26 @@ def claim_publication_target_pending(
     target_id: str,
     *,
     correlation_id: str | None = None,
+    text_attempt_id: str | None = None,
 ) -> bool:
     """pending → publishing, commit. True если строка захвачена."""
     now = datetime.now(UTC)
     from postbridge.services.video_publication import approval_for_plan
     target = session.get(PublicationTargetOrm, target_id)
     approval = approval_for_plan(session, target.publication_plan_id) if target else None
+    if target and not approval:
+        target = session.scalar(select(PublicationTargetOrm).where(PublicationTargetOrm.id == target_id)
+                                .with_for_update().execution_options(populate_existing=True))
+        if target is None or target.status != PUBLICATION_TARGET_PENDING:
+            session.rollback()
+            return False
+        state = text_delivery_state(session, target_id)
+        if (state and state.get("outcome") not in SAFE_OUTCOMES) or (not state and target.retry_count):
+            target.status, target.error_code, target.error_message = "unknown", UNKNOWN_CODE, UNKNOWN_MESSAGE
+            target.updated_at = now
+            enqueue_publication_target_status_changed(session, target, correlation_id=correlation_id)
+            session.commit()
+            return False
     if approval:
         from postbridge.config import get_settings
         from postbridge.services.video_delivery_time import admit_target, now_utc
@@ -96,6 +116,8 @@ def claim_publication_target_pending(
         return False
     target = session.get(PublicationTargetOrm, target_id)
     if target is not None:
+        if not approval:
+            write_text_delivery(session, target_id, "not_sent", attempt_id=text_attempt_id or uuid4().hex)
         enqueue_publication_target_status_changed(session, target, correlation_id=correlation_id)
     session.commit()
     return True
@@ -132,10 +154,13 @@ def schedule_publication_target_retry(
 ) -> bool:
     """failed → pending при допустимом retry (как JobStore.schedule_retry)."""
     from postbridge.services.video_publication import approval_for_plan
-    candidate = session.get(PublicationTargetOrm, target_id)
+    candidate = session.scalar(select(PublicationTargetOrm).where(PublicationTargetOrm.id == target_id)
+                               .with_for_update().execution_options(populate_existing=True))
     if candidate and approval_for_plan(session, candidate.publication_plan_id):
         return False
     if not exc.retryable:
+        return False
+    if candidate is None or not retry_is_proven_safe(session, candidate):
         return False
     target = session.get(PublicationTargetOrm, target_id)
     if target is None or target.status != PUBLICATION_TARGET_FAILED:
@@ -154,7 +179,7 @@ def schedule_publication_target_retry(
 
 
 def recover_stuck_publication_targets(session: Session, *, timeout_seconds: int) -> list[str]:
-    """Recover ordinary targets; approved video claims require external reconciliation."""
+    """Only a proven pre-dispatch claim may be requeued after a worker stops."""
     cutoff = datetime.now(UTC) - timedelta(seconds=timeout_seconds)
     now = datetime.now(UTC)
     stuck_ids = list(
@@ -170,20 +195,27 @@ def recover_stuck_publication_targets(session: Session, *, timeout_seconds: int)
     from postbridge.services.video_publication import approval_for_plan
     recovered = []
     for target_id in stuck_ids:
-        target = session.get(PublicationTargetOrm, target_id)
+        target = session.scalar(select(PublicationTargetOrm).where(PublicationTargetOrm.id == target_id)
+                                .with_for_update().execution_options(populate_existing=True))
+        if target is None:
+            continue
         video = approval_for_plan(session, target.publication_plan_id)
-        values = {"status": "unknown" if video else PUBLICATION_TARGET_PENDING, "updated_at": now}
+        safe = not video and text_delivery_state(session, target_id).get("outcome") == "not_sent"
+        values = {"status": PUBLICATION_TARGET_PENDING if safe else "unknown", "updated_at": now}
         if video:
             values.update(error_code="VIDEO_DELIVERY_UNKNOWN",
                 error_message="Worker stopped after claiming delivery; check the destination before any resend")
+        elif not safe:
+            values.update(error_code=UNKNOWN_CODE, error_message=UNKNOWN_MESSAGE)
         changed = session.execute(update(PublicationTargetOrm).where(PublicationTargetOrm.id == target_id,
             PublicationTargetOrm.status == PUBLICATION_TARGET_PUBLISHING, PublicationTargetOrm.updated_at < cutoff)
             .values(**values).execution_options(synchronize_session=False))
         if changed.rowcount != 1:
             continue
         session.refresh(target)
-        if video:
-            enqueue_publication_target_status_changed(session, target, correlation_id="video-stuck-recovery")
+        if not safe:
+            enqueue_publication_target_status_changed(session, target,
+                correlation_id="video-stuck-recovery" if video else "text-stuck-recovery")
         else:
             recovered.append(target_id)
     session.commit()
@@ -244,6 +276,7 @@ class PublicationTargetExecutor:
 
         from postbridge.services.video_publication import approval_for_plan, approved_payload
         video_approval = approval_for_plan(self.session, target.publication_plan_id)
+        text_attempt_id = uuid4().hex
         resuming_video = bool(video_approval and target.status == "processing")
         if video_approval:
             from postbridge.config import get_settings
@@ -251,7 +284,7 @@ class PublicationTargetExecutor:
                 return 0
 
         if not claim_publication_target_pending(
-            self.session, target_id, correlation_id=correlation_id
+            self.session, target_id, correlation_id=correlation_id, text_attempt_id=text_attempt_id
         ):
             logger.info("publication_target %s claim skipped (not pending)", target_id)
             return 0
@@ -260,6 +293,13 @@ class PublicationTargetExecutor:
         if target is None:
             return 0
 
+        def pre_dispatch_failed(error):
+            if video_approval:
+                mark_publication_target_failed(self.session, target_id, error, correlation_id=correlation_id)
+            else:
+                mark_text_failure(self.session, target_id, text_attempt_id, error,
+                                  outcome="not_sent", correlation_id=correlation_id)
+
         channel = self.session.get(ChannelOrm, target.channel_id)
         if channel is None:
             err = ValidationError(
@@ -267,9 +307,7 @@ class PublicationTargetExecutor:
                 message="channel not found for publication target",
                 details={"channel_id": target.channel_id},
             )
-            mark_publication_target_failed(
-                self.session, target_id, err, correlation_id=correlation_id
-            )
+            pre_dispatch_failed(err)
             raise err
 
         render = (
@@ -304,8 +342,12 @@ class PublicationTargetExecutor:
             credentials = decode_publish_credentials_for_platform(target.platform, cred_row)
             publisher = self._publisher or get_publisher(target.platform)
         except PostbridgeError as exc:
-            mark_publication_target_failed(self.session, target_id, exc, correlation_id=correlation_id)
+            pre_dispatch_failed(exc)
             raise
+        except Exception as exc:
+            internal = InternalError("Unexpected publication preparation error", details={"target_id": target_id})
+            pre_dispatch_failed(internal)
+            raise internal from exc
 
         def unknown(error):
             self.session.rollback()
@@ -317,6 +359,8 @@ class PublicationTargetExecutor:
 
         from postbridge.services.video_delivery_state import DeliveryPending, VideoDeliveryContext
         receipt = None
+        if not video_approval:
+            begin_text_dispatch(self.session, target_id, text_attempt_id)
         try:
             if video_approval and target.platform in {"youtube", "instagram", "tiktok"}:
                 delivery = VideoDeliveryContext(self.session, target_id, video_approval.snapshot)
@@ -326,6 +370,9 @@ class PublicationTargetExecutor:
                 external_id = publisher.publish_post(slug, post, credentials=credentials)
             if video_approval and not external_id:
                 raise InternalError("Video delivery returned no external identifier")
+            if not video_approval and (not isinstance(external_id, (str, int))
+                                       or isinstance(external_id, bool) or not str(external_id).strip()):
+                raise InternalError("Publication returned no acknowledgement identifier")
         except DeliveryPending:
             target = self.session.get(PublicationTargetOrm, target_id)
             target.status, target.error_code, target.error_message = "processing", None, None
@@ -334,6 +381,10 @@ class PublicationTargetExecutor:
             self.session.commit()
             return 0
         except PostbridgeError as exc:
+            if not video_approval:
+                mark_text_failure(self.session, target_id, text_attempt_id, exc,
+                                  outcome=text_failure_outcome(exc), correlation_id=correlation_id)
+                raise
             if video_approval and (exc.retryable or isinstance(exc, InternalError)):
                 unknown(exc)
                 raise
@@ -352,12 +403,15 @@ class PublicationTargetExecutor:
             if video_approval:
                 unknown(internal)
             else:
-                mark_publication_target_failed(self.session, target_id, internal, correlation_id=correlation_id)
+                mark_text_failure(self.session, target_id, text_attempt_id, internal,
+                                  outcome="unknown", correlation_id=correlation_id)
             raise internal from exc
 
         now = datetime.now(UTC)
         target = self.session.get(PublicationTargetOrm, target_id)
         if target:
+            if not video_approval:
+                write_text_delivery(self.session, target_id, "sent", attempt_id=text_attempt_id)
             target.status = PUBLICATION_TARGET_PUBLISHED
             target.published_at = now
             target.external_post_id = str(external_id) if external_id else None

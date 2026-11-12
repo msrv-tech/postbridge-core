@@ -176,6 +176,21 @@ def test_hosted_frontend_returns_real_404_and_noindexes_private_routes(monkeypat
     assert workspace.headers["x-robots-tag"] == "noindex, nofollow"
 
 
+@pytest.mark.parametrize("method", ["get", "head"])
+def test_hosted_integration_landing_is_a_public_frontend_route(monkeypatch, method):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "saas")
+    client = TestClient(app)
+    response = getattr(client, method)(
+        "/integrations/yandex-market?utm_source=yandex_market&utm_medium=partner_bonus")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert "noindex" not in response.headers.get("x-robots-tag", "")
+    if method == "get":
+        assert 'id="root"' in response.text
+    else:
+        assert response.content == b""
+
+
 def test_hosted_seo_open_graph_assets_are_1200_by_630(monkeypatch):
     monkeypatch.setenv("POSTBRIDGE_APP_MODE", "saas")
     client = TestClient(app)

@@ -24,6 +24,7 @@ def enqueue_publication_target_status_changed(
     correlation_id: str | None,
 ) -> None:
     """Добавляет запись outbox (без commit — вызывающий делает commit)."""
+    from postbridge.services.publication_delivery_state import delivery_view
     now = datetime.now(UTC)
     cid = correlation_id or "unknown"
     err: dict[str, object] | None = None
@@ -53,6 +54,7 @@ def enqueue_publication_target_status_changed(
             "channel_id": target.channel_id,
             "platform": target.platform,
             "error": err,
+            **delivery_view(session, target),
         },
     }
     session.add(

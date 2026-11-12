@@ -65,7 +65,7 @@ def _reconcile_one_run(session: Session, store: BatchImportRunStore, run: BatchI
             pending += 1
         elif t.status == "published":
             published += 1
-        elif t.status == "failed":
+        elif t.status in ("failed", "unknown"):
             failed += 1
             if first_code is None:
                 first_code = t.error_code or "PUBLICATION_TARGET_FAILED"
@@ -110,6 +110,10 @@ def try_release_batch_import_published_post_claim(session: Session, target_id: s
 
     Источник истины — строка в batch_import_enqueued_posts (связь run ↔ target), без парсинга meta_json.
     """
+    from postbridge.services.publication_delivery_state import retry_is_proven_safe
+    target = session.get(PublicationTargetOrm, target_id)
+    if target is None or target.status != "failed" or not retry_is_proven_safe(session, target):
+        return
     row = session.scalar(
         select(BatchImportEnqueuedPostOrm).where(
             BatchImportEnqueuedPostOrm.publication_target_id == target_id

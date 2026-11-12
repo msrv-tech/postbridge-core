@@ -129,6 +129,10 @@ function externalAppStatusLabel(status, t) {
   return status || '—'
 }
 
+function isExternalAppImplemented(app) {
+  return Boolean(app) && app.implemented !== false
+}
+
 function getTimezoneMarket() {
   const configured = String(import.meta.env.VITE_POSTBRIDGE_PUBLIC_MARKET || '').trim().toLowerCase()
   if (configured === 'io' || configured === 'ru') return configured
@@ -205,6 +209,11 @@ export default function WorkspaceSettings() {
   const [externalAppIntent, setExternalAppIntent] = useState(null)
   const [externalAppInstallingId, setExternalAppInstallingId] = useState('')
   const [externalAppRevokingId, setExternalAppRevokingId] = useState('')
+  const hasImplementedExternalApps = externalApps.some(isExternalAppImplemented)
+  const canShowExternalAppConnection = isExternalAppImplemented(externalAppConnection)
+    && externalApps.some((app) => app.id === externalAppConnection.app_id && isExternalAppImplemented(app))
+  const canShowExternalAppIntent = isExternalAppImplemented(externalAppIntent)
+    && externalApps.some((app) => app.id === externalAppIntent.app_id && isExternalAppImplemented(app))
 
   const preferredDomainsText = useMemo(
     () => (workspaceAgentPolicy.preferred_domains || []).join('\n'),
@@ -633,7 +642,7 @@ export default function WorkspaceSettings() {
   }
 
   const handleExternalAppConnection = (appId) => {
-    if (!workspaceId || !appId) return
+    if (!workspaceId || !externalApps.some((app) => app.id === appId && isExternalAppImplemented(app))) return
     setExternalAppConnectingId(appId)
     setExternalAppConnectionError('')
     getWorkspaceExternalAppConnection(workspaceId, appId)
@@ -646,7 +655,7 @@ export default function WorkspaceSettings() {
   }
 
   const handleExternalAppInstallIntent = (appId) => {
-    if (!workspaceId || !appId) return
+    if (!workspaceId || !externalApps.some((app) => app.id === appId && isExternalAppImplemented(app))) return
     setExternalAppInstallingId(appId)
     setExternalAppConnectionError('')
     createWorkspaceExternalAppInstallIntent(workspaceId, appId)
@@ -1014,7 +1023,7 @@ export default function WorkspaceSettings() {
           {externalAppsError && <p className="error">{externalAppsError}</p>}
           {externalAppConnectionError && <p className="error">{externalAppConnectionError}</p>}
 
-          {!externalAppsLoading && !externalAppsError && externalApps.length > 0 && (
+          {!externalAppsLoading && !externalAppsError && hasImplementedExternalApps && (
             <p className="muted post-editor-hint">
               {t('settings.ecosystemApps.freeUsage', {
                 used: externalAppsUsage.used,
@@ -1026,82 +1035,86 @@ export default function WorkspaceSettings() {
           {externalAppsLoading && <p className="muted">{t('common.loading')}</p>}
           {!externalAppsLoading && !externalAppsError && (
             <div style={{ display: 'grid', gap: '0.75rem' }}>
-              {externalApps.map((app) => (
-                <div
-                  key={app.id}
-                  className="status-row"
-                  style={{ alignItems: 'flex-start', gap: '1rem' }}
-                >
-                  <div style={{ flex: '1 1 18rem' }}>
-                    <div className="app-header-actions" style={{ justifyContent: 'flex-start', gap: '0.5rem' }}>
-                      <strong>{app.display_name}</strong>
-                      <span className="plan-badge">
-                        {externalAppStatusLabel(app.status, t)}
-                      </span>
-                      {app.id === 'moysklad-app' && <span className="plan-requested-badge">{t('settings.ecosystemApps.sharedWorkspaceBudget')}</span>}
-                      {app.id !== 'moysklad-app' && app.free_drafts_per_month > 0 && (
-                        <span className="plan-requested-badge">
-                          {t('settings.ecosystemApps.freeDrafts', { count: app.free_drafts_per_month })}
+              {externalApps.map((app) => {
+                const implemented = isExternalAppImplemented(app)
+                return (
+                  <div
+                    key={app.id}
+                    className="status-row"
+                    style={{ alignItems: 'flex-start', gap: '1rem' }}
+                  >
+                    <div style={{ flex: '1 1 18rem' }}>
+                      <div className="app-header-actions" style={{ justifyContent: 'flex-start', gap: '0.5rem' }}>
+                        <strong>{app.display_name}</strong>
+                        <span className="plan-badge">
+                          {externalAppStatusLabel(implemented ? app.status : 'planned', t)}
                         </span>
-                      )}
-                      {app.requires_paid_plan && app.enabled_for_workspace === false && (
-                        <span className="plan-requested-badge">
-                          {t('settings.ecosystemApps.paidOnly')}
-                        </span>
+                        {implemented && app.id === 'moysklad-app' && <span className="plan-requested-badge">{t('settings.ecosystemApps.sharedWorkspaceBudget')}</span>}
+                        {implemented && app.id !== 'moysklad-app' && app.free_drafts_per_month > 0 && (
+                          <span className="plan-requested-badge">
+                            {t('settings.ecosystemApps.freeDrafts', { count: app.free_drafts_per_month })}
+                          </span>
+                        )}
+                        {implemented && app.requires_paid_plan && app.enabled_for_workspace === false && (
+                          <span className="plan-requested-badge">
+                            {t('settings.ecosystemApps.paidOnly')}
+                          </span>
+                        )}
+                      </div>
+                      <p className="muted post-editor-hint" style={{ marginBottom: 0 }}>
+                        {app.summary}
+                      </p>
+                      {!implemented && <p className="muted post-editor-hint">{t('settings.ecosystemApps.plannedHint')}</p>}
+                      {implemented && app.id === 'moysklad-app' && <p className="muted post-editor-hint">{t('settings.ecosystemApps.moyskladConnectHint')}</p>}
+                      {implemented && app.id !== 'moysklad-app' && app.mvp_actions?.length > 0 && (
+                        <p className="muted post-editor-hint" style={{ marginBottom: 0 }}>
+                          {t('settings.ecosystemApps.actions')}: {app.mvp_actions.slice(0, 5).join(', ')}
+                          {app.mvp_actions.length > 5 ? '...' : ''}
+                        </p>
                       )}
                     </div>
-                    <p className="muted post-editor-hint" style={{ marginBottom: 0 }}>
-                      {app.summary}
-                    </p>
-                    {app.id === 'moysklad-app' && <p className="muted post-editor-hint">{t('settings.ecosystemApps.moyskladConnectHint')}</p>}
-                    {app.id !== 'moysklad-app' && app.mvp_actions?.length > 0 && (
-                      <p className="muted post-editor-hint" style={{ marginBottom: 0 }}>
-                        {t('settings.ecosystemApps.actions')}: {app.mvp_actions.slice(0, 5).join(', ')}
-                        {app.mvp_actions.length > 5 ? '...' : ''}
-                      </p>
-                    )}
-                  </div>
-                  <div className="toolbar" style={{ justifyContent: 'flex-end', marginTop: 0 }}>
-                    {app.documentation_url && (
-                      <a
-                        href={app.documentation_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="btn btn-secondary btn-small"
-                      >
-                        {t('settings.ecosystemApps.docs')}
-                      </a>
-                    )}
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-small"
-                      onClick={() => handleExternalAppConnection(app.id)}
-                      disabled={externalAppConnectingId === app.id}
-                    >
-                      {externalAppConnectingId === app.id
-                        ? t('common.loading')
-                        : t('settings.ecosystemApps.connection')}
-                    </button>
-                    {app.id === 'moysklad-app' && <a className="btn btn-secondary btn-small" href="https://online.moysklad.ru/" target="_blank" rel="noreferrer">{t('settings.ecosystemApps.openMoysklad')}</a>}
-                    {!app.uses_postbridge_mcp && app.id !== 'moysklad-app' && (
-                      <button
+                    <div className="toolbar" style={{ justifyContent: 'flex-end', marginTop: 0 }}>
+                      {app.documentation_url && (
+                        <a
+                          href={app.documentation_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn btn-secondary btn-small"
+                        >
+                          {t('settings.ecosystemApps.docs')}
+                        </a>
+                      )}
+                      {implemented && <button
                         type="button"
                         className="btn btn-secondary btn-small"
-                        onClick={() => handleExternalAppInstallIntent(app.id)}
-                        disabled={externalAppInstallingId === app.id}
+                        onClick={() => handleExternalAppConnection(app.id)}
+                        disabled={externalAppConnectingId === app.id}
                       >
-                        {externalAppInstallingId === app.id
+                        {externalAppConnectingId === app.id
                           ? t('common.loading')
-                          : t('settings.ecosystemApps.createInstallIntent')}
-                      </button>
-                    )}
+                          : t('settings.ecosystemApps.connection')}
+                      </button>}
+                      {implemented && app.id === 'moysklad-app' && <a className="btn btn-secondary btn-small" href="https://online.moysklad.ru/" target="_blank" rel="noreferrer">{t('settings.ecosystemApps.openMoysklad')}</a>}
+                      {implemented && !app.uses_postbridge_mcp && app.id !== 'moysklad-app' && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-small"
+                          onClick={() => handleExternalAppInstallIntent(app.id)}
+                          disabled={externalAppInstallingId === app.id}
+                        >
+                          {externalAppInstallingId === app.id
+                            ? t('common.loading')
+                            : t('settings.ecosystemApps.createInstallIntent')}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
 
-          {externalAppIntent && (
+          {canShowExternalAppIntent && (
             <div className="empty-state" style={{ marginTop: '1rem', padding: '1rem' }}>
               <strong>{t('settings.ecosystemApps.installIntent')}</strong>
               {externalAppIntent.connection_method === 'moysklad_vendor' ? (
@@ -1161,7 +1174,7 @@ export default function WorkspaceSettings() {
             </div>
           )}
 
-          {externalAppConnection && (
+          {canShowExternalAppConnection && (
             <div className="empty-state" style={{ marginTop: '1rem', padding: '1rem' }}>
               <div className="app-header-actions" style={{ justifyContent: 'space-between', gap: '1rem' }}>
                 <div>

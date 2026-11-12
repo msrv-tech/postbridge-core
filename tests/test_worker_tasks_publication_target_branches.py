@@ -127,7 +127,7 @@ def test_live_sync_success_updates_claim_max_message_id(monkeypatch: pytest.Monk
         session.close()
 
 
-def test_live_sync_retry_exhausted_aborts_claim(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_live_sync_unproved_retry_exhaustion_preserves_claim(monkeypatch: pytest.MonkeyPatch) -> None:
     from postbridge.workers.tasks import process_publication_target_task
 
     target_id = _seed_pending_target(platform="max")
@@ -168,7 +168,7 @@ def test_live_sync_retry_exhausted_aborts_claim(monkeypatch: pytest.MonkeyPatch)
             live_sync_target_core_channel_id=str(uuid4()),
         )
 
-    assert failed_calls == [1]
+    assert failed_calls == []
 
     session = SESSION_LOCAL()
     try:
@@ -177,7 +177,7 @@ def test_live_sync_retry_exhausted_aborts_claim(monkeypatch: pytest.MonkeyPatch)
             .filter_by(source_channel=src_ch, source_post_id=src_post, target_channel=tgt_ch)
             .one_or_none()
         )
-        assert row is None
+        assert row is not None
     finally:
         session.close()
 
@@ -232,7 +232,7 @@ def test_live_sync_success_rss_skips_max_message_id_update(monkeypatch: pytest.M
         session.close()
 
 
-def test_live_sync_raw_exception_aborts_claim(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_live_sync_unproved_raw_exception_preserves_claim(monkeypatch: pytest.MonkeyPatch) -> None:
     from postbridge.workers.tasks import process_publication_target_task
 
     target_id = _seed_pending_target(platform="max")
@@ -264,7 +264,7 @@ def test_live_sync_raw_exception_aborts_claim(monkeypatch: pytest.MonkeyPatch) -
             live_sync_target_core_channel_id=str(uuid4()),
         )
 
-    assert failed_calls == [1]
+    assert failed_calls == []
 
     session = SESSION_LOCAL()
     try:
@@ -273,7 +273,7 @@ def test_live_sync_raw_exception_aborts_claim(monkeypatch: pytest.MonkeyPatch) -
             .filter_by(source_channel=src_ch, source_post_id=src_post, target_channel=tgt_ch)
             .one_or_none()
         )
-        assert row is None
+        assert row is not None
     finally:
         session.close()
 

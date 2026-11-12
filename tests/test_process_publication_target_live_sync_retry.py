@@ -62,6 +62,7 @@ class _FailingPublisher:
             message="down",
             source="max",
             retryable=True,
+            details={"publication_outcome": "not_sent"},
         )
 
 

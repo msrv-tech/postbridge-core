@@ -28,5 +28,7 @@ def dispatch_publication_target(
             message_key="error.validation.publication_target_not_found",
             details={"target_id": target_id},
         )
+    from postbridge.services.publication_delivery_state import prepare_manual_dispatch
+    prepare_manual_dispatch(session, row)
     process_publication_target_task.delay(target_id, None)
     return {"status": "enqueued", "target_id": target_id}

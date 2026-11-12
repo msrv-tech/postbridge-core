@@ -442,8 +442,10 @@ class BatchImportRunStore:
             target = self.session.get(PublicationTargetOrm, row.publication_target_id)
             if target is not None and target.status == "published":
                 published_source_ids.add(row.source_post_id)
-            elif target is not None and target.status in ("pending", "publishing"):
-                inflight_source_ids.add(row.source_post_id)
+            elif target is not None:
+                from postbridge.services.publication_delivery_state import retry_is_proven_safe
+                if target.status in ("pending", "publishing", "unknown") or not retry_is_proven_safe(self.session, target):
+                    inflight_source_ids.add(row.source_post_id)
 
         fetched = list(
             self.session.scalars(

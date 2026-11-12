@@ -174,11 +174,10 @@ def process_publication_target_task(
     live_sync_tenant_id: str | None = None,
     live_sync_target_core_channel_id: str | None = None,
 ) -> int:
-    """Celery: публикует один publication_target; при retryable-ошибке планирует retry.
+    """Publish a target; retry only with durable evidence of non-delivery.
 
-    Live-sync: тот же retry, что и миграция (schedule_publication_target_retry + apply_async с kwargs);
-    claim снимается только при окончательном провале или при сыром Exception; при успехе —
-    update_max_message_id и inc_live_publish_ok.
+    Live-sync and batch dedup claims survive unknown acknowledgements. A retryable
+    transport flag cannot authorize another external publish.
     """
     corr = correlation_id or "unknown"
     log_job_processing_start(target_id, corr)
@@ -205,6 +204,12 @@ def process_publication_target_task(
 
     def _live_sync_abort_claim() -> None:
         if not is_live_sync:
+            return
+        session.rollback()
+        target = session.get(PublicationTargetOrm, target_id)
+        from postbridge.services.publication_delivery_state import retry_is_proven_safe
+        if target is None or target.status != "failed" or not retry_is_proven_safe(session, target):
+            # Keep the source-post fence across lost acknowledgements/restarts.
             return
         store = BatchImportRunStore(session)
         store.release_claim(

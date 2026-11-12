@@ -350,6 +350,7 @@ _ROOT_FRONTEND_ROUTE_PREFIXES = (
     "dashboard",
     "data-deletion",
     "home",
+    "integrations",
     "login",
     "news",
     "pricing",

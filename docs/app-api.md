@@ -743,6 +743,12 @@ Enqueues one target for processing and returns:
 }
 ```
 
+Text target views additionally expose `delivery_outcome`,
+`reconciliation_required`, and `delivery_retry_safe`. Failed status alone does
+not prove that a post was rejected. Unknown delivery cannot be dispatched again;
+only a durable known refusal/non-dispatch receipt permits retry. See the
+[delivery evidence and recovery contract](text-publication-delivery.md).
+
 ## Media
 
 Media endpoints let the self-host frontend upload images and manage background image generation jobs.

@@ -179,7 +179,7 @@ def test_recover_stuck_publication_targets_resets_and_returns_ids():
     try:
         target = session.get(PublicationTargetOrm, target_id)
         assert target is not None
-        target.status = PUBLICATION_TARGET_PUBLISHING
+        assert claim_publication_target_pending(session, target_id)
         target.updated_at = datetime.now(UTC) - timedelta(hours=1)
         session.commit()
 

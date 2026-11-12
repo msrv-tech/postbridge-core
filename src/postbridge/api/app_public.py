@@ -1998,9 +1998,11 @@ def _content_item_public_dict(row) -> dict[str, Any]:
 def _publication_target_public_dict(
     row: PublicationTargetOrm,
     *,
+    session: Session,
     channel: ChannelOrm | None = None,
     plan: PublicationPlanOrm | None = None,
 ) -> dict[str, Any]:
+    from postbridge.services.publication_delivery_state import delivery_view
     return {
         "id": row.id,
         "tenant_id": row.tenant_id,
@@ -2018,6 +2020,7 @@ def _publication_target_public_dict(
         "error_code": row.error_code,
         "error_message": row.error_message,
         "retry_count": row.retry_count,
+        **delivery_view(session, row),
         "created_at": row.created_at.isoformat(),
         "updated_at": row.updated_at.isoformat(),
     }
@@ -4447,7 +4450,7 @@ def list_content_item_publication_targets(
     rows = session.execute(stmt.order_by(PublicationTargetOrm.created_at.asc())).all()
     return {
         "items": [
-            _publication_target_public_dict(target, channel=channel, plan=plan)
+            _publication_target_public_dict(target, session=session, channel=channel, plan=plan)
             for target, channel, plan in rows
         ]
     }
@@ -4531,7 +4534,7 @@ def list_publication_targets(
     total = int(session.scalar(count_stmt) or 0)
     return {
         "items": [
-            _publication_target_public_dict(target, channel=channel, plan=plan)
+            _publication_target_public_dict(target, session=session, channel=channel, plan=plan)
             for target, channel, plan in rows
         ],
         "total": total,
@@ -5047,7 +5050,7 @@ def get_publication_target(
         channel = None
     if plan is not None and plan.tenant_id != tenant.id:
         plan = None
-    return _publication_target_public_dict(row, channel=channel, plan=plan)
+    return _publication_target_public_dict(row, session=session, channel=channel, plan=plan)
 
 
 @router.post("/publication-targets/{target_id}/dispatch", include_in_schema=False)
@@ -5059,5 +5062,7 @@ def dispatch_publication_target(
     """Enqueue one self-host publication target."""
     _tenant, row = _require_selfhost_publication_target(session, target_id)
     correlation_id = getattr(request.state, "correlation_id", None) or "selfhost-app"
+    from postbridge.services.publication_delivery_state import prepare_manual_dispatch
+    prepare_manual_dispatch(session, row, correlation_id=correlation_id)
     process_publication_target_task.delay(row.id, correlation_id)
     return {"status": "enqueued", "target_id": row.id}

@@ -1,4 +1,8 @@
 import { expect, test } from '@playwright/test'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const saasUser = {
   id: 'user-1',
@@ -1738,4 +1742,201 @@ test('workspace switching keeps externally managed billing separate', async ({ p
   await expect(page).toHaveURL('/workspaces/ws-2/settings')
   await expect(page.getByRole('button', { name: 'Change plan', exact: true })).toBeVisible()
   await expect(page.getByText('This workspace plan is managed in MoySklad. Change or cancel the subscription in its solutions catalog.')).toHaveCount(0)
+})
+
+test.describe('connector catalog availability', () => {
+  let server
+  let serverUrl
+  let cacheDir
+
+  test.beforeAll(async () => {
+    // The catalog is RU-only. Keep the existing IO smoke server and its cache separate.
+    const { createServer } = await import('vite')
+    cacheDir = await mkdtemp(join(tmpdir(), 'postbridge-connectors-ui-'))
+    server = await createServer({
+      root: fileURLToPath(new URL('../..', import.meta.url)),
+      base: '/',
+      cacheDir,
+      logLevel: 'error',
+      plugins: [{ name: 'no-live-connector-backend', configResolved(config) { config.server.proxy = undefined } }],
+      define: {
+        'import.meta.env.VITE_POSTBRIDGE_APP_MODE': JSON.stringify('saas'),
+        'import.meta.env.VITE_POSTBRIDGE_PUBLIC_MARKET': JSON.stringify('ru'),
+      },
+      server: { host: '127.0.0.1', port: 0, hmr: false },
+    })
+    await server.listen()
+    serverUrl = server.resolvedUrls.local[0]
+  })
+
+  test.afterAll(async () => {
+    await server?.close()
+    if (cacheDir) await rm(cacheDir, { recursive: true, force: true })
+  })
+
+  const app = (id, displayName, overrides = {}) => ({
+    id, display_name: displayName, summary: 'A synthetic connector catalog entry.',
+    status: 'available', implemented: true, connection_mode: 'provider_native',
+    requires_paid_plan: false, enabled_for_workspace: true, uses_postbridge_mcp: false,
+    free_drafts_per_month: 20, mvp_actions: ['create_draft'],
+    documentation_url: `https://docs.example.test/${id}`, ...overrides,
+  })
+
+  async function mockCatalog(page, items, { locale = 'en', plan = 'free', installations = [] } = {}) {
+    await mockSaasBff(page)
+    const state = { items, installations }
+    const calls = []
+    await page.route('**/me', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      ...saasUser, workspaces: [{ ...saasUser.workspaces[0], plan_code: plan }],
+    }) }))
+    await page.route('**/workspaces/ws-1/dashboard/summary', route => route.fulfill({ contentType: 'application/json',
+      body: JSON.stringify({ billing: { plan_code: plan, subscription_status: 'active' }, totals: {} }) }))
+    await page.route('**/workspaces/ws-1/external-apps**', route => {
+      const path = new URL(route.request().url()).pathname
+      const method = route.request().method()
+      const prefix = '/workspaces/ws-1/external-apps'
+      const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
+      if (path === prefix) return json({ items: state.items, external_app_drafts_used_month: 3,
+        external_app_drafts_limit_month: plan === 'free' ? 20 : null })
+      if (path === `${prefix}/installations`) return json({ items: state.installations })
+      calls.push({ path, method })
+      if (method === 'DELETE') {
+        state.installations = state.installations.map(item => ({ ...item, status: 'revoked' }))
+        return json({ status: 'revoked' })
+      }
+      const item = state.items.find(item => path.startsWith(`${prefix}/${item.id}/`))
+      if (!item) return json({ message: 'Unknown synthetic connector' }, 404)
+      if (item.requires_paid_plan && plan === 'free') {
+        return json({ message: 'A paid workspace plan is required.' }, 402)
+      }
+      if (path.endsWith('/connection')) return json({
+        app_id: item.id, implemented: item.implemented, connection_type: item.uses_postbridge_mcp ? 'mcp' : 'oauth_discovery',
+        manifest: { name: `Connection for ${item.display_name}`,
+          ...(item.uses_postbridge_mcp ? { mcp: { server_url: 'https://mcp.example.test/' } } : {}) },
+        external_app_drafts_used_month: 3, external_app_drafts_limit_month: plan === 'free' ? 20 : null,
+      })
+      if (path.endsWith('/install-intent')) return json({ app_id: item.id, state: `install-${item.id}`,
+        postbridge_callback_url: '/synthetic-callback', requested_scopes: ['source:read'] })
+      return json({ message: 'Unexpected synthetic connector request' }, 404)
+    })
+    await page.addInitScript(locale => {
+      localStorage.setItem('postbridge_token', 'saas-token')
+      localStorage.setItem('postbridge.locale', locale)
+      localStorage.setItem('postbridge_support_assistant_hidden_ws-1', '1')
+    }, locale)
+    return { state, calls }
+  }
+
+  const card = (section, name) => section.locator('.status-row').filter({ hasText: name })
+  const catalog = (page, heading = 'Ecosystem apps') => page.locator('.card').filter({
+    has: page.getByRole('heading', { name: heading, exact: true }),
+  })
+
+  for (const locale of ['en', 'ru']) {
+    test(`planned connectors stay visible without connection, quotas or actions (${locale})`, async ({ page }, testInfo) => {
+      const copy = locale === 'ru'
+        ? { heading: 'Экосистемные приложения', planned: 'Запланировано', connect: 'Подключение', install: 'Создать установку', docs: 'Документы', revoke: 'Отключить' }
+        : { heading: 'Ecosystem apps', planned: 'Planned', connect: 'Connection', install: 'Create install', docs: 'Docs', revoke: 'Disconnect' }
+      const { calls } = await mockCatalog(page, [
+        app('planned-data', 'Planned data source', { implemented: false, connection_mode: 'planned',
+          status: 'ready_for_dev', free_drafts_per_month: 0, mvp_actions: [], planned_actions: ['future_draft'] }),
+        // Conflicting legacy display fields must not override implemented=false.
+        app('planned-mcp', 'Planned MCP client', { implemented: false, connection_mode: 'planned',
+          uses_postbridge_mcp: true, requires_paid_plan: true, enabled_for_workspace: false,
+          mvp_actions: ['unavailable_action'], capabilities: ['unavailable_capability'] }),
+      ], { locale, installations: [{ id: 'legacy-install', app_id: 'planned-data', external_account_name: 'Legacy account', status: 'active' }] })
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.goto(new URL('/workspaces/ws-1/settings', serverUrl).href)
+      const section = catalog(page, copy.heading)
+      for (const name of ['Planned data source', 'Planned MCP client']) {
+        const entry = card(section, name)
+        await expect(entry.locator('.plan-badge')).toHaveText(copy.planned)
+        await expect(entry.locator('.plan-requested-badge')).toHaveCount(0)
+        await expect(entry.getByRole('link', { name: copy.docs, exact: true })).toBeVisible()
+      }
+      await expect(section.getByRole('button', { name: copy.connect, exact: true })).toHaveCount(0)
+      await expect(section.getByRole('button', { name: copy.install, exact: true })).toHaveCount(0)
+      await expect(section).not.toContainText('unavailable_action')
+      await expect(section).not.toContainText('unavailable_capability')
+      await expect(section).not.toContainText('future_draft')
+      await expect(section).not.toContainText(/drafts used this month|Использовано черновиков|Free: 20/)
+      expect(calls).toEqual([])
+      await section.screenshot({ path: testInfo.outputPath(`planned-connectors-${locale}.png`) })
+      await section.getByRole('button', { name: copy.revoke, exact: true }).click()
+      await expect(section.getByRole('button', { name: copy.revoke, exact: true })).toHaveCount(0)
+      await expect(section).toContainText('planned-data · revoked')
+      expect(calls).toEqual([{ path: '/workspaces/ws-1/external-apps/installations/legacy-install', method: 'DELETE' }])
+    })
+  }
+
+  for (const plan of ['free', 'pro']) {
+    test(`implemented connectors retain data, MCP and plan behavior (${plan})`, async ({ page }) => {
+      const { calls } = await mockCatalog(page, [
+        app('data-source', 'Data source'),
+        app('paid-source', 'Paid source', { requires_paid_plan: true, enabled_for_workspace: plan !== 'free', free_drafts_per_month: 0 }),
+        app('mcp-client', 'MCP client', { uses_postbridge_mcp: true, connection_mode: 'mcp_oauth', mvp_actions: ['list_workspaces'] }),
+        app('moysklad-app', 'MoySklad catalog entry'),
+      ], { plan })
+      await page.goto(new URL('/workspaces/ws-1/settings', serverUrl).href)
+      const section = catalog(page)
+      const data = card(section, 'Data source')
+      await expect(data).toContainText('Free: 20 drafts/mo')
+      await expect(data).toContainText('Actions: create_draft')
+      await data.getByRole('button', { name: 'Connection', exact: true }).click()
+      await expect(section.getByText('Connection for Data source', { exact: true })).toBeVisible()
+      await data.getByRole('button', { name: 'Create install', exact: true }).click()
+      await expect(section.getByText('state: install-data-source', { exact: true })).toBeVisible()
+      await expect(section).toContainText('Scopes: source:read')
+      const paid = card(section, 'Paid source')
+      await expect(paid.getByText('Paid plan', { exact: true })).toHaveCount(plan === 'free' ? 1 : 0)
+      await paid.getByRole('button', { name: 'Connection', exact: true }).click()
+      if (plan === 'free') await expect(section.locator('.error')).toContainText('A paid workspace plan is required.')
+      else await expect(section.getByText('Connection for Paid source', { exact: true })).toBeVisible()
+      const mcp = card(section, 'MCP client')
+      await expect(mcp).toContainText('Actions: list_workspaces')
+      await expect(mcp.getByRole('button', { name: 'Create install', exact: true })).toHaveCount(0)
+      await mcp.getByRole('button', { name: 'Connection', exact: true }).click()
+      await expect(section.getByRole('link', { name: 'Open MCP', exact: true }), JSON.stringify(calls)).toHaveAttribute('href', 'https://mcp.example.test/')
+      const sharedBudget = card(section, 'MoySklad catalog entry')
+      await expect(sharedBudget).toContainText('Shared workspace budget')
+      await expect(sharedBudget).not.toContainText('Free: 20')
+      await expect(sharedBudget.getByRole('link', { name: 'Open MoySklad', exact: true })).toBeVisible()
+      await expect(sharedBudget.getByRole('button', { name: 'Create install', exact: true })).toHaveCount(0)
+      expect(calls.map(call => call.path)).toEqual([
+        '/workspaces/ws-1/external-apps/data-source/connection',
+        '/workspaces/ws-1/external-apps/data-source/install-intent',
+        '/workspaces/ws-1/external-apps/paid-source/connection',
+        '/workspaces/ws-1/external-apps/mcp-client/connection',
+      ])
+      if (plan === 'free') await expect(section).toContainText('External app drafts used this month: 3 of 20.')
+      await expect(page.getByRole('button', { name: 'Change plan', exact: true })).toBeVisible()
+    })
+  }
+
+  test('refreshing a connector to planned hides stale connection and install details but preserves revocation', async ({ page }) => {
+    const { state, calls } = await mockCatalog(page, [
+      app('data-source', 'Data source'),
+      app('mcp-client', 'MCP client', { uses_postbridge_mcp: true, connection_mode: 'mcp_oauth' }),
+    ], { installations: [{ id: 'legacy-install', app_id: 'data-source', external_account_name: 'Legacy account', status: 'active' }] })
+    await page.goto(new URL('/workspaces/ws-1/settings', serverUrl).href)
+    const section = catalog(page)
+    await card(section, 'Data source').getByRole('button', { name: 'Create install', exact: true }).click()
+    await expect(section.getByText('state: install-data-source', { exact: true })).toBeVisible()
+    await card(section, 'MCP client').getByRole('button', { name: 'Connection', exact: true }).click()
+    await expect(section.getByRole('link', { name: 'Open MCP', exact: true })).toBeVisible()
+    state.items = state.items.map(item => ({ ...item, implemented: false, connection_mode: 'planned' }))
+    await section.getByRole('button', { name: 'Refresh', exact: true }).click()
+    await expect(section.locator('.plan-badge')).toHaveText(['Planned', 'Planned'])
+    await expect(section.getByRole('button', { name: 'Connection', exact: true })).toHaveCount(0)
+    await expect(section.getByRole('button', { name: 'Create install', exact: true })).toHaveCount(0)
+    await expect(section.getByRole('link', { name: 'Open MCP', exact: true })).toHaveCount(0)
+    await expect(section).not.toContainText('Connection for MCP client')
+    await expect(section).not.toContainText('state: install-data-source')
+    await expect(section).not.toContainText('External app drafts used this month')
+    await expect(section.getByRole('button', { name: 'Disconnect', exact: true })).toBeVisible()
+    expect(calls).toHaveLength(2)
+    await section.getByRole('button', { name: 'Disconnect', exact: true }).click()
+    await expect(section).toContainText('data-source · revoked')
+    expect(calls[2]).toEqual({ path: '/workspaces/ws-1/external-apps/installations/legacy-install', method: 'DELETE' })
+  })
 })
