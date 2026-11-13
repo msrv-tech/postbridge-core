@@ -86,6 +86,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
   const location = useLocation()
   const navigate = useNavigate()
   const { locale, t } = useI18n()
+  const connectorPage = /\/connectors(?:\/|$)/.test(location.pathname)
   const widgetStorageId = workspaceId || 'general'
   const videoProjectId = location.pathname.match(/\/content\/videos\/([0-9a-f-]{36})$/i)?.[1] || ''
   const [mode, setMode] = useState(() => workspaceId && ['content', 'video', 'agents'].includes(pageFromPath(location.pathname)) ? 'generation' : 'support')
@@ -101,7 +102,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
   const widgetRef = useRef(null)
   const requestRef = useRef(null)
   const [hidden, setHidden] = useState(() => isSupportAssistantHidden(widgetStorageId))
-  const [collapsed, setCollapsed] = useState(() => !workspaceId || location.pathname.includes('/videos') || location.pathname.includes('/content/video-campaigns'))
+  const [collapsed, setCollapsed] = useState(() => !workspaceId || connectorPage || location.pathname.includes('/videos') || location.pathname.includes('/content/video-campaigns'))
   const [position, setPosition] = useState(() => readPosition(widgetStorageId))
   const [drag, setDrag] = useState(null)
   const [question, setQuestion] = useState('')
@@ -119,9 +120,9 @@ export default function SupportAssistantWidget({ workspaceId }) {
     setError('')
     setConversationId('')
     setLoading(false)
-    setCollapsed(!workspaceId || page === 'video')
+    setCollapsed(!workspaceId || page === 'video' || connectorPage)
     requestRef.current = null
-  }, [contextKey])
+  }, [contextKey, connectorPage])
 
   useEffect(() => { if (!workspaceId) setMode('support') }, [workspaceId])
 

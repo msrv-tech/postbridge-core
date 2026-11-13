@@ -6,6 +6,7 @@ import { LanguageSelect, useI18n } from '../i18n'
 import SupportAssistantWidget from './SupportAssistantWidget'
 import WorkspaceSwitcher from './WorkspaceSwitcher'
 import HeaderNavigation from './HeaderNavigation'
+import { isSelfhostMode } from '../adapters/runtime'
 
 const dismissedImageJobsKey = (workspaceId) => `postbridge_dismissed_image_jobs_${workspaceId}`
 const brandMarkSrc = `${import.meta.env.BASE_URL}postbridge-mark.svg`
@@ -117,6 +118,9 @@ export default function AppShell({
                 <NavLink to={contentHref} className={navClassName(isContentActive)}>
                   {t('app.nav.content')}
                 </NavLink>
+                {!isSelfhostMode() && workspaceId && <NavLink to={`/workspaces/${encodeURIComponent(workspaceId)}/connectors`} className={navClassName(location.pathname.includes('/connectors'))}>
+                  {t('connectors.title')}
+                </NavLink>}
                 <NavLink to={channelsHref} className={navClassName(isChannelsActive)}>
                   {t('app.nav.channels')}
                 </NavLink>

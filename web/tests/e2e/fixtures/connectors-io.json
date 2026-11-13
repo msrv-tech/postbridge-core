@@ -1,0 +1,27 @@
+{
+  "schema_version": "2026-11-13",
+  "deployment": "io",
+  "items": [
+    {
+      "id": "chatgpt-mcp",
+      "kind": "mcp",
+      "brand_key": "openai",
+      "display_name": "ChatGPT / MCP",
+      "summary": "Use Postbridge tools from ChatGPT or a compatible MCP client with manual OAuth setup.",
+      "sort_order": 20,
+      "featured": true,
+      "listed": true,
+      "public_readiness": "pilot",
+      "rollout": "manual_setup",
+      "setup_mode": "manual_mcp",
+      "authorization_scope": "user_client",
+      "detail_url": "/connectors/chatgpt-mcp",
+      "manifest_url": "/api/external-apps/chatgpt-mcp/manifest",
+      "next_action": {
+        "kind": "pilot_guide",
+        "method": "GET",
+        "url": "/connectors/chatgpt-mcp"
+      }
+    }
+  ]
+}

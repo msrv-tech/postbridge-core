@@ -1,0 +1,131 @@
+{
+  "purpose": "Nominative identification of companies and the MCP protocol. Artwork remains owned by its respective rights holders. No endorsement or integration readiness is implied.",
+  "artwork": [
+    {
+      "source_url": "https://www.moysklad.ru/includes/header/logo/ms-logo.svg",
+      "primary_page": "https://www.moysklad.ru/company/",
+      "sha256": "1f86cddbe7278cab6babef9d9b711d1ae84b9e8721574bd3eb10e732b91f3c62",
+      "mime": "image/svg+xml",
+      "note": "Original full company wordmark.",
+      "brand_key": "moysklad",
+      "file": "moysklad.svg"
+    },
+    {
+      "source_url": "https://www.amocrm.ru/views/pages/landing/images/about_us/press_stuff/amocrm-logo-white_2.svg",
+      "primary_page": "https://www.amocrm.ru/about_us/",
+      "sha256": "7d4ed5d0a60b982ab04d4ac9c15a9fbbf1636a453e55e30984cd3aa70310e5bd",
+      "mime": "image/svg+xml",
+      "note": "Complete official wordmark exported from the square presentation canvas; see variant-exports.json. amoCRM only, without Kommo.",
+      "brand_key": "amocrm",
+      "file": "amocrm.svg",
+      "preparation": {
+        "file": "variants/amocrm.svg",
+        "sha256": "7d4ed5d0a60b982ab04d4ac9c15a9fbbf1636a453e55e30984cd3aa70310e5bd",
+        "source_file": "amocrm-wordmark.svg",
+        "source_sha256": "b0e5119e47724b54a82f03976dbee91c8aa7e62a58887de18c0203cff4041855",
+        "source_child_indices_zero_based": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "viewBox": "170 462 882 261.2",
+        "operation": "Remove unused square presentation-canvas space around the complete official wordmark. All seven original paths are retained unchanged; clear space remains. No glyph is cropped.",
+        "path_geometry_and_colors_identical": true,
+        "redrawn": false
+      }
+    },
+    {
+      "source_url": "https://www.bitrix24.com/upload/brand-guidelines/bitrix24-logo.zip",
+      "primary_page": "https://www.bitrix24.com/about/brand-guidelines.php",
+      "sha256": "422263d3e36c9b0f23caf2427d16b3f453b103d3fedc847b31d126764c185d62",
+      "mime": "image/svg+xml",
+      "note": "Unmodified bitrix24-logo/logo.svg from the official press kit.",
+      "brand_key": "bitrix24",
+      "file": "bitrix24.svg"
+    },
+    {
+      "source_url": "https://openai.github.io/openai-agents-python/assets/logo.svg",
+      "primary_page": "https://openai.github.io/openai-agents-python/",
+      "sha256": "b94ea61d860fae6f82f43571f36f17111fcf5d348e8e9cc22ae4b441c7560011",
+      "mime": "image/svg+xml",
+      "note": "Original white OpenAI Blossom from official OpenAI documentation, on a neutral dark matte. Brand guidance: https://openai.com/brand/ . No claim of ChatGPT app publication or partnership.",
+      "brand_key": "openai",
+      "file": "openai.svg"
+    },
+    {
+      "source_url": "https://cdn.ozone.ru/s3/ozon-disk-api/Brand_Ozon/Design_Team/Web_Design/Guides_Files/Logo_Ozon_1734337486.zip",
+      "primary_page": "https://brandlab.ozon.ru/guide/logo_guide",
+      "sha256": "45d4179107166ac769c9fa9b5633b5d2efc5359b47f2c8d27737978139436f4e",
+      "mime": "image/svg+xml",
+      "note": "Complete original blue-on-white plate exported from Logo_Ozon/RGB/Logo_Ozon_RGB.svg, including official clear space. See variant-exports.json.",
+      "brand_key": "ozon",
+      "file": "ozon.svg",
+      "preparation": {
+        "file": "variants/ozon-blue.svg",
+        "sha256": "45d4179107166ac769c9fa9b5633b5d2efc5359b47f2c8d27737978139436f4e",
+        "source_file": "ozon.svg",
+        "source_sha256": "05ba94dc2151630365946dd5173ca0ed4d6db6128e52a065f7ce741f2c757873",
+        "source_child_indices_zero_based": [
+          3,
+          32,
+          33,
+          34,
+          35
+        ],
+        "viewBox": "165.8 286 1080 474.7",
+        "operation": "Isolate the complete blue-on-white variant, including its original background and clear space, from the official multi-variant master. No glyph is cropped.",
+        "path_geometry_and_colors_identical": true,
+        "redrawn": false
+      }
+    },
+    {
+      "source_url": "https://yastatic.net/s3/doc-binary/src/support/market/ru/logo/favicon-market.svg",
+      "primary_page": "https://yandex.ru/support/marketplace/ru/orders/fbs/packaging/make-sticker",
+      "sha256": "4b4cf67197f566f1abcd277315024783b295be8706d269d6bdd9bec6bec8efde",
+      "mime": "image/svg+xml",
+      "note": "Original official service symbol, served by the seller documentation. Neutral light matte.",
+      "brand_key": "yandex-market",
+      "file": "yandex-market.svg"
+    },
+    {
+      "source_url": "https://rwb.ru/assets/svg/wb-logo.svg",
+      "primary_page": "https://rwb.ru/",
+      "sha256": "6dd2ca9038f08c90e6ef3a9722f88fbe40129c0b556fc3f65b30374eaa6a071f",
+      "mime": "image/svg+xml",
+      "note": "Original Wildberries symbol from the Wildberries section of the official parent-company site, not the RWB parent logo.",
+      "brand_key": "wildberries",
+      "file": "wildberries.svg"
+    },
+    {
+      "source_url": "https://1cfresh.com/resources/images/content/logo_header.png",
+      "primary_page": "https://1cfresh.com/",
+      "sha256": "3f4efbfa4b3f2ec18e66b87cb83d7b865aef3b6aac2b8d96012bfeea6948554a",
+      "mime": "image/png",
+      "note": "Original company 1C mark used in the official 1cfresh.com header. Identifies the company; service name remains 1С:Fresh in text. Original PNG retained; no tracing.",
+      "brand_key": "fresh",
+      "file": "onec.png"
+    },
+    {
+      "source_url": "https://aistudio.yandex.ru/favicon/svg/favicon.svg",
+      "primary_page": "https://aistudio.yandex.ru/",
+      "sha256": "78366d9a8738e670d219f36ae0b53df2c88ea2117e16c7c8bf10946bfb03ec15",
+      "mime": "image/svg+xml",
+      "note": "Original current AI Studio symbol. Used as Yandex AI identity only; the planned card still states that client compatibility and login are unverified.",
+      "brand_key": "yandex-ai",
+      "file": "yandex-ai.svg"
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/main/docs/favicon.svg",
+      "primary_page": "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/docs.json",
+      "sha256": "f6f33e24e95846f9ae2582ab72c4eae7beec5ec52c13d767d9f342bf639dd3e6",
+      "mime": "image/svg+xml",
+      "note": "Original protocol symbol. Displayed separately from OpenAI company artwork with a visible MCP protocol label.",
+      "brand_key": "mcp",
+      "file": "mcp.svg"
+    }
+  ]
+}

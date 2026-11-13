@@ -19,6 +19,7 @@ test('switches to the matching section without object IDs or payment state', () 
     ['content/post-old', 'content'], ['content/new', 'content'], ['content/videos/project-old?version=3', 'content/videos'],
     ['content/video-campaigns?source=old', 'content/video-campaigns'], ['channels/old/edit', 'channels'],
     ['settings?checkout=old&billing=lava_return', 'settings'], ['agents/candidates/old', 'agents/candidates'],
+    ['connectors/moysklad-app?setup=old', 'connectors'], ['connectors', 'connectors'],
     ['agents/runs/old', 'agents/topic-scout'], ['agents/videos', 'agents/videos'],
   ]) assert.equal(workspaceSwitchPath(`/workspaces/one/${source}`, 'two'), `/workspaces/two/${section}`)
 })

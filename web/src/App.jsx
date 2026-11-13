@@ -12,11 +12,13 @@ import LoadingSkeleton from './components/LoadingSkeleton'
 import CookieConsent from './components/CookieConsent'
 import MiniAppAuthGate from './components/MiniAppAuthGate'
 import { setToken } from './adapters/sessionToken'
-import { consumeAuthReturnTo, consumeOAuthCallbackExpected } from './adapters/authReturnTo'
+import { consumeAuthReturnTo, consumeOAuthCallbackExpected, normalizeAuthReturnTo } from './adapters/authReturnTo'
+import { connectorResumePath, consumeConnectorIntent } from './adapters/connectorIntent'
 import { hitMetrika, reachMetrikaGoal } from './metrika'
 import { useI18n } from './i18n'
 
 const Home = lazy(() => import('./pages/Home'))
+const Connectors = lazy(() => import('./pages/Connectors'))
 const News = lazy(() => import('./pages/News'))
 const NewsDetail = lazy(() => import('./pages/NewsDetail'))
 const Landing = lazy(() => import('./pages/Landing'))
@@ -130,7 +132,7 @@ function HomeRoute() {
   return <Navigate to={workspaceEntryPath(user, explicitWorkspace)} replace />;
 }
 
-function ProtectedRoute({ children }) {
+function ProtectedRoute({ children, guestPath = '/' }) {
   const { user, loading } = useAuth();
   const { workspaceId } = useParams();
   const hasWorkspace = user?.workspaces?.some((workspace) => workspace.id === workspaceId);
@@ -138,9 +140,15 @@ function ProtectedRoute({ children }) {
     if (hasWorkspace) rememberWorkspace(user, workspaceId);
   }, [user, workspaceId, hasWorkspace]);
   if (loading) return <LoadingSkeleton />;
-  if (!user) return <Navigate to="/" replace />;
+  if (!user) return <Navigate to={guestPath} replace />;
   if (workspaceId && !hasWorkspace && !user.is_platform_admin) return <Navigate to={workspaceEntryPath(user)} replace />;
   return <Fragment key={workspaceId || ''}>{children}</Fragment>;
+}
+
+function ConnectorWorkspaceRoute() {
+  const { connectorId } = useParams()
+  const publicPath = connectorId ? `/connectors/${encodeURIComponent(connectorId)}` : '/connectors'
+  return <ProtectedRoute guestPath={publicPath}><Connectors /></ProtectedRoute>
 }
 
 function AdminRoute({ children }) {
@@ -153,7 +161,10 @@ function AdminRoute({ children }) {
 
 function GuestRoute({ children }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading) return <LoadingSkeleton />;
+  const connector = new URLSearchParams(location.search).get('connector');
+  if (user && !normalizeAuthReturnTo(new URLSearchParams(location.search).get('return_to')) && connectorResumePath(connector)) return <Navigate to={connectorResumePath(connector)} replace />;
   if (user) return <Navigate to={workspaceEntryPath(user)} replace />;
   return children;
 }
@@ -206,11 +217,12 @@ function OAuthTokenHandler({ children }) {
       window.history.replaceState(null, '', location.pathname + location.search);
       if (hadToken) {
         const authReturnTo = consumeAuthReturnTo();
+        const connectorReturnTo = consumeConnectorIntent();
         reachMetrikaGoal('auth_completed', { method: 'oauth_hash' });
         if (authReturnTo) {
           window.location.replace(authReturnTo);
         } else {
-          navigate('/', { replace: true });
+          navigate(connectorReturnTo || '/', { replace: true });
         }
       }
     }
@@ -237,6 +249,10 @@ export default function App() {
           <Route path="/dashboard" element={<HomeRoute />} />
           <Route path="/setup" element={<SelfhostSetup />} />
           <Route path="/home" element={<Home />} />
+          <Route path="/connectors" element={<Connectors />} />
+          <Route path="/connectors/:connectorId" element={<Connectors />} />
+          <Route path="/workspaces/:workspaceId/connectors" element={<ConnectorWorkspaceRoute />} />
+          <Route path="/workspaces/:workspaceId/connectors/:connectorId" element={<ConnectorWorkspaceRoute />} />
           <Route path="/platforms" element={<PlatformsRedirect />} />
           <Route path="/news" element={isSelfhostMode() ? <Navigate to="/" replace /> : <News />} />
           <Route path="/news/:slug" element={isSelfhostMode() ? <Navigate to="/" replace /> : <NewsDetail />} />

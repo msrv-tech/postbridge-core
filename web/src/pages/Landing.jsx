@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { listAuthProviders, requestMagicLink, reviewLogin, verifyMagicLink } from '../adapters/authFlows'
 import { setToken } from '../adapters/sessionToken'
 import { consumeAuthReturnTo, markOAuthCallbackExpected, normalizeAuthReturnTo, rememberAuthReturnTo } from '../adapters/authReturnTo'
+import { clearConnectorIntent, consumeConnectorIntent, normalizeConnectorId, rememberConnectorIntent } from '../adapters/connectorIntent'
 import PublicLayout from '../components/PublicLayout'
 import TelegramDeepLinkField from '../components/TelegramDeepLinkField'
 import { fetchTelegramWebLinkStatus, startTelegramWebLinkSession } from '../telegramWebLinkFlow'
@@ -76,22 +77,27 @@ export default function Landing() {
   const [reviewCode, setReviewCode] = useState('')
   const isMetaReviewLogin = searchParams.get('review') === 'meta'
   const authReturnTo = normalizeAuthReturnTo(searchParams.get('return_to'))
+  const connectorIntent = normalizeConnectorId(searchParams.get('connector'))
 
   useEffect(() => {
     if (authReturnTo) {
       rememberAuthReturnTo(authReturnTo)
+      clearConnectorIntent()
     } else {
       consumeAuthReturnTo()
+      if (connectorIntent) rememberConnectorIntent(connectorIntent)
+      else clearConnectorIntent()
     }
-  }, [authReturnTo])
+  }, [authReturnTo, connectorIntent])
 
   const finishLogin = (token) => {
     setToken(token)
     consumeAuthReturnTo()
+    const connectorReturnTo = consumeConnectorIntent()
     if (authReturnTo) {
       window.location.assign(authReturnTo)
     } else {
-      navigate('/')
+      navigate(connectorReturnTo || '/')
     }
   }
 

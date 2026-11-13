@@ -1,0 +1,195 @@
+{
+  "schema_version": "2026-11-13",
+  "deployment": "ru",
+  "items": [
+    {
+      "id": "moysklad-app",
+      "kind": "data",
+      "brand_key": "moysklad",
+      "display_name": "MoySklad App",
+      "summary": "Use your Postbridge AI assistant inside MoySklad with the same workspace, channels and AI budget. Read products, sale prices, categories and stock on demand.",
+      "sort_order": 10,
+      "featured": true,
+      "listed": true,
+      "public_readiness": "available",
+      "rollout": "existing_installations",
+      "setup_mode": "guide",
+      "authorization_scope": "workspace",
+      "detail_url": "/connectors/moysklad-app",
+      "manifest_url": "/api/external-apps/moysklad-app/manifest",
+      "next_action": {
+        "kind": "setup_guide",
+        "method": "GET",
+        "url": "/connectors/moysklad-app"
+      }
+    },
+    {
+      "id": "amocrm-widget",
+      "kind": "data",
+      "brand_key": "amocrm",
+      "display_name": "amoCRM",
+      "summary": "Create Postbridge drafts and scheduled posts from CRM deals, notes and customer-facing workflow events.",
+      "sort_order": 20,
+      "featured": true,
+      "listed": true,
+      "public_readiness": "pilot",
+      "rollout": "closed_pilot",
+      "setup_mode": "guide",
+      "authorization_scope": "workspace",
+      "detail_url": "/connectors/amocrm-widget",
+      "manifest_url": "/api/external-apps/amocrm-widget/manifest",
+      "next_action": {
+        "kind": "pilot_guide",
+        "method": "GET",
+        "url": "/connectors/amocrm-widget"
+      }
+    },
+    {
+      "id": "ozon-app",
+      "kind": "data",
+      "brand_key": "ozon",
+      "display_name": "Ozon",
+      "summary": "Personal Postbridge assistant with read-only Ozon products, seller prices, categories, stock and photo imports. Shared workspace content and AI allowance.",
+      "sort_order": 30,
+      "featured": false,
+      "listed": true,
+      "public_readiness": "planned",
+      "rollout": "disabled",
+      "setup_mode": "none",
+      "authorization_scope": "workspace",
+      "detail_url": "/connectors/ozon-app",
+      "manifest_url": "/api/external-apps/ozon-app/manifest",
+      "next_action": {
+        "kind": "details",
+        "method": "GET",
+        "url": "/connectors/ozon-app"
+      }
+    },
+    {
+      "id": "yandex-market-source",
+      "kind": "data",
+      "brand_key": "yandex-market",
+      "display_name": "Yandex Market",
+      "summary": "Product information from a seller's Yandex Market store for Postbridge content; public connection is planned.",
+      "sort_order": 40,
+      "featured": false,
+      "listed": true,
+      "public_readiness": "planned",
+      "rollout": "not_launched",
+      "setup_mode": "none",
+      "authorization_scope": "workspace",
+      "detail_url": "/connectors/yandex-market-source",
+      "manifest_url": "/api/external-apps/yandex-market-source/manifest",
+      "next_action": {
+        "kind": "details",
+        "method": "GET",
+        "url": "/connectors/yandex-market-source"
+      }
+    },
+    {
+      "id": "wildberries-source",
+      "kind": "data",
+      "brand_key": "wildberries",
+      "display_name": "Wildberries",
+      "summary": "Product information from a Wildberries seller account for Postbridge content; public connection is planned.",
+      "sort_order": 50,
+      "featured": false,
+      "listed": true,
+      "public_readiness": "planned",
+      "rollout": "not_launched",
+      "setup_mode": "none",
+      "authorization_scope": "workspace",
+      "detail_url": "/connectors/wildberries-source",
+      "manifest_url": "/api/external-apps/wildberries-source/manifest",
+      "next_action": {
+        "kind": "details",
+        "method": "GET",
+        "url": "/connectors/wildberries-source"
+      }
+    },
+    {
+      "id": "onec-fresh-extension",
+      "kind": "data",
+      "brand_key": "fresh",
+      "display_name": "1C:Fresh Extension",
+      "summary": "Create Postbridge drafts from 1C:Fresh products, services, orders or company updates without copying accounting data into Postbridge.",
+      "sort_order": 60,
+      "featured": false,
+      "listed": true,
+      "public_readiness": "planned",
+      "rollout": "not_launched",
+      "setup_mode": "none",
+      "authorization_scope": "workspace",
+      "detail_url": "/connectors/onec-fresh-extension",
+      "manifest_url": "/api/external-apps/onec-fresh-extension/manifest",
+      "next_action": {
+        "kind": "details",
+        "method": "GET",
+        "url": "/connectors/onec-fresh-extension"
+      }
+    },
+    {
+      "id": "bitrix24-mcp",
+      "kind": "mcp",
+      "brand_key": "bitrix24",
+      "display_name": "Bitrix24 MCP",
+      "summary": "Expose Postbridge workspaces, channels, drafts, calendar, bridges and RAG search to Bitrix24 AI agents through a freemium MCP integration.",
+      "sort_order": 10,
+      "featured": true,
+      "listed": true,
+      "public_readiness": "available",
+      "rollout": "public",
+      "setup_mode": "guide",
+      "authorization_scope": "user_client",
+      "detail_url": "/connectors/bitrix24-mcp",
+      "manifest_url": "/api/external-apps/bitrix24-mcp/manifest",
+      "next_action": {
+        "kind": "setup_guide",
+        "method": "GET",
+        "url": "/connectors/bitrix24-mcp"
+      }
+    },
+    {
+      "id": "chatgpt-mcp",
+      "kind": "mcp",
+      "brand_key": "openai",
+      "display_name": "ChatGPT / MCP",
+      "summary": "Use Postbridge tools from ChatGPT or a compatible MCP client with manual OAuth setup.",
+      "sort_order": 20,
+      "featured": true,
+      "listed": true,
+      "public_readiness": "pilot",
+      "rollout": "manual_setup",
+      "setup_mode": "manual_mcp",
+      "authorization_scope": "user_client",
+      "detail_url": "/connectors/chatgpt-mcp",
+      "manifest_url": "/api/external-apps/chatgpt-mcp/manifest",
+      "next_action": {
+        "kind": "pilot_guide",
+        "method": "GET",
+        "url": "/connectors/chatgpt-mcp"
+      }
+    },
+    {
+      "id": "yandex-ai-mcp",
+      "kind": "mcp",
+      "brand_key": "yandex-ai",
+      "display_name": "Yandex AI / MCP",
+      "summary": "Expose safe Postbridge content, calendar, channel and RAG tools to Yandex AI agent environments.",
+      "sort_order": 30,
+      "featured": false,
+      "listed": true,
+      "public_readiness": "planned",
+      "rollout": "not_launched",
+      "setup_mode": "none",
+      "authorization_scope": "user_client",
+      "detail_url": "/connectors/yandex-ai-mcp",
+      "manifest_url": "/api/external-apps/yandex-ai-mcp/manifest",
+      "next_action": {
+        "kind": "details",
+        "method": "GET",
+        "url": "/connectors/yandex-ai-mcp"
+      }
+    }
+  ]
+}

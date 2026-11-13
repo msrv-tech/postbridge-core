@@ -35,6 +35,7 @@ export default function PublicLayout({ children, compact = false, className = ''
           </Link>
           <HeaderNavigation navClassName="public-nav" label={t('public.nav.aria')}>
             {!selfhost && <Link to="/news">{t('common.news')}</Link>}
+            {!selfhost && <Link to="/home#connectors">{t('connectors.title')}</Link>}
             {showIoDirectory && <a href="/platforms">Platforms</a>}
             <details className="public-nav-menu">
               <summary>{t('common.cases')}</summary>

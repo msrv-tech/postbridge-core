@@ -71,6 +71,9 @@ jobs:
       - name: Test workspace navigation
         run: npm --prefix web run test:workspace
 
+      - name: Test connector navigation and access policy
+        run: npm --prefix web run test:connectors
+
       - name: Test general assistant proxy
         run: npm --prefix web run test:assistant-proxy
 

@@ -1,0 +1,84 @@
+.connector-section-heading { display:flex;align-items:flex-end;justify-content:space-between;gap:1.5rem;margin-bottom:1.5rem; }
+.connector-section-heading h2 { font-size:clamp(1.6rem,3vw,2.15rem);line-height:1.2;max-width:25ch;margin:.5rem 0 0; }
+.connector-section-heading .section-copy { max-width:66ch; }
+.connector-catalog-link { display:inline-flex;align-items:center;gap:.4rem;min-height:44px;color:var(--link);font-weight:600; }
+.connector-section-heading>.connector-catalog-link { flex-shrink:0; }
+.connector-content-flow { display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:.75rem;padding:.85rem 1rem;margin-bottom:1.75rem;background:var(--bg-muted);border-radius:12px;font-size:.8rem;color:var(--text-muted); }
+.connector-content-flow strong { color:var(--text); }
+.connector-groups { display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1.75rem; }
+.connector-groups[data-single='true'] { grid-template-columns:minmax(0,1fr); }
+.connector-groups>section { min-width:0; }
+.connector-groups>section>h2,.connector-groups>section>h3 { font-size:1.2rem;margin:0; }
+.connector-group-copy { margin:.4rem 0 1rem;font-size:.85rem;color:var(--text-muted); }
+.connector-groups .connector-group-copy { min-height:2.7em; }
+.connector-list { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.8rem;margin:0;padding:0;list-style:none; }
+.connector-list>li { min-width:0; }
+.connector-list:has(>li:only-child) { grid-template-columns:minmax(0,1fr);max-width:34rem; }
+.connector-card { display:flex;flex-direction:column;height:100%;min-width:0;padding:1.15rem;border:1px solid var(--border);border-radius:15px;background:var(--surface); }
+.connector-card-top { display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.55rem;margin-bottom:.9rem; }
+/* Brand artwork keeps its prescribed colors on a neutral matte in both themes. */
+.connector-logo { display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;width:112px;height:48px;padding:6px;border-radius:8px;background:#fff;color-scheme:light; }
+.connector-logo img { display:block;width:100px;height:36px;object-fit:contain;object-position:center; }
+.connector-logo-openai { background:#111; }
+.connector-logo-openai img { width:48px;height:48px; }
+.connector-logo-symbol img { width:36px;height:36px; }
+.connector-logo-company img { width:47px;height:36px; }
+.connector-readiness { padding:.2rem .45rem;border-radius:6px;font-size:.7rem;line-height:1.4;color:var(--text-muted);background:var(--bg-muted); }
+.connector-readiness.is-available { background:color-mix(in srgb,var(--primary) 15%,var(--surface));color:var(--link); }
+.connector-readiness.is-pilot { background:color-mix(in srgb,var(--warning) 12%,var(--surface));color:light-dark(#855100,#e4bc72); }
+.connector-card h3,.connector-card h4 { font-size:1.1rem;line-height:1.3;margin:0; }
+.connector-benefit { margin:.65rem 0 0;font-size:.85rem;line-height:1.6; }
+.connector-note { margin:.65rem 0 0;font-size:.75rem;line-height:1.55;color:var(--text-muted); }
+.connector-protocol { display:flex;align-items:center;gap:.45rem;margin:.55rem 0 0;font-size:.75rem;color:var(--text-muted); }
+.connector-protocol img { display:block;width:20px;height:20px;object-fit:contain;background:#fff;border-radius:4px;color-scheme:light; }
+.connector-cta { display:flex;align-items:center;min-height:44px;margin-top:auto;padding-top:1.1rem;font-size:.8rem;font-weight:600;color:var(--link); }
+.connector-personal { margin:.85rem 0 0;padding-top:.65rem;border-top:1px solid var(--border);font-size:.75rem; }
+.connector-personal dt { color:var(--text-muted); }
+.connector-personal dd { margin:.25rem 0 0;overflow-wrap:anywhere; }
+.connector-personal.is-needs_login dd { color:light-dark(#855100,#e4bc72); }
+.connector-roadmap-link { display:flex;flex-wrap:wrap;justify-content:space-between;gap:.75rem;margin-top:1.5rem;font-size:.8rem;color:var(--text-muted); }
+.connector-roadmap-link a { color:var(--link);min-height:44px;display:inline-flex;align-items:center; }
+.connector-roadmap-link>span { align-self:center; }
+.connector-roadmap { border-top:1px solid var(--border);padding-top:1.75rem;margin-top:2rem;scroll-margin-top:1rem; }
+.connector-roadmap>h2 { font-size:1.4rem;margin:0; }
+.connector-roadmap .connector-list { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.connector-agent-links { margin-top:1.5rem;color:var(--text-muted);font-size:.8rem; }
+.connector-agent-links summary { min-height:44px;padding:.65rem 0;cursor:pointer; }
+.connector-agent-links li { margin:.5rem 0; }
+.connector-agent-links a { color:var(--link); }
+.connector-catalog { padding-bottom:2rem; }
+.connector-page-heading { margin-bottom:2rem; }
+.connector-page-heading h1 { margin:0 0 .8rem; }
+.connector-page-heading p { color:var(--text-muted);max-width:66ch; }
+.connector-detail { max-width:48rem;margin-inline:auto; }
+.connector-detail .connector-card-top { margin-top:1rem; }
+.connector-detail h1 { margin:1rem 0;line-height:1.2; }
+.connector-detail .connector-benefit { font-size:1rem; }
+.connector-back { display:inline-flex;align-items:center;min-height:44px;color:var(--link); }
+.connector-detail-section { margin-top:1.5rem;padding:1.5rem 0;border-top:1px solid var(--border); }
+.connector-detail-section h2 { font-size:1.25rem;margin:0 0 .8rem; }
+.connector-detail-section>p,.connector-detail-section ol { color:var(--text-muted); }
+.connector-detail-section ol { padding-left:1.3rem; }
+.connector-detail-section li { padding:.4rem 0; }
+.connector-actions { display:flex;align-items:center;flex-wrap:wrap;gap:.75rem;margin-top:1.25rem; }
+.connector-workspace-choice { margin-top:1rem;padding:1rem;background:var(--bg-muted);border-radius:12px; }
+.connector-workspace-choice label { display:block; }
+.connector-workspace-choice select { display:block;min-width:0;max-width:100%;width:100%;margin-top:.5rem; }
+.connector-workspace-choice p { font-size:.85rem;line-height:1.6;color:var(--text-muted); }
+.connector-config-url { display:block;overflow-wrap:anywhere;font-size:.85rem; }
+.workspace-connectors-entry { display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1.15rem 1.25rem;margin-bottom:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:13px; }
+.workspace-connectors-entry h2 { font-size:1.1rem;margin:0; }
+.workspace-connectors-entry p { font-size:.85rem;margin:.3rem 0 0;color:var(--text-muted); }
+.workspace-connectors-entry a { flex-shrink:0; }
+.connector-sr-only { position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap; }
+@media(max-width:1100px) { .connector-groups { grid-template-columns:minmax(0,1fr); }.connector-groups .connector-group-copy { min-height:0; } }
+@media(max-width:760px) { .connector-roadmap .connector-list { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:650px) {
+  .connector-section-heading { display:block; }.connector-section-heading>.connector-catalog-link { margin-top:.5rem; }
+  .connector-content-flow { justify-content:flex-start;gap:.45rem .65rem;font-size:.75rem; }
+  .connector-list,.connector-roadmap .connector-list { grid-template-columns:minmax(0,1fr); }
+  .connector-card { padding:1.15rem; }.connector-benefit { font-size:.9rem; }.connector-note,.connector-cta { font-size:.8rem; }
+  .connector-cta { padding-top:.8rem; }.connector-catalog-link { font-size:.85rem; }
+  .workspace-connectors-entry { display:block;padding:1rem; }.workspace-connectors-entry a { margin-top:.5rem; }
+  .connector-detail h1 { font-size:1.9rem; }.connector-workspace-choice select { font-size:16px; }
+}

@@ -12,6 +12,9 @@ import {
 } from '../adapters/externalApps'
 import { dispatchPublicationTarget, listPublicationTargetProjections } from '../adapters/publicationTargets'
 import { isSelfhostMode } from '../adapters/runtime'
+import { connectorAllowsSetup } from '../adapters/connectorPolicy'
+import { ConnectorLogo, connectorPath } from '../components/ConnectorCatalog'
+import { connectorStatusLabel } from '../connectorPresentation'
 import {
   isSupportAssistantHidden,
   setSupportAssistantHidden,
@@ -133,6 +136,10 @@ function isExternalAppImplemented(app) {
   return Boolean(app) && app.implemented !== false
 }
 
+function canOfferExternalAppSetup(app) {
+  return isExternalAppImplemented(app) && (!app.connector || connectorAllowsSetup(app.connector))
+}
+
 function getTimezoneMarket() {
   const configured = String(import.meta.env.VITE_POSTBRIDGE_PUBLIC_MARKET || '').trim().toLowerCase()
   if (configured === 'io' || configured === 'ru') return configured
@@ -211,9 +218,9 @@ export default function WorkspaceSettings() {
   const [externalAppRevokingId, setExternalAppRevokingId] = useState('')
   const hasImplementedExternalApps = externalApps.some(isExternalAppImplemented)
   const canShowExternalAppConnection = isExternalAppImplemented(externalAppConnection)
-    && externalApps.some((app) => app.id === externalAppConnection.app_id && isExternalAppImplemented(app))
+    && externalApps.some((app) => app.id === externalAppConnection.app_id && canOfferExternalAppSetup(app))
   const canShowExternalAppIntent = isExternalAppImplemented(externalAppIntent)
-    && externalApps.some((app) => app.id === externalAppIntent.app_id && isExternalAppImplemented(app))
+    && externalApps.some((app) => app.id === externalAppIntent.app_id && canOfferExternalAppSetup(app))
 
   const preferredDomainsText = useMemo(
     () => (workspaceAgentPolicy.preferred_domains || []).join('\n'),
@@ -230,6 +237,11 @@ export default function WorkspaceSettings() {
   const showAssistantSettings = Boolean(workspaceId) && !isSelfhostMode()
   const timezoneMarket = getTimezoneMarket()
   const showEcosystemApps = Boolean(workspaceId) && !isSelfhostMode() && timezoneMarket === 'ru'
+  useEffect(() => {
+    if (location.hash !== '#ecosystem-apps' || externalAppsLoading) return undefined
+    const frame = requestAnimationFrame(() => document.getElementById('ecosystem-apps')?.scrollIntoView({ block: 'start' }))
+    return () => cancelAnimationFrame(frame)
+  }, [location.hash, externalAppsLoading])
 
   const setLightThemeEnabled = useCallback((enabled) => {
     setTheme(setStoredTheme(enabled ? THEMES.light : THEMES.dark))
@@ -642,7 +654,7 @@ export default function WorkspaceSettings() {
   }
 
   const handleExternalAppConnection = (appId) => {
-    if (!workspaceId || !externalApps.some((app) => app.id === appId && isExternalAppImplemented(app))) return
+    if (!workspaceId || !externalApps.some((app) => app.id === appId && canOfferExternalAppSetup(app))) return
     setExternalAppConnectingId(appId)
     setExternalAppConnectionError('')
     getWorkspaceExternalAppConnection(workspaceId, appId)
@@ -655,7 +667,7 @@ export default function WorkspaceSettings() {
   }
 
   const handleExternalAppInstallIntent = (appId) => {
-    if (!workspaceId || !externalApps.some((app) => app.id === appId && isExternalAppImplemented(app))) return
+    if (!workspaceId || !externalApps.some((app) => app.id === appId && canOfferExternalAppSetup(app))) return
     setExternalAppInstallingId(appId)
     setExternalAppConnectionError('')
     createWorkspaceExternalAppInstallIntent(workspaceId, appId)
@@ -992,7 +1004,7 @@ export default function WorkspaceSettings() {
       )}
 
       {showEcosystemApps && (
-        <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <div id="ecosystem-apps" className="card" style={{ marginBottom: '1.5rem' }}>
           <div
             style={{
               display: 'flex',
@@ -1037,6 +1049,7 @@ export default function WorkspaceSettings() {
             <div style={{ display: 'grid', gap: '0.75rem' }}>
               {externalApps.map((app) => {
                 const implemented = isExternalAppImplemented(app)
+                const canSetup = canOfferExternalAppSetup(app)
                 return (
                   <div
                     key={app.id}
@@ -1045,9 +1058,10 @@ export default function WorkspaceSettings() {
                   >
                     <div style={{ flex: '1 1 18rem' }}>
                       <div className="app-header-actions" style={{ justifyContent: 'flex-start', gap: '0.5rem' }}>
+                        {app.connector && <ConnectorLogo item={app.connector} />}
                         <strong>{app.display_name}</strong>
                         <span className="plan-badge">
-                          {externalAppStatusLabel(implemented ? app.status : 'planned', t)}
+                          {app.connector ? connectorStatusLabel(app.connector, t) : externalAppStatusLabel(implemented ? app.status : 'planned', t)}
                         </span>
                         {implemented && app.id === 'moysklad-app' && <span className="plan-requested-badge">{t('settings.ecosystemApps.sharedWorkspaceBudget')}</span>}
                         {implemented && app.id !== 'moysklad-app' && app.free_drafts_per_month > 0 && (
@@ -1074,6 +1088,7 @@ export default function WorkspaceSettings() {
                       )}
                     </div>
                     <div className="toolbar" style={{ justifyContent: 'flex-end', marginTop: 0 }}>
+                      {app.connector?.listed && <Link className="btn btn-secondary btn-small" to={connectorPath(app.connector, workspaceId)}>{t('connectors.action.guide', { name: app.display_name })}</Link>}
                       {app.documentation_url && (
                         <a
                           href={app.documentation_url}
@@ -1084,7 +1099,7 @@ export default function WorkspaceSettings() {
                           {t('settings.ecosystemApps.docs')}
                         </a>
                       )}
-                      {implemented && <button
+                      {canSetup && <button
                         type="button"
                         className="btn btn-secondary btn-small"
                         onClick={() => handleExternalAppConnection(app.id)}
@@ -1094,8 +1109,8 @@ export default function WorkspaceSettings() {
                           ? t('common.loading')
                           : t('settings.ecosystemApps.connection')}
                       </button>}
-                      {implemented && app.id === 'moysklad-app' && <a className="btn btn-secondary btn-small" href="https://online.moysklad.ru/" target="_blank" rel="noreferrer">{t('settings.ecosystemApps.openMoysklad')}</a>}
-                      {implemented && !app.uses_postbridge_mcp && app.id !== 'moysklad-app' && (
+                      {canSetup && app.id === 'moysklad-app' && <a className="btn btn-secondary btn-small" href="https://online.moysklad.ru/" target="_blank" rel="noreferrer">{t('settings.ecosystemApps.openMoysklad')}</a>}
+                      {canSetup && !app.uses_postbridge_mcp && app.id !== 'moysklad-app' && (
                         <button
                           type="button"
                           className="btn btn-secondary btn-small"

@@ -44,6 +44,7 @@ export function workspaceSwitchPath(pathname, workspaceId) {
   const suffix = pathname.match(/^\/workspaces\/[^/]+\/(.*)/)?.[1] || ''
   let section = 'content'
   if (suffix.startsWith('settings')) section = 'settings'
+  else if (suffix.startsWith('connectors')) section = 'connectors'
   else if (suffix.startsWith('channels')) section = 'channels'
   else if (suffix.startsWith('content/videos')) section = 'content/videos'
   else if (suffix.startsWith('content/video-campaigns')) section = 'content/video-campaigns'

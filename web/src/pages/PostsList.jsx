@@ -5,6 +5,7 @@ import { getVideoCapabilities } from '../adapters/video'
 import { clearToken } from '../adapters/sessionToken'
 import { useAuth } from '../useAuth'
 import AppShell from '../components/AppShell'
+import WorkspaceConnectorEntry from '../components/WorkspaceConnectorEntry'
 import { useI18n } from '../i18n'
 
 const LIMIT = 20
@@ -106,6 +107,7 @@ export default function PostsList() {
         </>
       }
     >
+      <WorkspaceConnectorEntry workspaceId={workspaceId} />
       <div className="card">
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginBottom: '1rem' }}>
           <span className="muted">{t('common.filter')}</span>

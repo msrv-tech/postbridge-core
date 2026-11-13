@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import PublicLayout from '../components/PublicLayout'
+import HomeConnectors from '../components/HomeConnectors'
 import { listNews } from '../adapters/news'
 import { useI18n } from '../i18n'
 import { getPublicMarket } from '../branding'
@@ -314,6 +315,8 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <HomeConnectors />
 
       <section className="section">
         <div className="container">
