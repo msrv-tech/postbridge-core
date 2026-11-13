@@ -15,7 +15,6 @@ from postbridge.botkit.saas_http import (
     pending_channel as saas_pending_channel,
     register_telegram_channel as saas_register_telegram_channel,
     saas_base_url,
-    user_workspace as saas_user_workspace,
     web_app_base_url,
 )
 from postbridge.config import get_settings
@@ -50,39 +49,46 @@ class SaasBackend(BaseBackend):
             telegram_username=telegram_username,
         )
 
-    async def resolve_workspace_id(self, telegram_user_id: int, telegram_username: str | None) -> str | None:
+    async def _canonical_identity(self, telegram_user_id: int, telegram_username: str | None) -> tuple[str, str] | None:
+        """Resolve one server-owned actor/workspace pair, without a derived fallback."""
         try:
-            _, workspace_id = await saas_ensure_user(telegram_user_id, telegram_username)
-            return workspace_id
+            identity = await saas_ensure_user(telegram_user_id, telegram_username)
+            if not isinstance(identity, tuple) or len(identity) != 2:
+                return None
+            if not all(isinstance(value, str) and value and value == value.strip() for value in identity):
+                return None
+            return identity
         except Exception:
             return None
 
+    @staticmethod
+    def _matches_identity(row: dict, identity: tuple[str, str]) -> bool:
+        user_id, workspace_id = identity
+        return row.get("user_id") == user_id and (
+            "workspace_id" not in row or row["workspace_id"] == workspace_id
+        )
+
+    async def resolve_workspace_id(self, telegram_user_id: int, telegram_username: str | None) -> str | None:
+        identity = await self._canonical_identity(telegram_user_id, telegram_username)
+        return identity[1] if identity else None
+
     async def has_attached_channel(self, telegram_user_id: int, telegram_username: str | None) -> bool:
-        workspace_id = await self.resolve_workspace_id(telegram_user_id, telegram_username)
-        user_id = f"telegram:{telegram_user_id}"
-        if workspace_id:
-            try:
-                user_id, _ = await saas_ensure_user(telegram_user_id, telegram_username)
-            except Exception:
-                pass
-        return await saas_has_telegram_channel(user_id)
+        identity = await self._canonical_identity(telegram_user_id, telegram_username)
+        if identity is None:
+            return False
+        return await saas_has_telegram_channel(identity[0])
 
     async def pending_channel(self, telegram_user_id: int, telegram_username: str | None) -> PendingChannel | None:
-        workspace_id = await self.resolve_workspace_id(telegram_user_id, telegram_username)
-        user_id = f"telegram:{telegram_user_id}"
-        if workspace_id:
-            try:
-                user_id, _ = await saas_ensure_user(telegram_user_id, telegram_username)
-            except Exception:
-                pass
-        row = await saas_pending_channel(user_id)
-        if not row:
+        identity = await self._canonical_identity(telegram_user_id, telegram_username)
+        if identity is None:
             return None
-        ws = workspace_id or await saas_user_workspace(str(row["user_id"]))
+        row = await saas_pending_channel(identity[0])
+        if not row or not self._matches_identity(row, identity):
+            return None
         return PendingChannel(
             title=str(row["title"]),
             chat_id=int(row["platform_channel_id"]),
-            workspace_id=ws,
+            workspace_id=identity[1],
         )
 
     async def register_channel(
@@ -94,7 +100,9 @@ class SaasBackend(BaseBackend):
         title: str,
         added_by_telegram_user_id: int,
     ) -> PendingChannel:
-        _, workspace_id = await saas_ensure_user(telegram_user_id, telegram_username)
+        identity = await self._canonical_identity(telegram_user_id, telegram_username)
+        if identity is None:
+            raise RuntimeError("Canonical Telegram identity is unavailable")
         row = await saas_register_telegram_channel(
             telegram_user_id=telegram_user_id,
             telegram_username=telegram_username,
@@ -102,10 +110,12 @@ class SaasBackend(BaseBackend):
             title=title,
             added_by_telegram_user_id=added_by_telegram_user_id,
         )
+        if not self._matches_identity(row, identity):
+            raise RuntimeError("Telegram registration identity changed")
         return PendingChannel(
             title=str(row["title"]),
             chat_id=int(row["platform_channel_id"]),
-            workspace_id=workspace_id,
+            workspace_id=identity[1],
         )
 
     def site_base_url(self) -> str:
