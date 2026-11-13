@@ -347,6 +347,7 @@ _ROOT_FRONTEND_ROUTE_PREFIXES = (
     "admin",
     "agents",
     "cases",
+    "connectors",
     "dashboard",
     "data-deletion",
     "home",

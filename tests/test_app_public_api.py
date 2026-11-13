@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from urllib.parse import parse_qs, urlparse
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
@@ -189,6 +190,73 @@ def test_hosted_integration_landing_is_a_public_frontend_route(monkeypatch, meth
         assert 'id="root"' in response.text
     else:
         assert response.content == b""
+
+
+@pytest.mark.parametrize("method", ["get", "head"])
+@pytest.mark.parametrize("path", ["/connectors", "/connectors/chatgpt-mcp"])
+def test_hosted_connector_pages_serve_the_built_public_spa(monkeypatch, method, path):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "saas")
+    client = TestClient(app)
+    index = client.get("/")
+    response = getattr(client, method)(path)
+
+    assert index.status_code == 200
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["cache-control"] == "no-store"
+    assert "noindex" not in response.headers.get("x-robots-tag", "")
+    assert response.headers["content-length"] == index.headers["content-length"]
+    if method == "get":
+        assert response.content == index.content
+        assert 'id="root"' in response.text
+        assert "/src/main.jsx" not in response.text
+    else:
+        assert response.content == b""
+
+
+@pytest.mark.parametrize("method", ["get", "head"])
+def test_hosted_connector_routes_preserve_private_pages_and_real_404s(monkeypatch, method):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "saas")
+    client = TestClient(app)
+    for path in ("/workspaces/ws-1/content", "/workspaces/ws-1/connectors", "/workspaces/ws-1/connectors/chatgpt-mcp"):
+        response = getattr(client, method)(path)
+        assert response.status_code == 200, path
+        assert response.headers["x-robots-tag"] == "noindex, nofollow"
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["content-type"].startswith("text/html")
+        assert ('id="root"' in response.text) if method == "get" else response.content == b""
+    for path in ("/definitely-not-a-postbridge-route", "/connectors-unknown/detail", "/src/adapters/externalApps.js"):
+        response = getattr(client, method)(path)
+        assert response.status_code == 404, path
+        assert 'id="root"' not in response.text
+    for path in ("/api/not-a-real-core-endpoint", "/api/workspaces/ws-1/connectors", "/core/not-a-real-core-endpoint"):
+        response = getattr(client, method)(path)
+        assert response.status_code == 404, path
+        assert response.headers["content-type"].startswith("application/json")
+        if method == "get":
+            assert response.json()["code"] == "HTTP_ERROR"
+        else:
+            assert response.content == b""
+
+
+def test_hosted_connector_static_assets_still_serve_built_bytes(monkeypatch):
+    monkeypatch.setenv("POSTBRIDGE_APP_MODE", "saas")
+    client = TestClient(app)
+    index = client.get("/")
+    script = re.search(r'<script[^>]+src="([^"]+\.js)"', index.text)
+    assert script is not None
+    bundle = client.get(script.group(1))
+    assert bundle.status_code == 200
+    assert "javascript" in bundle.headers["content-type"]
+    assert 'id="root"' not in bundle.text
+    for method in ("get", "head"):
+        logo = getattr(client, method)("/connector-brands/openai.svg")
+        assert logo.status_code == 200
+        assert logo.headers["content-type"].startswith("image/svg+xml")
+        if method == "get":
+            assert "<svg" in logo.text
+        else:
+            assert logo.content == b""
 
 
 def test_hosted_seo_open_graph_assets_are_1200_by_630(monkeypatch):
