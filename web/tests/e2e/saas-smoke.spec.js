@@ -2071,3 +2071,286 @@ test('news articles reject URL tricks and use only declared allowlisted image MI
   expect(result.unsafeLink).toEqual([{ kind: 'text', text: 'plain label' }])
   expect(result.destinations).toEqual([null, null, null, null])
 })
+
+// Owner inventory is deliberately separate from workspace publication registries.
+const metaInventory = (items = [], next_cursor = null) => ({ schema_version: 1, scope: 'owner_inventory', items, next_cursor })
+const metaRow = (id, values = {}) => ({ id, platform: 'facebook', platform_channel_id: '00012345678901234567890', title: 'Saved page', state: 'pending', usable: false, ...values })
+const metaOwner = user_id => {
+  const { id, ...profile } = saasUser
+  return { ...profile, user_id, current_workspace_id: null, workspaces: [] }
+}
+const metaCards = page => page.locator('[data-meta-connection-id]')
+const deferredMeta = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
+
+async function mockMetaOwner(page, { locale = 'en', theme = 'dark', ignoreAbort = false } = {}) {
+  const state = { users: { 'owner-a': metaOwner('owner-a'), 'owner-b': metaOwner('owner-b') }, calls: [], errors: [],
+    result: metaInventory([metaRow('native-a')]), inventory: null, me: null }
+  page.on('pageerror', error => state.errors.push(error.message))
+  await page.addInitScript(({ locale, theme, ignoreAbort }) => {
+    localStorage.setItem('postbridge_token', 'owner-a')
+    localStorage.setItem('postbridge.locale', locale)
+    localStorage.setItem('postbridge.theme', theme)
+    if (ignoreAbort) {
+      // Exercise the stale-result guard even if a transport ignores cancellation.
+      const nativeFetch = window.fetch
+      window.fetch = (input, options) => nativeFetch(input, String(input).includes('/me/meta-connections') ? { ...options, signal: undefined } : options)
+    }
+  }, { locale, theme, ignoreAbort })
+  await page.route('**/*', async route => {
+    const request = route.request(), url = new URL(request.url()), path = url.pathname
+    if (request.isNavigationRequest()) return route.continue()
+    const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
+    const actor = (request.headers().authorization || '').replace(/^Bearer /, '')
+    if (path === '/me/meta-connections') {
+      state.calls.push({ path, method: request.method(), query: [...url.searchParams], actor, headers: request.headers() })
+      return state.inventory ? state.inventory({ route, request, url, actor, json }) : json(state.result)
+    }
+    if (path === '/me') return state.me ? state.me({ actor, json }) : json(state.users[actor] || {}, state.users[actor] ? 200 : 401)
+    if (path === '/api/app/runtime-config') return json({ app_mode: 'saas', i18n: { default_locale: locale } })
+    if (path === '/api/news') return json({ items: [], source_url: null })
+    if (path === '/api/connectors') return json({ schema_version: 1, deployment: 'io', items: [] })
+    if (path === '/auth/providers') return json({ providers: [{ id: 'email', label: 'Email', type: 'magic_code' }] })
+    if (['fetch', 'xhr'].includes(request.resourceType()) && !path.startsWith('/src/') && !path.startsWith('/node_modules/') && !path.startsWith('/@')) {
+      state.calls.push({ path, method: request.method(), actor })
+      return json({ code: 'UNEXPECTED_TEST_API' }, 404)
+    }
+    return route.continue()
+  })
+  return state
+}
+
+for (const locale of ['en', 'ru']) {
+  test(`Meta owner inventory ${locale}: no-workspace account navigation, stable native IDs and local marks`, async ({ page, context }, testInfo) => {
+    const theme = locale === 'en' ? 'light' : 'dark'
+    const state = await mockMetaOwner(page, { locale, theme })
+    const hostile = '<img src="https://attacker.invalid/x" onerror="alert(1)">'
+    state.result = metaInventory([metaRow('native-a'), metaRow('native-b', { title: hostile }), metaRow('native-c', { platform: 'instagram', title: 'Instagram account', state: 'reconnect_required' })])
+    await page.goto('/home')
+    await page.locator('.public-nav').getByRole('link', { name: locale === 'en' ? 'Log in' : 'Войти', exact: true }).click()
+    await expect(page).toHaveURL(/\/settings\/meta-connections$/)
+    await expect(metaCards(page)).toHaveCount(3)
+    await expect(page.getByRole('heading', { name: locale === 'en' ? 'Meta connections' : 'Подключения Meta', exact: true })).toBeVisible()
+    await expect(metaCards(page).nth(1).getByRole('heading')).toHaveText(hostile)
+    await expect(metaCards(page).locator('img:not([src$="facebook.svg"]):not([src$="instagram.svg"]), script, iframe, input, select')).toHaveCount(0)
+    const expectedNames = locale === 'en' ? ['Checking connection', 'Checking connection', 'Access confirmation needed'] : ['Проверяется', 'Проверяется', 'Нужно подтверждение доступа']
+    await expect(metaCards(page).locator('strong')).toHaveText(expectedNames)
+    await expect.poll(() => metaCards(page).locator('img').evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0 && getComputedStyle(image).objectFit === 'contain' && image.alt === ''))).toBe(true)
+    expect(await metaCards(page).locator('img').evaluateAll(images => images.every(image => new URL(image.src).pathname.startsWith('/assets/platforms/')))).toBe(true)
+    await expect(page.locator('.workspace-switcher')).toHaveCount(0)
+    await expect(page.locator('.app-nav a[href="/settings/meta-connections"]')).toHaveAttribute('aria-current', 'page')
+    for (const row of await metaCards(page).all()) await row.locator('summary').click()
+    await expect(metaCards(page).nth(0)).toContainText('native-a')
+    await expect(metaCards(page).nth(1)).toContainText('native-b')
+    await expect(metaCards(page).nth(0).locator('dd').nth(1)).toHaveText('00012345678901234567890')
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await metaCards(page).nth(0).getByRole('button', { name: locale === 'en' ? 'Copy connection ID' : 'Скопировать ID подключения', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('native-a')
+    await expect(page.getByRole('link', { name: locale === 'en' ? 'Support' : 'Поддержка', exact: true })).toHaveAttribute('href', /^mailto:/)
+    await page.screenshot({ path: testInfo.outputPath(`meta-${locale}-${theme}-desktop.png`), fullPage: true })
+    await page.setViewportSize({ width: locale === 'ru' ? 320 : 390, height: 844 })
+    await expect(page.getByRole('button', { name: locale === 'en' ? 'Open menu' : 'Открыть меню', exact: true })).toHaveAttribute('aria-expanded', 'false')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`meta-${locale}-${theme}-mobile.png`), fullPage: true })
+    await page.getByRole('button', { name: locale === 'en' ? 'Open menu' : 'Открыть меню', exact: true }).click()
+    await page.locator('.app-nav').getByRole('link', { name: locale === 'en' ? 'Meta connections' : 'Подключения Meta', exact: true }).click()
+    expect(state.calls.every(call => call.path === '/me/meta-connections' && call.method === 'GET' && call.actor === 'owner-a' && JSON.stringify(call.query) === JSON.stringify([['limit', '50']]))).toBe(true)
+    expect(state.errors).toEqual([])
+  })
+}
+
+test('Meta owner inventory ignores workspace selectors and never becomes a publication recipient', async ({ page }) => {
+  const state = await mockMetaOwner(page)
+  state.users['owner-a'] = { ...metaOwner('owner-a'), workspaces: saasUser.workspaces }
+  await page.goto('/settings/meta-connections?workspace=foreign&owner_id=foreign&workspace_id=foreign')
+  await expect(metaCards(page)).toHaveCount(1)
+  await expect(page.locator('.workspace-switcher')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^(publish|connect|reconnect|delete|move|claim)(?:\s|$)/i })).toHaveCount(0)
+  await expect(page.locator('a[href*="oauth"], a[href*="authorize"]')).toHaveCount(0)
+  await expect(metaCards(page).locator('input, select')).toHaveCount(0)
+  await expect(metaCards(page)).not.toContainText('foreign')
+  for (const path of ['/SETTINGS/META-CONNECTIONS/?workspace=foreign', '/settings/meta-%63onnections/?workspace=foreign']) {
+    await page.goto(path)
+    await expect(metaCards(page)).toHaveCount(1)
+    await expect(page.locator('.workspace-switcher')).toHaveCount(0)
+  }
+  expect(state.calls.every(call => call.path === '/me/meta-connections' && call.method === 'GET' && JSON.stringify(call.query) === JSON.stringify([['limit', '50']]))).toBe(true)
+  // Existing workspace adapter stays separate, with no inventory request or merge.
+  state.calls.length = 0
+  await page.route('**/workspaces/ws-1/channel-registry', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [], total: 0, limit: 20, offset: 0 }) }))
+  expect(await page.evaluate(async () => (await import('/src/adapters/channels.js')).listChannelRegistry('ws-1'))).toEqual({ items: [], total: 0, limit: 20, offset: 0 })
+  expect(state.calls).toEqual([])
+  expect(await page.evaluate(() => Object.entries(localStorage).some(([key, value]) => !['postbridge_token', 'postbridge.locale', 'postbridge.theme'].includes(key) && /native-a|00012345678901234567890/.test(value)))).toBe(false)
+})
+
+test('Meta owner inventory keeps IDs on refresh, paginates and recovers after a failed next page', async ({ page }) => {
+  const state = await mockMetaOwner(page)
+  const cursor = 'opaque/owner+a&b='
+  state.result = metaInventory([metaRow('native-a')], cursor)
+  await page.goto('/settings/meta-connections')
+  await expect(metaCards(page)).toHaveCount(1)
+  state.inventory = ({ json }) => json({ message: 'private backend detail' }, 503)
+  await page.getByRole('button', { name: 'Show more', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('Connections could not be loaded')
+  await expect(metaCards(page)).toHaveCount(1)
+  state.inventory = ({ url, json }) => json(url.searchParams.get('cursor') === cursor ? metaInventory([metaRow('native-b')], 'page-3') : metaInventory([metaRow('native-a', { state: 'saved' })]))
+  await page.getByRole('button', { name: 'Show more', exact: true }).click()
+  await expect(metaCards(page)).toHaveCount(2)
+  expect(state.calls.at(-1).query).toEqual([['limit', '50'], ['cursor', cursor]])
+  state.inventory = ({ json }) => json(metaInventory([metaRow('wrong-cycle')], 'page-3'))
+  await page.getByRole('button', { name: 'Show more', exact: true }).click()
+  await expect(page.getByRole('alert')).toBeVisible()
+  await expect(metaCards(page)).toHaveCount(2)
+  await expect(page.locator('[data-meta-connection-id="wrong-cycle"]')).toHaveCount(0)
+  state.inventory = ({ json }) => json(metaInventory([metaRow('native-a', { state: 'saved' }), metaRow('native-b', { state: 'reconnect_required' })]))
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await expect(metaCards(page).locator('strong')).toHaveText(['Saved', 'Access confirmation needed'])
+  expect(await metaCards(page).evaluateAll(rows => rows.map(row => row.dataset.metaConnectionId))).toEqual(['native-a', 'native-b'])
+  await expect(page.getByRole('button', { name: 'Show more', exact: true })).toHaveCount(0)
+  expect(state.calls.every(call => call.method === 'GET')).toBe(true)
+})
+
+const invalidMetaReplies = [
+  ['404', 404, { message: 'foreign-secret-detail' }],
+  ['503', 503, { message: 'foreign-secret-detail' }],
+  ['HTML', 200, '<html>foreign-secret-detail</html>'],
+  ['old envelope', 200, { items: [] }],
+  ['new version', 200, { ...metaInventory(), schema_version: 2 }],
+  ['wrong scope', 200, { ...metaInventory(), scope: 'workspace_inventory' }],
+  ['owner field', 200, metaInventory([{ ...metaRow('foreign'), owner_id: 'foreign-secret-detail' }])],
+  ['workspace field', 200, metaInventory([{ ...metaRow('foreign'), workspace_id: 'foreign-secret-detail' }])],
+  ['credential field', 200, metaInventory([{ ...metaRow('foreign'), credentials_ref: 'foreign-secret-detail' }])],
+  ['usable true', 200, metaInventory([metaRow('foreign', { usable: true })])],
+]
+
+for (const [label, status, body] of invalidMetaReplies.slice(0, 4)) {
+  test(`Meta owner inventory first ${label} response is not an empty successful list`, async ({ page }) => {
+    const state = await mockMetaOwner(page)
+    state.inventory = ({ route }) => route.fulfill({ status, contentType: typeof body === 'string' ? 'text/html' : 'application/json', body: typeof body === 'string' ? body : JSON.stringify(body) })
+    await page.goto('/settings/meta-connections')
+    await expect(page.getByRole('alert')).toBeVisible()
+    await expect(page.getByText('Your account has no saved Meta connections.', { exact: true })).toHaveCount(0)
+    await expect(metaCards(page)).toHaveCount(0)
+    await expect(page.locator('body')).not.toContainText('foreign-secret-detail')
+    state.inventory = null
+    state.result = metaInventory()
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+    await expect(page.getByText('Your account has no saved Meta connections.', { exact: true })).toBeVisible()
+    await expect(page.getByRole('alert')).toHaveCount(0)
+  })
+}
+
+test('Meta owner inventory failures and foreign fields preserve only confirmed same-session rows', async ({ page }) => {
+  const state = await mockMetaOwner(page)
+  await page.goto('/settings/meta-connections')
+  await expect(metaCards(page)).toHaveCount(1)
+  for (const [, status, body] of invalidMetaReplies) {
+    state.inventory = ({ route }) => route.fulfill({ status, contentType: typeof body === 'string' ? 'text/html' : 'application/json', body: typeof body === 'string' ? body : JSON.stringify(body) })
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+    await expect(page.getByRole('alert')).toContainText('Showing the last confirmed data from this session.')
+    await expect(metaCards(page)).toHaveCount(1)
+    await expect(metaCards(page)).toHaveAttribute('data-meta-connection-id', 'native-a')
+    await expect(page.locator('body')).not.toContainText('foreign-secret-detail')
+    await expect(page.getByText('Your account has no saved Meta connections.', { exact: true })).toHaveCount(0)
+  }
+  state.inventory = null
+  state.result = metaInventory([metaRow('native-a', { state: 'saved' })])
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await expect(metaCards(page).locator('strong')).toHaveText('Saved')
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+for (const lateStatus of [200, 401]) {
+  test(`Meta owner inventory actor switch ignores a late ${lateStatus} result even without transport cancellation`, async ({ page }) => {
+    const state = await mockMetaOwner(page, { ignoreAbort: true })
+    await page.goto('/settings/meta-connections')
+    await expect(metaCards(page)).toHaveCount(1)
+    const old = deferredMeta(), nextUser = deferredMeta()
+    state.inventory = async ({ actor, json }) => {
+      if (actor === 'owner-a') { await old.promise; return json(metaInventory([metaRow('late-foreign-a')]), lateStatus) }
+      return json(metaInventory([metaRow('native-b')]))
+    }
+    state.me = async ({ actor, json }) => { if (actor === 'owner-b') await nextUser.promise; return json(state.users[actor]) }
+    const beforeRefresh = state.calls.filter(call => call.actor === 'owner-a').length
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+    await expect.poll(() => state.calls.filter(call => call.actor === 'owner-a').length).toBeGreaterThan(beforeRefresh)
+    await page.evaluate(async () => { (await import('/src/adapters/sessionToken.js')).setToken('owner-b') })
+    await expect(metaCards(page)).toHaveCount(0)
+    nextUser.resolve()
+    await expect(metaCards(page)).toHaveAttribute('data-meta-connection-id', 'native-b')
+    await page.evaluate(() => {
+      window.__metaObserved = []
+      new MutationObserver(() => window.__metaObserved.push(...[...document.querySelectorAll('[data-meta-connection-id]')].map(e => e.dataset.metaConnectionId))).observe(document.body, { subtree: true, childList: true })
+    })
+    const response = page.waitForResponse(response => response.url().includes('/me/meta-connections') && response.status() === lateStatus && response.request().headers().authorization === 'Bearer owner-a')
+    old.resolve()
+    await (await response).finished()
+    await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
+    // The response is consumed asynchronously; a same-session refresh is a bounded
+    // completion barrier and must still retain actor B's record and token.
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+    await expect(metaCards(page)).toHaveAttribute('data-meta-connection-id', 'native-b')
+    expect(await page.evaluate(() => ({ token: localStorage.getItem('postbridge_token'), observed: window.__metaObserved }))).toEqual({ token: 'owner-b', observed: expect.not.arrayContaining(['late-foreign-a', 'native-a']) })
+    await page.getByRole('button', { name: 'Log out', exact: true }).click()
+    await expect(page).toHaveURL(/\/login$/)
+    await expect(metaCards(page)).toHaveCount(0)
+    expect(await page.evaluate(() => localStorage.getItem('postbridge_token'))).toBeNull()
+    expect(state.errors).toEqual([])
+  })
+}
+
+test('Meta owner inventory a new token for the same actor starts without old confirmed rows', async ({ page }) => {
+  const state = await mockMetaOwner(page)
+  state.users['owner-a-new-token'] = metaOwner('owner-a')
+  await page.goto('/settings/meta-connections')
+  await expect(metaCards(page)).toHaveCount(1)
+  state.inventory = ({ json }) => json({ code: 'NOT_READY' }, 503)
+  await page.evaluate(async () => { (await import('/src/adapters/sessionToken.js')).setToken('owner-a-new-token') })
+  await expect(page.getByRole('alert')).toBeVisible()
+  await expect(metaCards(page)).toHaveCount(0)
+  await expect(page.getByRole('alert')).not.toContainText('Showing the last confirmed')
+})
+
+for (const status of [401, 403]) {
+  test(`Meta owner inventory clears confirmed rows on ${status}`, async ({ page }) => {
+    const state = await mockMetaOwner(page)
+    await page.goto('/settings/meta-connections')
+    await expect(metaCards(page)).toHaveCount(1)
+    state.inventory = ({ json }) => json({ message: 'foreign-secret-detail' }, status)
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+    await expect(metaCards(page)).toHaveCount(0)
+    if (status === 401) {
+      await expect(page).toHaveURL(/\/login$/)
+      expect(await page.evaluate(() => localStorage.getItem('postbridge_token'))).toBeNull()
+    } else {
+      await expect(page.getByRole('alert')).toContainText('Access to connections is unavailable')
+      expect(await page.evaluate(() => localStorage.getItem('postbridge_token'))).toBe('owner-a')
+    }
+    await expect(page.locator('body')).not.toContainText('foreign-secret-detail')
+  })
+}
+
+test('Meta owner inventory adapter enforces the frozen schema and selfhost performs no owner request', async ({ page }) => {
+  const state = await mockMetaOwner(page)
+  await page.goto('/settings/meta-connections')
+  await expect(metaCards(page)).toHaveCount(1)
+  const checks = await page.evaluate(async ({ valid }) => {
+    const { parseMetaOwnerInventory, listMyMetaConnections } = await import('/src/adapters/channels.js')
+    const rejected = value => { try { parseMetaOwnerInventory(value); return false } catch { return true } }
+    const row = valid.items[0]
+    const invalid = [null, [], {}, { ...valid, next_cursor: 1 }, { ...valid, next_cursor: 'x'.repeat(1025) }, { ...valid, extra: 'foreign' },
+      ...[{ id: '' }, { id: 42 }, { id: 'x'.repeat(65) }, { platform: 'vk' }, { title: {} }, { title: 'x'.repeat(256) }, { platform_channel_id: 1234 }, { platform_channel_id: 'x'.repeat(256) }, { usable: true }, { usable: 0 }, { state: 'ready' }].map(change => ({ ...valid, items: [{ ...row, ...change }] })),
+      { ...valid, items: Array.from({ length: 101 }, (_, i) => ({ ...row, id: `id-${i}` })) }, { ...valid, items: [row, row] }]
+    const results = invalid.map(rejected)
+    const unicode = parseMetaOwnerInventory({ ...valid, items: [{ ...row, title: '😀'.repeat(255) }] }).items[0].title
+    const previous = location.href
+    history.replaceState(null, '', '/web/settings/meta-connections')
+    let selfhostGuard = false
+    try { await listMyMetaConnections() } catch { selfhostGuard = true }
+    history.replaceState(null, '', previous)
+    return { results, unicode, selfhostGuard }
+  }, { valid: state.result })
+  expect(checks.results.every(Boolean)).toBe(true)
+  expect(checks.unicode).toBe('😀'.repeat(255))
+  expect(checks.selfhostGuard).toBe(true)
+  expect(state.calls.every(call => call.path === '/me/meta-connections' && !call.query?.some(([name]) => name === 'workspace' || name === 'owner_id'))).toBe(true)
+})

@@ -10,6 +10,7 @@ from postbridge.api.schemas import BlueskyCredentials
 from postbridge.config import Settings, get_settings
 from postbridge.domain.errors import ConfigurationError, ExternalApiError
 from postbridge.domain.models import PostPayload
+from postbridge.integrations.bluesky.richtext import link_facets
 from postbridge.integrations.bluesky.rule_post_text import BLUESKY_TEXT_LIMIT
 from postbridge.integrations.media_download import download_media, media_urls
 
@@ -64,6 +65,9 @@ class BlueskyPublisher:
                     "text": _trim_text(payload.text),
                     "createdAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                 }
+                facets = link_facets(str(record["text"]), source_text=(payload.text or "").strip() or " ")
+                if facets:
+                    record["facets"] = facets
                 images = self._upload_images(
                     client=client,
                     service_url=service_url,

@@ -21,6 +21,7 @@ const Home = lazy(() => import('./pages/Home'))
 const Connectors = lazy(() => import('./pages/Connectors'))
 const News = lazy(() => import('./pages/News'))
 const NewsDetail = lazy(() => import('./pages/NewsDetail'))
+const MetaConnections = lazy(() => import('./pages/MetaConnections'))
 const Landing = lazy(() => import('./pages/Landing'))
 const CaseLanding = lazy(() => import('./pages/CaseLanding'))
 const YandexMarket = lazy(() => import('./pages/YandexMarket'))
@@ -122,6 +123,7 @@ function HomeRoute() {
   if (loading) return <LoadingSkeleton />;
   if (!user && isSelfhostMode()) return <Navigate to="/setup" replace />;
   if (!user) return <Home />;
+  if (!isSelfhostMode() && !user.workspaces?.length) return <Navigate to="/settings/meta-connections" replace />;
   const params = new URLSearchParams(location.search);
   const explicitWorkspace = params.get('workspace');
   const hasExplicitWorkspace = user.workspaces?.some((workspace) => workspace.id === explicitWorkspace);
@@ -270,6 +272,9 @@ export default function App() {
               </GuestRoute>
             )
           } />
+          <Route path="/settings/meta-connections" element={isSelfhostMode() ? <Navigate to="/settings" replace /> : (
+            <ProtectedRoute guestPath="/login"><MetaConnections /></ProtectedRoute>
+          )} />
           <Route path="/settings" element={
             <ProtectedRoute>
               <SettingsRedirect />

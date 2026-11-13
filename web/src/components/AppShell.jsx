@@ -42,7 +42,9 @@ export default function AppShell({
   const workspaceMatch = location.pathname.match(/\/workspaces\/([^/]+)/)
   const workspaceFromPath = workspaceMatch?.[1] || ''
   const workspaceFromQuery = new URLSearchParams(location.search).get('workspace') || ''
-  const workspaceId = workspaceIdProp || workspaceFromPath || workspaceFromQuery
+  // Explicit null keeps account pages independent of URL workspace hints.
+  const accountContext = workspaceIdProp === null
+  const workspaceId = accountContext ? '' : workspaceIdProp || workspaceFromPath || workspaceFromQuery
   const contentHref = workspaceId ? `/workspaces/${workspaceId}/content` : '/'
   const channelsHref = workspaceId ? `/workspaces/${workspaceId}/channels` : '/'
   const agentsHref = workspaceId ? `/workspaces/${workspaceId}/agents/topic-scout` : '/'
@@ -54,7 +56,7 @@ export default function AppShell({
   const isContentActive = location.pathname.includes('/content')
   const isChannelsActive = location.pathname.includes('/channels')
   const isAgentsActive = location.pathname.includes('/agents/')
-  const isSettingsActive = location.pathname.includes('/settings')
+  const isSettingsActive = !accountContext && location.pathname.includes('/settings')
   const navClassName = (active) => `app-nav-link${active ? ' is-active' : ''}`
   const visibleImageJobs = useMemo(
     () =>
@@ -127,9 +129,12 @@ export default function AppShell({
                 <NavLink to={agentsHref} className={navClassName(isAgentsActive)}>
                   {t('app.nav.agents')}
                 </NavLink>
-                <NavLink to={settingsHref} className={navClassName(isSettingsActive)}>
+                <NavLink to={settingsHref} end className={navClassName(isSettingsActive)}>
                   {t('app.nav.settings')}
                 </NavLink>
+                {!isSelfhostMode() && user && <NavLink to="/settings/meta-connections" end className={({ isActive }) => navClassName(isActive)}>
+                  {t('metaConnections.title')}
+                </NavLink>}
                 <LanguageSelect compact />
               </HeaderNavigation>
             </div>

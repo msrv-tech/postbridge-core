@@ -1,4 +1,36 @@
-import { api } from './apiClient'
+import { api, isSelfhostMode } from './apiClient'
+
+const inventoryFields = ['id', 'platform', 'platform_channel_id', 'title', 'state', 'usable']
+const exactFields = (value, fields) => value && typeof value === 'object' && !Array.isArray(value)
+  && Object.keys(value).length === fields.length && fields.every(key => Object.hasOwn(value, key))
+const boundedString = (value, max, min = 0) => typeof value === 'string'
+  && value.length <= max * 2 && [...value].length >= min && [...value].length <= max
+const invalidInventory = () => Object.assign(new Error('Invalid owner inventory response'), { code: 'META_OWNER_INVENTORY_INVALID' })
+
+export function parseMetaOwnerInventory(value) {
+  if (!exactFields(value, ['schema_version', 'scope', 'items', 'next_cursor'])
+    || value.schema_version !== 1 || value.scope !== 'owner_inventory'
+    || !Array.isArray(value.items) || value.items.length > 100
+    || value.next_cursor !== null && !boundedString(value.next_cursor, 1024)) throw invalidInventory()
+  const ids = new Set()
+  for (const item of value.items) {
+    if (!exactFields(item, inventoryFields) || !boundedString(item.id, 64, 1)
+      || !['facebook', 'instagram'].includes(item.platform) || !boundedString(item.platform_channel_id, 255)
+      || item.title !== null && !boundedString(item.title, 255)
+      || !['pending', 'reconnect_required', 'saved'].includes(item.state) || item.usable !== false
+      || ids.has(item.id)) throw invalidInventory()
+    ids.add(item.id)
+  }
+  return value
+}
+
+export async function listMyMetaConnections({ cursor = null, signal } = {}) {
+  if (isSelfhostMode()) throw invalidInventory()
+  if (cursor !== null && !boundedString(cursor, 1024)) throw invalidInventory()
+  const query = new URLSearchParams({ limit: '50' })
+  if (cursor !== null) query.set('cursor', cursor)
+  return parseMetaOwnerInventory(await api(`/me/meta-connections?${query}`, { signal, cache: 'no-store' }))
+}
 
 export function listChannelRegistry(workspaceId) {
   return api(`/workspaces/${workspaceId}/channel-registry`)
