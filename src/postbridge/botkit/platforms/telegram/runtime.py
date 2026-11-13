@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import logging
 import traceback
 
@@ -32,6 +33,8 @@ logger = logging.getLogger(__name__)
 _bot: Bot | None = None
 _dp: Dispatcher | None = None
 _SUPPORTED_COMMAND_LANGUAGES: tuple[str | None, ...] = (None, "en", "ru")
+_WEBHOOK_STARTUP_TIMEOUT_SECONDS = 60.0
+_WEBHOOK_SHUTDOWN_TIMEOUT_SECONDS = 10.0
 
 
 def _get_bot() -> Bot:
@@ -127,6 +130,34 @@ async def _configure_bot_ui() -> None:
         )
 
 
+@asynccontextmanager
+async def _telegram_webhook_lifespan(app):
+    """Compose with Core lifespan; never discard Telegram pending updates."""
+    global _bot, _dp
+    settings = get_settings()
+    if settings.bot_mode != "webhook" or not settings.telegram_bot_token:
+        yield
+        return
+    bot = _get_bot()
+    try:
+        async with asyncio.timeout(_WEBHOOK_STARTUP_TIMEOUT_SECONDS):
+            await _configure_bot_ui()
+        yield
+    finally:
+        try:
+            try:
+                if _dp is not None:
+                    async with asyncio.timeout(_WEBHOOK_SHUTDOWN_TIMEOUT_SECONDS):
+                        await _dp.emit_shutdown(bot=bot)
+            finally:
+                async with asyncio.timeout(_WEBHOOK_SHUTDOWN_TIMEOUT_SECONDS):
+                    await bot.session.close()
+        finally:
+            if _bot is bot:
+                _bot = None
+            _dp = None
+
+
 def setup_telegram_bot_webhook(app) -> None:
     settings = get_settings()
     if settings.bot_mode != "webhook":
@@ -135,7 +166,9 @@ def setup_telegram_bot_webhook(app) -> None:
         logger.warning("TELEGRAM_BOT_TOKEN not set, Telegram bot webhook disabled")
         return
 
-    router = APIRouter()
+    if getattr(app, "_postbridge_telegram_webhook_installed", False):
+        return
+    router = APIRouter(lifespan=_telegram_webhook_lifespan)
 
     @router.post(settings.bot_webhook_path, include_in_schema=False)
     async def telegram_webhook(request: Request) -> Response:
@@ -152,10 +185,7 @@ def setup_telegram_bot_webhook(app) -> None:
             return Response(status_code=500)
 
     app.include_router(router)
-
-    @app.on_event("startup")
-    async def _bot_startup() -> None:
-        await _configure_bot_ui()
+    app._postbridge_telegram_webhook_installed = True
 
 
 def main() -> None:

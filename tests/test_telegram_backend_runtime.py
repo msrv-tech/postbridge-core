@@ -388,7 +388,7 @@ def test_setup_telegram_bot_webhook_handler_returns_403_200_500(monkeypatch: pyt
     monkeypatch.setattr(tg_runtime, "get_settings", lambda: settings)
 
     class _Router:
-        def __init__(self) -> None:
+        def __init__(self, **kwargs) -> None:
             self.routes: list[dict[str, Any]] = []
 
         def post(self, path: str, *, include_in_schema: bool = False):
@@ -401,27 +401,11 @@ def test_setup_telegram_bot_webhook_handler_returns_403_200_500(monkeypatch: pyt
     class _App:
         def __init__(self) -> None:
             self.routers: list[Any] = []
-            self.startups: list[Any] = []
 
         def include_router(self, router) -> None:
             self.routers.append(router)
 
-        def on_event(self, event: str):
-            def _decorator(fn):
-                if event == "startup":
-                    self.startups.append(fn)
-                return fn
-
-            return _decorator
-
     monkeypatch.setattr(tg_runtime, "APIRouter", _Router)
-
-    configured: list[bool] = []
-
-    async def _fake_configure() -> None:
-        configured.append(True)
-
-    monkeypatch.setattr(tg_runtime, "_configure_bot_ui", _fake_configure)
 
     sentinel_bot = object()
     sentinel_update = object()
@@ -477,9 +461,7 @@ def test_setup_telegram_bot_webhook_handler_returns_403_200_500(monkeypatch: pyt
     res = _run(handler(_Req(headers={"X-Telegram-Bot-Api-Secret-Token": "sec"}, body={"boom": True})))
     assert res.status_code == 500
 
-    assert app.startups
-    _run(app.startups[0]())
-    assert configured == [True]
+    # Actual ASGI lifespan startup/shutdown is covered by test_telegram_app_lifespan.
 
 
 def test_runtime_main_exits_in_webhook_mode(monkeypatch: pytest.MonkeyPatch) -> None:
