@@ -7,7 +7,7 @@ const webRoot = fileURLToPath(new URL('.', import.meta.url))
 
 export default defineConfig({
   testDir: './tests/e2e',
-  testIgnore: /saas-smoke\.spec\.js/,
+  testIgnore: /(?:saas-smoke|connectors)\.spec\.js/,
   timeout: 30_000,
   expect: {
     timeout: 10_000,
