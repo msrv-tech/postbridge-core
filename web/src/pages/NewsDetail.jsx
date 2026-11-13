@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import PublicLayout from '../components/PublicLayout'
+import { NewsBody, NewsMedia } from '../components/NewsContent'
+import { newsMedia, newsText } from '../adapters/newsPresentation'
 import { getNewsItem } from '../adapters/news'
 import { useI18n } from '../i18n'
 
@@ -43,8 +45,10 @@ export default function NewsDetail() {
       .finally(() => setLoading(false))
   }, [slug, t])
 
-  const body = item?.content_text || item?.summary || ''
-  const showLead = item?.summary && !sameOpening(item.summary, body)
+  const summary = newsText(item?.summary)
+  const body = newsText(item?.content_text) || summary
+  const media = newsMedia(item)
+  const showLead = summary && !sameOpening(summary, body)
 
   return (
     <PublicLayout compact>
@@ -68,13 +72,11 @@ export default function NewsDetail() {
 
           {!loading && !error && item && (
             <article>
-              <h1 className="news-detail-title">{item.title}</h1>
+              <h1 className="news-detail-title">{newsText(item.title)}</h1>
               <p className="muted news-card-date">{formatDate(item.published_at, locale, t)}</p>
-              {item.media_url && (
-                <img className="news-detail-media" src={item.media_url} alt="" />
-              )}
-              {showLead && <p className="news-detail-lead">{item.summary}</p>}
-              <div className="news-detail-body">{body}</div>
+              <NewsMedia media={media} imageClassName="news-detail-media" />
+              {showLead && <p className="news-detail-lead">{summary}</p>}
+              <div className="news-detail-body"><NewsBody html={item.content_html} text={body} /></div>
             </article>
           )}
         </div>

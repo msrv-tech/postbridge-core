@@ -463,6 +463,12 @@ select {
   margin-top: 0.75rem;
 }
 
+.news-attachment-link {
+  display: inline-block;
+  margin: 0.75rem 0;
+  overflow-wrap: anywhere;
+}
+
 .news-detail {
   max-width: 50rem;
 }

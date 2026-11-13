@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import PublicLayout from '../components/PublicLayout'
+import { NewsMedia, NewsReadMore } from '../components/NewsContent'
+import { newsMedia, newsText } from '../adapters/newsPresentation'
 import { listNews } from '../adapters/news'
 import { PUBLIC_CHANNELS } from '../publicChannels'
 import { useI18n } from '../i18n'
@@ -145,24 +147,19 @@ export default function News() {
           {!loading && !error && items.length > 0 && (
             <div className="news-list">
               {items.map((item, index) => {
-                const detailUrl = item.slug ? `/news/${item.slug}` : item.link
+                const media = newsMedia(item)
                 return (
                   <article
-                    className={`card news-card${item.media_url ? ' has-media' : ''}`}
+                    className={`card news-card${media?.kind === 'image' ? ' has-media' : ''}`}
                     key={newsKey(item, index)}
                   >
-                    {item.media_url && (
-                      <img className="news-card-media" src={item.media_url} alt="" loading="lazy" />
-                    )}
+                    {media?.kind === 'image' && <NewsMedia media={media} imageClassName="news-card-media" />}
                     <div className="news-card-body">
                       <p className="muted news-card-date">{formatDate(item.published_at, locale, t)}</p>
-                      <h3>{item.title}</h3>
-                      <p className="news-card-preview">{previewText(item.summary)}</p>
-                      {detailUrl && (
-                        <p className="news-card-link">
-                          <a href={detailUrl}>{t('news.readMore')}</a>
-                        </p>
-                      )}
+                      <h3>{newsText(item.title)}</h3>
+                      <p className="news-card-preview">{previewText(newsText(item.summary))}</p>
+                      {media && media.kind !== 'image' && <NewsMedia media={media} />}
+                      <NewsReadMore item={item} />
                     </div>
                   </article>
                 )

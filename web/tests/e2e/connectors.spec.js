@@ -74,7 +74,7 @@ async function verifyLogos(page, count) {
   const images = page.locator('.connector-card .connector-logo img')
   await expect(images).toHaveCount(count)
   await expect.poll(() => images.evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0))).toBe(true)
-  expect(await images.evaluateAll(images => images.every(image => image.alt === '' && getComputedStyle(image).objectFit === 'contain'))).toBe(true)
+  await expect.poll(() => images.evaluateAll((images, count) => images.length === count && images.every(image => image.alt === '' && getComputedStyle(image).objectFit === 'contain'), count)).toBe(true)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await expect(page.locator('main')).not.toContainText(/connectors\.[a-z]+\./)
 }

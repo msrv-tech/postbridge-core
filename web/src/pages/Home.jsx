@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import PublicLayout from '../components/PublicLayout'
 import HomeConnectors from '../components/HomeConnectors'
+import { NewsMedia, NewsReadMore } from '../components/NewsContent'
+import { newsMedia, newsText } from '../adapters/newsPresentation'
 import { listNews } from '../adapters/news'
 import { useI18n } from '../i18n'
 import { getPublicMarket } from '../branding'
@@ -508,24 +510,19 @@ export default function Home() {
             {!newsLoading && newsItems.length > 0 && (
               <div className="feature-grid">
                 {newsItems.map((item, index) => {
-                  const detailUrl = item.slug ? `/news/${item.slug}` : item.link
+                  const media = newsMedia(item)
                   return (
                     <article
-                      className={`card feature-card news-card news-card-compact${item.media_url ? ' has-media' : ''}`}
+                      className={`card feature-card news-card news-card-compact${media?.kind === 'image' ? ' has-media' : ''}`}
                       key={newsKey(item, index)}
                     >
-                      {item.media_url && (
-                        <img className="news-card-media" src={item.media_url} alt="" loading="lazy" />
-                      )}
+                      {media?.kind === 'image' && <NewsMedia media={media} imageClassName="news-card-media" />}
                       <div className="news-card-body">
                         <p className="muted news-card-date">{formatNewsDate(item.published_at, locale, t)}</p>
-                        <h3>{item.title}</h3>
-                        <p className="news-card-preview">{newsPreview(item.summary)}</p>
-                        {detailUrl && (
-                          <p className="news-card-link">
-                            <a href={detailUrl}>{t('news.readMore')}</a>
-                          </p>
-                        )}
+                        <h3>{newsText(item.title)}</h3>
+                        <p className="news-card-preview">{newsPreview(newsText(item.summary))}</p>
+                        {media && media.kind !== 'image' && <NewsMedia media={media} />}
+                        <NewsReadMore item={item} />
                       </div>
                     </article>
                   )

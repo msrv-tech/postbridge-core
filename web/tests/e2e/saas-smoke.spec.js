@@ -1940,3 +1940,134 @@ test.describe('connector catalog availability', () => {
     expect(calls[2]).toEqual({ path: '/workspaces/ws-1/external-apps/installations/legacy-install', method: 'DELETE' })
   })
 })
+
+// Public article consumers must remain safe even when an API response bypasses
+// the RSS sanitizer. HTTPS attachment fixtures do not contact real media stores.
+const articleImageUrl = 'https://media.postbridge.ru/core/media/00000000-0000-4000-8000-000000000001'
+const articleVideoUrl = 'https://media.postbridge.ru/core/media/00000000-0000-4000-8000-000000000002'
+const articleUnknownUrl = 'https://media.postbridge.ru/core/media/00000000-0000-4000-8000-000000000003?label=photo.jpg'
+const articleSignedUrl = 'https://postbridge.ru/core/media/00000000-0000-4000-8000-000000000004?key=a%2Fb&signature=x%2By'
+
+async function mockArticleApi(page, locale, items) {
+  const mediaRequests = [], navigations = [], errors = []
+  const { readFile } = await import('node:fs/promises')
+  const jpeg = await readFile(new URL('../../public/demo/coffee-cover.jpg', import.meta.url))
+  page.on('pageerror', error => errors.push(error.message))
+  page.on('request', request => { if (request.isNavigationRequest() && request.frame() === page.mainFrame()) navigations.push(request.url()) })
+  await page.addInitScript(locale => { localStorage.setItem('postbridge.locale', locale); window.__articleXss = 0 }, locale)
+  await page.route('**/*', async route => {
+    const request = route.request(), url = new URL(request.url())
+    if (request.isNavigationRequest()) return route.continue()
+    const json = body => route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+    if (url.hostname === 'media.postbridge.ru' || url.hostname.endsWith('.invalid')) {
+      mediaRequests.push({ url: request.url(), method: request.method() })
+      return request.url() === articleImageUrl
+        ? route.fulfill({ contentType: 'image/jpeg', body: jpeg })
+        : route.fulfill({ status: 404, body: '' })
+    }
+    if (url.pathname === '/api/app/runtime-config') return json({ app_mode: 'saas', i18n: { default_locale: locale } })
+    if (url.pathname === '/api/connectors') return json({ schema_version: 1, deployment: 'io', items: [] })
+    if (url.pathname === '/api/news') return json({ items, total: items.length, source_url: null })
+    if (url.pathname.startsWith('/api/news/')) return json({ item: items.find(item => item.slug === decodeURIComponent(url.pathname.split('/').pop())), source_url: null })
+    return route.continue()
+  })
+  return { mediaRequests, navigations, errors }
+}
+
+for (const locale of ['ru', 'en']) {
+  test(`news articles ${locale}: SPA links, declared JPEG and attachment fallbacks`, async ({ page }) => {
+    const base = { summary: 'Article summary', published_at: '2026-11-13T00:00:00Z', content_text: 'Legacy plain text <b>stays text</b>' }
+    const items = [
+      { ...base, slug: 'declared-image', title: 'Declared JPEG', media_url: articleImageUrl, media_type: 'image/jpeg', content_html: `Rich &lt;text&gt; <a href="${articleSignedUrl.replaceAll('&', '&amp;')}" rel="noopener noreferrer">Signed attachment</a><br />Second line` },
+      { ...base, slug: 'declared-video', title: 'Declared MP4', media_url: articleVideoUrl, media_type: 'video/mp4' },
+      { ...base, slug: 'unknown-media', title: 'Unknown MIME', media_url: articleUnknownUrl, media_type: 'application/octet-stream' },
+      { ...base, slug: 'legacy-article', title: 'Legacy article', media_url: articleImageUrl + '?legacy=1' },
+    ]
+    const observed = await mockArticleApi(page, locale, items)
+    const readMore = locale === 'ru' ? 'Читать полностью' : 'Read more'
+    const openVideo = locale === 'ru' ? 'Открыть видео' : 'Open video'
+    const openFile = locale === 'ru' ? 'Открыть файл' : 'Open file'
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/home')
+    await expect(page.locator('.news-card')).toHaveCount(4)
+    await page.locator('.news-card-media').scrollIntoViewIfNeeded()
+    await expect.poll(() => page.locator('.news-card-media').evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true)
+    await expect(page.locator('.news-card-media')).toHaveCount(1)
+    await expect(page.locator('.news-card').getByRole('link', { name: openVideo })).toHaveCount(1)
+    await expect(page.locator('.news-card').getByRole('link', { name: openFile })).toHaveCount(2)
+    await page.evaluate(() => { window.__articleNavigationMarker = 'same document' })
+    await page.getByRole('link', { name: locale === 'ru' ? 'Все новости' : 'All news', exact: true }).click()
+    await expect(page).toHaveURL(/\/news$/)
+    await expect(page.locator('.news-card')).toHaveCount(4)
+    await expect(page.locator('.news-card-media')).toHaveCount(1)
+    await page.locator('.news-card').filter({ hasText: 'Declared JPEG' }).getByRole('link', { name: readMore }).click()
+    await expect(page).toHaveURL(/\/news\/declared-image$/)
+    await expect(page.locator('.news-detail-body')).toContainText('Rich <text>')
+    await expect(page.locator('.news-detail-body a')).toHaveAttribute('href', articleSignedUrl)
+    await expect(page.locator('.news-detail-body a')).toHaveAttribute('rel', 'noopener noreferrer')
+    await expect(page.locator('.news-detail-body br')).toHaveCount(1)
+    await expect(page.locator('.news-detail-media')).toHaveAttribute('src', articleImageUrl)
+    for (const [slug, title, label, url] of [
+      ['declared-video', 'Declared MP4', openVideo, articleVideoUrl],
+      ['unknown-media', 'Unknown MIME', openFile, articleUnknownUrl],
+      ['legacy-article', 'Legacy article', openFile, articleImageUrl + '?legacy=1'],
+    ]) {
+      await page.locator('.news-detail > a').click()
+      await page.locator('.news-card').filter({ hasText: title }).getByRole('link', { name: readMore }).click()
+      await expect(page).toHaveURL(new RegExp(`/news/${slug}$`))
+      await expect(page.locator('.news-detail article').getByRole('link', { name: label })).toHaveAttribute('href', url)
+      await expect(page.locator('.news-detail-media, .news-detail video')).toHaveCount(0)
+      await expect(page.locator('.news-detail-body')).toHaveText(base.content_text)
+      await expect(page.locator('.news-detail-body b')).toHaveCount(0)
+    }
+    expect(await page.evaluate(() => window.__articleNavigationMarker)).toBe('same document')
+    expect(observed.navigations).toHaveLength(1)
+    expect(observed.mediaRequests.every(request => request.url === articleImageUrl && request.method === 'GET')).toBe(true)
+    expect(observed.errors).toEqual([])
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  })
+
+  test(`news articles ${locale}: hostile and malformed API never creates active HTML or unsafe URLs`, async ({ page }) => {
+    const fallback = 'Plain fallback <img onerror="window.__articleXss=1">'
+    const items = [
+      { slug: 'hostile-markup', title: 'Hostile', content_text: fallback, content_html: '<img src="https://attacker.invalid/pixel" onerror="window.__articleXss=1"><script>window.__articleXss=1</script>', media_url: 'javascript:window.__articleXss=1', media_type: 'image/jpeg' },
+      { slug: 'unsafe-anchor', title: 'Unsafe link', content_text: fallback, content_html: '<a href="https://user:secret@example.test/file" rel="noopener noreferrer">Rejected credentials</a>', media_url: '//attacker.invalid/file', media_type: 'image/png' },
+      { slug: 'bad-fields', title: 'Malformed fields', content_text: fallback, content_html: { html: '<svg onload="window.__articleXss=1">' }, media_url: { url: articleImageUrl }, media_type: ['image/jpeg'] },
+      { slug: 'escaped-markup', title: 'Escaped markup', content_text: fallback, content_html: '&lt;img src=&quot;https://attacker.invalid/pixel&quot; onerror=&quot;window.__articleXss=1&quot;&gt;', media_url: 'https://user@example.test/file', media_type: 'image/jpeg' },
+    ]
+    const observed = await mockArticleApi(page, locale, items)
+    for (const item of items) {
+      await page.goto(`/news/${item.slug}`)
+      await expect(page.locator('.news-detail-title')).toHaveText(item.title)
+      await expect(page.locator('.news-detail-body a, .news-detail-body img, .news-detail-body script, .news-detail-body iframe, .news-detail-body svg, .news-detail-body style, .news-detail-body object')).toHaveCount(0)
+      await expect(page.locator('.news-detail-media, .news-attachment-link')).toHaveCount(0)
+      if (['hostile-markup', 'bad-fields'].includes(item.slug)) await expect(page.locator('.news-detail-body')).toHaveText(fallback)
+      expect(await page.evaluate(() => window.__articleXss)).toBe(0)
+    }
+    expect(observed.mediaRequests).toEqual([])
+    expect(observed.errors).toEqual([])
+  })
+}
+
+test('news articles reject URL tricks and use only declared allowlisted image MIME', async ({ page }) => {
+  await mockArticleApi(page, 'en', [])
+  await page.goto('/home')
+  const result = await page.evaluate(async () => {
+    const { safeNewsHttpsUrl, newsMedia, newsRichParts, newsDestination } = await import('/src/adapters/newsPresentation.js')
+    const unsafe = ['javascript:alert(1)', 'java\nscript:alert(1)', 'data:image/svg+xml,evil', '//example.test/file', '/relative/file', 'example.test/file', 'https://user:pass@example.test/file', 'https://@example.test/file', 'https://example.test/\nfile', 'https://example.test\\@evil.test/', 'https://example.test:bad/file', 'https://example.test/"x', {}, null]
+    return {
+      unsafe: unsafe.map(safeNewsHttpsUrl),
+      encoded: safeNewsHttpsUrl('https://example.test/core/media/uuid?key=a%2Fb&sig=x%2By'),
+      media: ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif', 'video/mp4', 'application/octet-stream', 'image/svg+xml', 'IMAGE/JPEG', 'image/jpeg; charset=utf-8', null, {}].map(media_type => newsMedia({ media_url: 'https://example.test/extensionless?name=image.jpg', media_type })?.kind),
+      malformed: ['<svg><a href="https://example.test">x</a></svg>', '<a href="https://example.test" onclick="evil()">x</a>', '<br onload="evil()">', '<a href="https://example.test" rel="noopener noreferrer">unclosed', ['array'], {}].map(newsRichParts),
+      unsafeLink: newsRichParts('<a href="java&#115;cript:alert(1)" rel="noopener noreferrer">plain label</a>'),
+      destinations: ['javascript:alert(1)', '//example.test', '/relative', 'https://user:pass@example.test'].map(link => newsDestination({ link })),
+    }
+  })
+  expect(result.unsafe.every(value => value === null)).toBe(true)
+  expect(result.encoded).toBe('https://example.test/core/media/uuid?key=a%2Fb&sig=x%2By')
+  expect(result.media).toEqual(['image', 'image', 'image', 'image', 'image', 'video', 'file', 'file', 'file', 'file', 'file', 'file'])
+  expect(result.malformed.every(value => value === null)).toBe(true)
+  expect(result.unsafeLink).toEqual([{ kind: 'text', text: 'plain label' }])
+  expect(result.destinations).toEqual([null, null, null, null])
+})
