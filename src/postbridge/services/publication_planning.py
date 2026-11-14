@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from postbridge.integrations.platform_policy import assert_platform_enabled
 
 from postbridge.models.domain import (
     ChannelOrm,
@@ -71,6 +72,8 @@ def create_content_with_plan_and_targets(
     by_id = {c.id: c for c in channels}
     ordered = [by_id[i] for i in ids]
 
+    for channel in ordered:
+        assert_platform_enabled(channel.platform)
     content_id = str(uuid4())
     plan_id = str(uuid4())
     preview = _preview_body(title, body_markdown)
@@ -186,6 +189,8 @@ def create_plan_and_targets_for_content_item(
     by_id = {c.id: c for c in channels}
     ordered = [by_id[i] for i in ids]
 
+    for channel in ordered:
+        assert_platform_enabled(channel.platform)
     plan_id = str(uuid4())
     preview = _preview_body(content_item.title, content_item.body_markdown)
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from postbridge.integrations.platform_policy import is_platform_enabled
+
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -233,7 +235,7 @@ def try_publish_scheduled_postbridge_item(
     )
     for b in bridges:
         tgt = session.get(ChannelOrm, b.target_channel_id)
-        if tgt is None or tgt.tenant_id != row.tenant_id:
+        if tgt is None or tgt.tenant_id != row.tenant_id or not is_platform_enabled(tgt.platform):
             continue
         adaptation = adapt_post_for_bridge(
             session,

@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from postbridge.domain.errors import PostbridgeError
+from postbridge.models.domain import ChannelOrm
+from postbridge.integrations.platform_policy import assert_channel_enabled, disabled_platforms
 from postbridge.services.publication_planning import create_content_with_plan_and_targets
 from postbridge.storage.batch_import_run_store import BatchImportRunStore
 
@@ -39,6 +41,9 @@ def ingest_live_sync_publication(
     claim_publish → create_content_with_plan_and_targets → commit.
     При ошибке до commit — release_claim и rollback.
     """
+    if disabled_platforms():
+        channel = session.get(ChannelOrm, target_core_channel_id)
+        assert_channel_enabled(channel, tenant_id=tenant_id, requested_platform=target_platform)
     post_data = post
     from postbridge.services.video_publication import reject_unapproved_route
     reject_unapproved_route(session, tenant_id, content_id=post_data.get("source_post_id"),

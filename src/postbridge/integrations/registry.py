@@ -9,6 +9,7 @@ from postbridge.integrations.base import ChannelAdapter, SourceFetcher, TargetPu
 from postbridge.integrations.channel_credentials import load_channel_credential_row
 from postbridge.integrations.platform_ai import PlatformAiAdapter
 from postbridge.integrations.platform_capabilities import PlatformCapabilities
+from postbridge.integrations.platform_policy import assert_platform_enabled, disabled_platforms
 from postbridge.integrations.registry_bundle import (
     CredentialDecoder,
     PlatformBundle,
@@ -56,12 +57,14 @@ def get_platform_capabilities(platform: str) -> PlatformCapabilities | None:
 
 def platform_capabilities_public_map() -> dict[str, dict[str, Any]]:
     """Снимок capabilities по всем платформам из реестра (для BFF / internal API)."""
+    disabled = disabled_platforms()
     return {
         platform: {
             **bundle.capabilities.to_dict(),
             "rule_post_text_limit": RULE_POST_TEXT_LIMITS.get(platform),
         }
         for platform, bundle in PLATFORM_BUNDLES.items()
+        if platform not in disabled
     }
 
 
@@ -83,6 +86,7 @@ def decode_fetch_credentials_for_platform(platform: str, row: Any) -> Any:
 
 
 def get_ai_adapter(platform: str) -> PlatformAiAdapter:
+    assert_platform_enabled(platform)
     b = PLATFORM_BUNDLES.get(platform)
     if b is None:
         return _DEFAULT_AI
@@ -91,6 +95,7 @@ def get_ai_adapter(platform: str) -> PlatformAiAdapter:
 
 def adapt_post_dict_for_platform(post: dict[str, Any], platform: str) -> str:
     """Детерминированная сборка текста под платформу (без LLM)."""
+    assert_platform_enabled(platform)
     if not isinstance(post, dict):
         return ""
     b = PLATFORM_BUNDLES.get(platform)
@@ -135,6 +140,7 @@ class RegistryChannelAdapter:
         *,
         tenant_id: str | None = None,
     ) -> list[PostPayload]:
+        assert_platform_enabled(self._platform)
         if self._fetcher is None:
             raise ValueError(f"fetch is not available for platform={self._platform}")
         return await self._fetcher.fetch_posts(
@@ -147,6 +153,7 @@ class RegistryChannelAdapter:
         post: PostPayload,
         credentials: Any,
     ) -> str | None:
+        assert_platform_enabled(self._platform)
         if self._publisher is None:
             raise ValueError(f"publish is not available for platform={self._platform}")
         return self._publisher.publish_post(target_channel, post, credentials)
@@ -154,6 +161,7 @@ class RegistryChannelAdapter:
 
 def get_adapter(platform: str) -> ChannelAdapter:
     """Возвращает фасад ChannelAdapter для platform (или ValueError)."""
+    assert_platform_enabled(platform)
     b = PLATFORM_BUNDLES.get(platform)
     fc = FETCHERS.get(platform)
     pc = PUBLISHERS.get(platform)
@@ -182,6 +190,7 @@ def get_adapter(platform: str) -> ChannelAdapter:
 
 def get_fetcher(platform: str) -> SourceFetcher:
     """Возвращает экземпляр fetcher для платформы."""
+    assert_platform_enabled(platform)
     cls = FETCHERS.get(platform)
     if cls is None:
         raise ValueError(f"Unknown source platform: {platform}. Available: {list(FETCHERS)}")
@@ -190,6 +199,7 @@ def get_fetcher(platform: str) -> SourceFetcher:
 
 def get_publisher(platform: str) -> TargetPublisher:
     """Возвращает экземпляр publisher для платформы."""
+    assert_platform_enabled(platform)
     cls = PUBLISHERS.get(platform)
     if cls is None:
         raise ValueError(f"Unknown target platform: {platform}. Available: {list(PUBLISHERS)}")

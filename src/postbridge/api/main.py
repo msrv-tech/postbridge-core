@@ -176,6 +176,7 @@ def serve_selfhost_rss_feed(feed_id: str, request: Request) -> Response:
 
 
 _ERROR_STATUS_BY_CODE = {
+    "PLATFORM_DISABLED": 422,
     "VALIDATION_MIGRATION_RUN_NOT_FOUND": 404,
     "VALIDATION_CONTENT_ITEM_NOT_FOUND": 404,
     "MEDIA_STORAGE_NOT_CONFIGURED": 503,

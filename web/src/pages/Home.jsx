@@ -3,11 +3,13 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import PublicLayout from '../components/PublicLayout'
 import HomeConnectors from '../components/HomeConnectors'
+import HomePlatforms from '../components/HomePlatforms'
 import { NewsMedia, NewsReadMore } from '../components/NewsContent'
 import { newsMedia, newsText } from '../adapters/newsPresentation'
 import { listNews } from '../adapters/news'
 import { useI18n } from '../i18n'
 import { getPublicMarket } from '../branding'
+import { isSelfhostMode } from '../adapters/runtime'
 
 const demoBase = `${import.meta.env.BASE_URL}demo/`
 
@@ -53,7 +55,7 @@ function getAiPillars(t) {
 ]
 }
 
-function getSupportedPlatforms(t, region) {
+function getSelfhostPlatforms(t, region) {
   if (region === 'io') {
     return [
       {
@@ -245,7 +247,8 @@ export default function Home() {
 
   const steps = getSteps(t, landingRegion)
   const aiPillars = getAiPillars(t)
-  const supportedPlatforms = getSupportedPlatforms(t, landingRegion)
+  const selfhost = isSelfhostMode()
+  const supportedPlatforms = selfhost ? getSelfhostPlatforms(t, landingRegion) : null
   const features = getFeatures(t, landingRegion)
   const trustItems = getTrustItems(t)
   const agentBridgeExamples = getAgentBridgeExamples(t, landingRegion)
@@ -377,16 +380,16 @@ export default function Home() {
         <div className="container">
           <div className="section-heading">
             <span className="eyebrow">{t('home.platforms.eyebrow')}</span>
-            <h2>{t(getRegionalKey(landingRegion, 'home.platforms.title'))}</h2>
+            <h2>{t(selfhost ? getRegionalKey(landingRegion, 'home.platforms.title') : 'home.platforms.catalogTitle')}</h2>
           </div>
-          <div className="platform-showcase" aria-label={t('home.platforms.aria')}>
+          {selfhost ? <div className="platform-showcase" aria-label={t('home.platforms.aria')}>
             {supportedPlatforms.map((platform) => (
               <article className={`platform-showcase-item platform-showcase-item-${platform.key}`} key={platform.key}>
                 <PlatformLogo platform={platform.key} />
                 <h3>{platform.name}</h3>
               </article>
             ))}
-          </div>
+          </div> : <HomePlatforms />}
         </div>
       </section>
 

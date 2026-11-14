@@ -225,6 +225,9 @@ def process_publication_target_task(
         try:
             ret = executor.run(target_id, correlation_id=correlation_id)
         except PostbridgeError as exc:
+            if exc.code == "PLATFORM_DISABLED":
+                # A policy refusal cannot rewrite an earlier receipt or fence.
+                raise
             settings = get_settings()
             retry_correlation_id = correlation_id or "unknown"
             scheduled = schedule_publication_target_retry(

@@ -301,3 +301,191 @@ test('runtime recognizes the self-host path without switching the SaaS dev serve
     return { hosted, local }
   })).toEqual({ hosted: false, local: true })
 })
+
+// Synthetic product descriptors follow the reviewed public-catalog wire. Expected
+// regional sets below are independent of the frontend projection implementation.
+const homeProviders = [
+  ['telegram', 'Telegram', 'direct_publication'], ['facebook', 'Facebook', 'direct_publication'],
+  ['instagram', 'Instagram', 'direct_publication'], ['youtube', 'YouTube', 'video_publication'],
+  ['tiktok', 'TikTok', 'video_publication'], ['x', 'X', 'direct_publication'],
+  ['linkedin', 'LinkedIn', 'direct_publication'], ['bluesky', 'Bluesky', 'direct_publication'],
+  ['mastodon', 'Mastodon', 'direct_publication'], ['max', 'MAX', 'direct_publication'],
+  ['vk', 'VK', 'direct_publication'], ['zen', 'Dzen', 'rss_import_or_feed'],
+  ['rss', 'RSS', 'rss_import_or_feed'], ['postbridge', 'Postbridge', 'internal_source'],
+]
+const homeExpectedIds = {
+  ru: ['telegram', 'youtube', 'tiktok', 'linkedin', 'mastodon', 'max', 'vk', 'zen', 'rss', 'postbridge'],
+  io: ['telegram', 'facebook', 'instagram', 'youtube', 'tiktok', 'x', 'linkedin', 'bluesky', 'mastodon', 'vk', 'zen', 'rss', 'postbridge'],
+}
+function homeCatalog(market) {
+  return { items: homeProviders.filter(([id]) => homeExpectedIds[market].includes(id)).map(([id, display_name, presentation_role]) => ({
+    id, display_name, presentation_role, status: 'available', detail_path: market === 'io' ? `/platforms/${id}` : null,
+  })) }
+}
+
+
+async function mockHomeCatalog(page, { market = 'io', locale = 'en', authenticated = false, catalog = homeCatalog(market), providerStatus = 200, providerBody, waitForCatalog } = {}) {
+  const calls = await mockApi(page, { market, locale, authenticated })
+  const baseURL = test.info().project.use.baseURL
+  // Keep the actual market hostname in the browser while serving only local
+  // test assets; no DNS or production/provider requests are involved.
+  await page.route(/^http:\/\/postbridge\.(?:ru|io)\//, async route => {
+    const url = new URL(route.request().url())
+    if (/^\/(?:api\/|workspaces\/|auth\/|me$|assistant\/)/.test(url.pathname) && !route.request().isNavigationRequest()) return route.fallback()
+    const response = await route.fetch({ url: `${baseURL}${url.pathname}${url.search}` })
+    return route.fulfill({ response })
+  })
+  const providerRequests = []
+  await page.route('**/api/providers', async route => {
+    providerRequests.push({ method: route.request().method(), headers: await route.request().allHeaders() })
+    if (waitForCatalog) await waitForCatalog
+    return route.fulfill({ status: providerStatus, contentType: providerBody === undefined ? 'application/json' : 'text/html', body: providerBody ?? JSON.stringify(catalog) })
+  })
+  return { calls, providerRequests }
+}
+
+async function visibleHomeIds(page) {
+  return page.locator('#platforms [data-provider-id]').evaluateAll(cards => cards.map(card => card.dataset.providerId))
+}
+
+for (const [market, locale, width] of [['ru', 'ru', 320], ['ru', 'en', 1280], ['io', 'en', 390], ['io', 'ru', 1280]]) {
+  test(`Home canonical catalog ${market} ${locale} ${width}: complete roles, links and visible last row`, async ({ page }, testInfo) => {
+    const { providerRequests } = await mockHomeCatalog(page, { market, locale })
+    const errors = []; page.on('pageerror', error => errors.push(error.message))
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(`http://postbridge.${market}/home#platforms`)
+    await expect.poll(() => visibleHomeIds(page)).toEqual(homeExpectedIds[market])
+    const section = page.locator('#platforms')
+    const labels = locale === 'ru' ? ['Публикации', 'Видеопубликации', 'RSS и импорт', 'Внутренний источник'] : ['Publishing', 'Video publishing', 'RSS and import', 'Internal source']
+    for (const [id, label] of [['telegram', labels[0]], ['youtube', labels[1]], ['tiktok', labels[1]], ['zen', labels[2]], ['rss', labels[2]], ['postbridge', labels[3]]]) {
+      await expect(section.locator(`[data-provider-id="${id}"] .platform-showcase-role`)).toHaveText(label)
+    }
+    await expect(section.locator('[data-provider-id="zen"] h3')).toHaveText('Dzen')
+    const links = section.getByRole('link')
+    await expect(links).toHaveCount(market === 'io' ? 13 : 0)
+    for (const id of market === 'io' ? homeExpectedIds.io : []) {
+      await expect(section.locator(`[data-provider-id="${id}"] a`)).toHaveAttribute('href', `/platforms/${id}`)
+    }
+    if (market === 'io') {
+      await links.first().focus(); await expect(links.first()).toBeFocused()
+      await page.keyboard.press('Tab'); await expect(links.nth(1)).toBeFocused()
+    }
+    const last = section.locator('[data-provider-id="postbridge"]')
+    await last.scrollIntoViewIfNeeded(); await expect(last).toBeInViewport()
+    expect(await section.locator('[data-provider-id]').evaluateAll(cards => cards.every(card => {
+      const r = card.getBoundingClientRect()
+      return r.left >= 0 && r.right <= innerWidth && card.scrollWidth <= card.clientWidth
+    }))).toBe(true)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await expect.poll(() => section.locator('.platform-logo img').evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0 && image.alt === ''))).toBe(true)
+    expect(providerRequests.every(request => request.method === 'GET' && !request.headers.authorization && !request.headers.cookie)).toBe(true)
+    expect(errors).toEqual([])
+    if (process.env.POSTBRIDGE_HOME_SCREENSHOTS) {
+      const path = `${process.env.POSTBRIDGE_HOME_SCREENSHOTS}/home-${market}-${locale}-${width}.png`
+      await section.screenshot({ path }); await testInfo.attach('home-platform-catalog', { path, contentType: 'image/png' })
+    }
+  })
+}
+
+for (const authenticated of [false, true]) test(`Home canonical catalog receiver independence ${authenticated ? 'member' : 'guest'} and locale invariance`, async ({ page }) => {
+  const { calls } = await mockHomeCatalog(page, { authenticated })
+  await page.goto('http://postbridge.io/home')
+  await expect.poll(() => visibleHomeIds(page)).toEqual(homeExpectedIds.io)
+  // No receiver, credential, or bridge request participates in membership.
+  expect(calls.filter(call => /\/(?:channels|bridges|rules)(?:\/|$)/.test(call.path))).toEqual([])
+  const language = page.locator('.public-header .language-select select')
+  await language.selectOption('ru')
+  await expect(page.locator('#platforms [data-provider-id="postbridge"] .platform-showcase-role')).toHaveText('Внутренний источник')
+  expect(await visibleHomeIds(page)).toEqual(homeExpectedIds.io)
+})
+
+test('Home canonical catalog loading never exposes the legacy shortlist', async ({ page }) => {
+  let release
+  const waiting = new Promise(resolve => { release = resolve })
+  await mockHomeCatalog(page, { waitForCatalog: waiting })
+  await page.goto('http://postbridge.io/home')
+  await expect(page.locator('#platforms [role="status"]')).toContainText('Loading')
+  await expect(page.locator('#platforms .platform-showcase-item')).toHaveCount(0)
+  release()
+  await expect.poll(() => visibleHomeIds(page)).toEqual(homeExpectedIds.io)
+})
+
+for (const [name, failure] of [
+  ['HTTP failure', { providerStatus: 503 }],
+  ['HTML instead of JSON', { providerBody: '<!doctype html><title>Unavailable</title>' }],
+  ['missing catalog', { catalog: {} }],
+  ['malformed descriptor', { catalog: { items: [{ id: 'telegram' }] } }],
+]) test(`Home canonical catalog ${name} has no legacy fallback`, async ({ page }) => {
+  await mockHomeCatalog(page, { ...failure })
+  await page.goto('http://postbridge.io/home')
+  await expect(page.locator('#platforms [role="status"]')).toHaveText('The platform list is temporarily unavailable.')
+  await expect(page.locator('#platforms .platform-showcase-item')).toHaveCount(0)
+})
+
+test('Home canonical catalog old wire stays complete with neutral labels and no guessed links', async ({ page }) => {
+  const catalog = homeCatalog('io')
+  catalog.items.forEach(item => { delete item.presentation_role; delete item.detail_path })
+  await mockHomeCatalog(page, { catalog })
+  await page.goto('http://postbridge.io/home')
+  await expect.poll(() => visibleHomeIds(page)).toEqual(homeExpectedIds.io)
+  await expect(page.locator('#platforms a')).toHaveCount(0)
+  await expect(page.locator('#platforms .platform-showcase-role').first()).toHaveText('Supported platform')
+})
+
+test('Home canonical catalog normalizes aliases, keeps new IDs and rejects unsafe detail paths', async ({ page }) => {
+  const catalog = { items: [
+    { id: ' twitter ', display_name: 'X', presentation_role: 'direct_publication', detail_path: '/platforms/x' },
+    { id: 'x', display_name: 'Duplicate X', presentation_role: 'direct_publication' },
+    { id: 'future-provider', display_name: 'Future provider', presentation_role: '__proto__', detail_path: 'https://example.test/platforms/future-provider' },
+    { id: 'off-provider', display_name: 'Disabled provider', status: 'disabled' },
+    { id: 'private-provider', display_name: 'Private route', detail_path: '/workspaces/private' },
+  ] }
+  await mockHomeCatalog(page, { catalog })
+  await page.goto('http://postbridge.io/home')
+  await expect.poll(() => visibleHomeIds(page)).toEqual(['x', 'future-provider', 'private-provider'])
+  await expect(page.locator('#platforms a')).toHaveCount(1)
+  await expect(page.locator('#platforms [data-provider-id="future-provider"] .platform-showcase-role')).toHaveText('Supported platform')
+  await expect(page.locator('#platforms [data-provider-id="future-provider"] .local-brand-fallback')).toHaveCount(1)
+})
+
+test('Home canonical catalog information link performs native document navigation', async ({ page }) => {
+  await mockHomeCatalog(page)
+  let documentNavigation = false
+  await page.route('http://postbridge.io/platforms/youtube', route => {
+    documentNavigation = route.request().isNavigationRequest()
+    return route.fulfill({ contentType: 'text/html', body: '<h1>Local SSR detail fixture</h1>' })
+  })
+  await page.goto('http://postbridge.io/home')
+  await page.locator('#platforms [data-provider-id="youtube"] a').click()
+  await expect(page.getByRole('heading', { name: 'Local SSR detail fixture' })).toBeVisible()
+  expect(documentNavigation).toBe(true)
+})
+
+test('Home canonical catalog public 401 keeps the member session and sends no credentials', async ({ page, context }) => {
+  await context.addCookies([{ name: 'private_session', value: 'synthetic-private-cookie', url: 'http://postbridge.io' }])
+  const { providerRequests } = await mockHomeCatalog(page, { authenticated: true, providerStatus: 401 })
+  await page.goto('http://postbridge.io/home')
+  await expect(page.locator('#platforms [role="status"]')).toHaveText('The platform list is temporarily unavailable.')
+  expect(await page.evaluate(() => localStorage.getItem('postbridge_token'))).toBe('synthetic-review-session')
+  expect(providerRequests.length).toBeGreaterThan(0)
+  expect(providerRequests.every(request => !request.headers.authorization && !request.headers.cookie)).toBe(true)
+})
+
+if (process.env.POSTBRIDGE_HOME_MODE) test('Home canonical catalog explicit selfhost keeps the existing showcase without provider requests', async ({ page }) => {
+  const { providerRequests } = await mockHomeCatalog(page)
+  await page.goto(process.env.POSTBRIDGE_HOME_MODE === 'flag-at-root' ? '/home' : '/web/home')
+  await expect(page.locator('#platforms .platform-showcase-item h3')).toHaveText(['Telegram', 'LinkedIn', 'X', 'Bluesky', 'Mastodon', 'RSS'])
+  await expect(page.locator('#platforms [data-provider-id]')).toHaveCount(0)
+  await expect(page.locator('#platforms [role="status"]')).toHaveCount(0)
+  await expect(page.locator('#platforms .platform-showcase-role')).toHaveCount(0)
+  expect(providerRequests).toEqual([])
+})
+
+test('Home canonical catalog build-disabled policy intersects a stale full API catalog', async ({ page }) => {
+  const market = process.env.POSTBRIDGE_HOME_PROFILE || 'io'
+  const catalog = { items: homeProviders.map(([id, display_name, presentation_role]) => ({ id, display_name, presentation_role, detail_path: market === 'io' ? `/platforms/${id}` : null })) }
+  await mockHomeCatalog(page, { market, catalog })
+  await page.goto(`http://postbridge.${market}/home`)
+  const disabled = new Set(String(process.env.VITE_POSTBRIDGE_DISABLED_PLATFORMS || '').split(',').map(id => id.trim().toLowerCase().replace(/^twitter$/, 'x')))
+  await expect.poll(() => visibleHomeIds(page)).toEqual(homeProviders.map(([id]) => id).filter(id => !disabled.has(id)))
+})

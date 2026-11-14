@@ -155,6 +155,7 @@ class Settings:
     video_speech_model: str = "gemini-2.5-flash-tts"
     video_generation_enabled: bool = False
     video_generation_model: str = "veo-3.1-fast-generate-001"
+    postbridge_disabled_platforms: str = ""
 
 
 def _to_bool(value: str | None, default: bool = False) -> bool:
@@ -217,6 +218,7 @@ def get_settings() -> Settings:
     return Settings(
         app_env=os.getenv("APP_ENV", "dev"),
         postbridge_app_mode=app_mode,
+        postbridge_disabled_platforms=os.getenv("POSTBRIDGE_DISABLED_PLATFORMS", ""),
         postbridge_version=(os.getenv("POSTBRIDGE_VERSION", "").strip() or _package_version()),
         postbridge_release_repository=(
             os.getenv("POSTBRIDGE_RELEASE_REPOSITORY", "msrv-tech/postbridge-core").strip()

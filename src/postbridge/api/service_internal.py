@@ -247,7 +247,7 @@ def service_adapt_post_for_bridge(
 ) -> dict[str, Any]:
     """Adapt a post for a bridge target using bridge settings and platform limits."""
     if body.target_channel_id:
-        _assert_core_channels_in_tenant(session, tenant_id, body.target_channel_id)
+        _assert_core_channels_in_tenant(session, tenant_id, body.target_channel_id, require_enabled=True)
     try:
         result = adapt_post_for_bridge(
             session,
@@ -314,6 +314,9 @@ def ensure_channel(
     tenant_id: str = Depends(require_service_tenant),
     session: Session = Depends(get_db_session),
 ) -> dict[str, str]:
+    from postbridge.integrations.platform_policy import assert_platform_enabled
+
+    assert_platform_enabled(body.platform)
     ch_id = body.channel_id or str(uuid4())
     now = datetime.now(UTC)
     tenant = session.get(TenantOrm, tenant_id)
@@ -347,6 +350,7 @@ def ensure_channel(
                 message_key="error.validation.channel_tenant_mismatch",
                 details={"channel_id": ch_id},
             )
+        assert_platform_enabled(row.platform)
         row.platform = body.platform
         row.kind = body.kind
         row.title = body.title
@@ -1660,7 +1664,7 @@ _BRIDGE_MODES = frozenset({"live_sync", "migration"})
 
 
 def _assert_core_channels_in_tenant(
-    session: Session, tenant_id: str, *channel_ids: str
+    session: Session, tenant_id: str, *channel_ids: str, require_enabled: bool = False
 ) -> None:
     ids = [c for c in channel_ids if c]
     if not ids:
@@ -1682,6 +1686,11 @@ def _assert_core_channels_in_tenant(
             message_key="error.validation.channel_not_found_or_wrong_tenant",
             details={"channel_ids": missing},
         )
+    if require_enabled:
+        from postbridge.integrations.platform_policy import assert_platform_enabled
+
+        for row in rows:
+            assert_platform_enabled(row.platform)
 
 
 class ServiceBridgeCreateBody(BaseModel):
@@ -1742,7 +1751,7 @@ def service_create_bridge(
             details={"status": body.status},
         )
     _assert_core_channels_in_tenant(
-        session, tenant_id, body.source_channel_id, body.target_channel_id
+        session, tenant_id, body.source_channel_id, body.target_channel_id, require_enabled=True
     )
     from postbridge.services.video_bridges import normalize_bridge_settings
     settings = normalize_bridge_settings(body.settings_json, session.get(ChannelOrm, body.source_channel_id),
@@ -1818,7 +1827,8 @@ def service_list_live_sync_targets_by_source(
     out: list[ServiceLiveSyncTargetOut] = []
     for b in bridges:
         tgt = session.get(ChannelOrm, b.target_channel_id)
-        if tgt is None or tgt.tenant_id != tenant_id or tgt.platform in {"youtube", "tiktok"} or (b.settings_json or {}).get("video_delivery") is not None:
+        from postbridge.integrations.platform_policy import is_platform_enabled
+        if tgt is None or tgt.tenant_id != tenant_id or not is_platform_enabled(tgt.platform) or tgt.platform in {"youtube", "tiktok"} or (b.settings_json or {}).get("video_delivery") is not None:
             continue
         out.append(
             ServiceLiveSyncTargetOut(
@@ -1941,6 +1951,8 @@ def service_patch_bridge(
             message_key="error.validation.bridge_not_found",
             details={"bridge_id": bridge_id},
         )
+    if body.status == "active":
+        _assert_core_channels_in_tenant(session, tenant_id, row.source_channel_id, row.target_channel_id, require_enabled=True)
     if body.status is not None:
         row.status = body.status
     if "settings_json" in body.model_fields_set:

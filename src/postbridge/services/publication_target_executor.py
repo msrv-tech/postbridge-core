@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from postbridge.domain.errors import InternalError, PostbridgeError, ValidationError
 from postbridge.domain.models import PostPayload
 from postbridge.integrations.base import TargetPublisher
+from postbridge.integrations.platform_policy import assert_channel_enabled, disabled_platforms
 from postbridge.integrations.channel_credentials import load_channel_credential_row
 from postbridge.integrations.registry import decode_publish_credentials_for_platform, get_publisher
 from postbridge.services.publication_delivery_state import (
@@ -69,6 +70,12 @@ def _resolve_target_channel_slug(channel: ChannelOrm) -> str:
     )
 
 
+def _assert_target_policy(session: Session, target: PublicationTargetOrm) -> None:
+    if disabled_platforms():
+        channel = session.get(ChannelOrm, target.channel_id)
+        assert_channel_enabled(channel, tenant_id=target.tenant_id, requested_platform=target.platform)
+
+
 def claim_publication_target_pending(
     session: Session,
     target_id: str,
@@ -80,6 +87,10 @@ def claim_publication_target_pending(
     now = datetime.now(UTC)
     from postbridge.services.video_publication import approval_for_plan
     target = session.get(PublicationTargetOrm, target_id)
+    if target and target.status == PUBLICATION_TARGET_PUBLISHED:
+        return False
+    if target:
+        _assert_target_policy(session, target)
     approval = approval_for_plan(session, target.publication_plan_id) if target else None
     if target and not approval:
         target = session.scalar(select(PublicationTargetOrm).where(PublicationTargetOrm.id == target_id)
@@ -274,6 +285,7 @@ class PublicationTargetExecutor:
         if target.status == PUBLICATION_TARGET_PUBLISHED:
             return 0
 
+        _assert_target_policy(self.session, target)
         from postbridge.services.video_publication import approval_for_plan, approved_payload
         video_approval = approval_for_plan(self.session, target.publication_plan_id)
         text_attempt_id = uuid4().hex

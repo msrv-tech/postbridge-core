@@ -11,6 +11,8 @@ from sqlalchemy import select
 
 from postbridge.domain.errors import ValidationError
 from postbridge.models.domain import PublicationTargetOrm, VideoDeliveryStateOrm
+from postbridge.models.domain import ChannelOrm
+from postbridge.integrations.platform_policy import assert_channel_enabled, disabled_platforms
 
 TEXT_DELIVERY_KIND = "text_publication_v1"
 SAFE_OUTCOMES = {"not_sent", "rejected"}
@@ -113,6 +115,9 @@ def mark_text_failure(session, target_id, attempt_id, error, *, outcome, correla
 
 def prepare_manual_dispatch(session, target, *, correlation_id=None):
     """Retry only durable, proven refusals; keep approved video dispatch unchanged."""
+    if not (target.status == "published" and target.external_post_id) and disabled_platforms():
+        channel = session.get(ChannelOrm, target.channel_id)
+        assert_channel_enabled(channel, tenant_id=target.tenant_id, requested_platform=target.platform)
     from postbridge.services.video_publication import approval_for_plan
     if approval_for_plan(session, target.publication_plan_id):
         return

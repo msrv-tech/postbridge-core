@@ -17,6 +17,7 @@ from postbridge.db import get_db_session
 from postbridge.domain.errors import ExternalApiError, PostbridgeError, ValidationError
 from postbridge.domain.models import PostPayload
 from postbridge.integrations.channel_credentials import load_channel_credential_row
+from postbridge.integrations.platform_policy import assert_channel_enabled, disabled_platforms
 from postbridge.integrations.registry import (
     decode_publish_credentials_for_platform,
     get_fetcher,
@@ -34,6 +35,11 @@ LIVE_PUBLISH_RETRY_ATTEMPTS = 3
 LIVE_PUBLISH_RETRY_BASE_DELAY = 1.0
 
 router = APIRouter()
+
+
+def _assert_sync_channel_policy(session: Session, channel_id: str, tenant_id: str, platform: str) -> None:
+    if disabled_platforms():
+        assert_channel_enabled(session.get(ChannelOrm, channel_id), tenant_id=tenant_id, requested_platform=platform)
 
 
 class PublishSingleRequest(BaseModel):
@@ -164,6 +170,7 @@ def edit_single(
 ) -> dict[str, str]:
     """Редактирует пост в MAX по source_post_id (требует сохранённый max_message_id)."""
     check_sync_publish_auth(request)
+    _assert_sync_channel_policy(session, payload.target_core_channel_id, payload.tenant_id, payload.target_platform)
     from postbridge.services.video_publication import reject_unapproved_route
     reject_unapproved_route(session, payload.tenant_id, content_id=payload.post.get("source_post_id"),
         urls=[payload.post.get("media_url"), *(payload.post.get("media_urls") or [])])
@@ -313,6 +320,7 @@ def delete_single(
 ) -> dict[str, str]:
     """Удаляет пост в MAX по source_post_id (требует сохранённый max_message_id)."""
     check_sync_publish_auth(request)
+    _assert_sync_channel_policy(session, payload.target_core_channel_id, payload.tenant_id, payload.target_platform)
     job_store = BatchImportRunStore(session)
     row = job_store.get_published_post(
         payload.source_channel, payload.source_post_id, payload.target_channel
@@ -377,6 +385,7 @@ async def fetch_posts(
 ) -> FetchPostsResponse:
     """Забирает посты из источника (Telegram, MAX, VK, RSS)."""
     check_sync_publish_auth(request)
+    _assert_sync_channel_policy(session, payload.source_core_channel_id, payload.tenant_id, payload.source_platform)
     src_ch = session.get(ChannelOrm, payload.source_core_channel_id)
     if src_ch is None or src_ch.tenant_id != payload.tenant_id:
         raise HTTPException(

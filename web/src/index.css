@@ -373,6 +373,23 @@ select {
   text-transform: uppercase;
 }
 
+.platform-showcase-role {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: .9rem;
+  overflow-wrap: anywhere;
+}
+
+.platform-showcase-item h3 a {
+  color: inherit;
+  text-underline-offset: .2em;
+}
+
+.platform-showcase-item h3 a:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 4px;
+}
+
 .platform-showcase-item h3 {
   margin: 0;
   font-size: 1.15rem;
