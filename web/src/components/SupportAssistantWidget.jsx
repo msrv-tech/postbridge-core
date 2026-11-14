@@ -1,3 +1,4 @@
+import PlatformLogo from './PlatformLogo'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { askSupportAssistant, askGeneralSupport, applyAssistantVideoAction, readAssistantAction } from '../adapters/supportAssistant'
@@ -384,7 +385,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
               </> : answer.video_action.kind === 'video_delivery' ? <>
                 <p>{t(`videoAssistant.delivery.${answer.video_action.summary.action}`)}</p>
                 {answer.video_action.summary.output_url && <details><summary>{t("video.preview")}</summary><video src={answer.video_action.summary.output_url} controls preload="none" style={{ maxHeight: 240, maxWidth: '100%' }} /></details>}
-                {answer.video_action.summary.destinations?.map((d, i) => <p key={i}>{d.title} · {d.platform}</p>)}
+                {answer.video_action.summary.destinations?.map((d, i) => <p key={i}><PlatformLogo platform={d.platform} compact />{d.title} · {d.platform}</p>)}
                 <p>{answer.video_action.summary.publish_at ? `${new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short', timeZone: answer.video_action.summary.timezone }).format(new Date(answer.video_action.summary.publish_at))} · ${answer.video_action.summary.timezone}` : t('videoPublish.immediate')}</p>
                 {answer.video_action.summary.tiktok?.map((choice, i) => <p key={i}>TikTok · {t(`tiktok.privacy.${choice.options.privacy_level}`)} · {['comment', 'duet', 'stitch'].map(key => `${t(`tiktok.allow.${key}`)}: ${choice.options[`allow_${key}`] ? t('common.yes') : t('common.no')}`).join(' · ')}<br />{[['commercial_content', 'commercial'], ['brand_organic', 'ownBrand'], ['branded_content', 'branded']].map(([key, label]) => `${t(`tiktok.${label}`)}: ${choice.options[key] ? t('common.yes') : t('common.no')}`).join(' · ')}<br />{t('tiktok.original')}<br /><a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noreferrer">{t('tiktok.musicConfirmation')}</a></p>)}
               </> : answer.video_action.kind === 'material_edit' ? <p>{answer.video_action.summary.previous_name} → {answer.video_action.summary.brief} · {answer.video_action.summary.previous_folder || '/'} → {answer.video_action.summary.folder || '/'}</p>

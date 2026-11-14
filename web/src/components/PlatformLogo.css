@@ -1,0 +1,10 @@
+.platform-logo { display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;flex:0 0 auto;width:56px;height:56px;padding:12px;border-radius:10px;background:#fff;color:#64748b;color-scheme:light;vertical-align:middle; }
+.platform-logo img,.platform-logo svg { display:block;width:32px;height:32px;object-fit:contain;object-position:center; }
+.platform-logo-compact { width:28px;height:28px;padding:6px;border-radius:6px;margin-inline-end:.35rem; }
+.platform-logo-compact img,.platform-logo-compact svg { width:16px;height:16px; }
+.local-brand-fallback { color:#64748b; }
+.platform-showcase-item { min-width:0;flex-direction:column;align-items:flex-start; }
+.platform-showcase-item h3 { overflow-wrap:anywhere; }
+.channels-registry-list > span { min-width:0;max-width:100%;flex-wrap:wrap; }
+.channels-registry-list .channel-link-badge { box-sizing:border-box;max-width:100%;flex-wrap:wrap; }
+.channel-link-badge .platform-logo-compact { margin-inline-end:0; }

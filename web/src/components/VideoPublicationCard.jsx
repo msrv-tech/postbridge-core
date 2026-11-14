@@ -1,3 +1,4 @@
+import PlatformLogo from './PlatformLogo'
 import { Link } from 'react-router-dom'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getVideoPublication, approveVideoPublication, retryVideoPublication, cancelVideoPublication, rescheduleVideoPublication, reconcileVideoPublication, getTikTokCreatorInfo } from '../adapters/video'
@@ -128,7 +129,7 @@ export default function VideoPublicationCard({ workspaceId, postId, dirty, saveD
       </>}
       {view.targets.some((target) => target.status === 'pending') && <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => run(async () => { const result = await cancelVideoPublication(workspaceId, postId); if (alive.current) setView(result) })}>{t('videoPublish.cancel')}</button>}
       <ul>{view.targets.map((target) => <li key={target.id}>
-        <strong>{target.title}</strong>{' · '}{t(`videoPublish.format.${target.format || 'video'}`)}{' · '}{t(`videoPublish.status.${target.status}`)}
+        <PlatformLogo platform={target.platform} compact /><strong>{target.title}</strong>{' · '}{t(`videoPublish.format.${target.format || 'video'}`)}{' · '}{t(`videoPublish.status.${target.status}`)}
         {target.platform === 'youtube' && target.options?.title && <p>{target.options.title}{' · '}{t(`videoPublish.visibility.${target.options.visibility || 'private'}`)}</p>}
         {target.external_url && <>{' · '}<a href={target.external_url} target="_blank" rel="noreferrer">{t('videoPublish.open')}</a></>}
         {view.enabled && ['youtube', 'instagram', 'tiktok'].includes(target.platform) && ['unknown', 'failed'].includes(target.status) && !target.error_code?.startsWith('VIDEO_BRIDGE_') && !['EXTERNAL_API_INSTAGRAM_REJECTED', 'EXTERNAL_API_YOUTUBE_REJECTED', 'EXTERNAL_API_TIKTOK_REJECTED'].includes(target.error_code) && <button type="button" className="btn btn-secondary btn-small" disabled={busy} onClick={() => run(async () => { const result = await reconcileVideoPublication(workspaceId, postId, target.id); if (alive.current) setView(result) })}>{t('videoPublish.checkResult')}</button>}
@@ -153,7 +154,7 @@ export default function VideoPublicationCard({ workspaceId, postId, dirty, saveD
               setTikTokCreators(old => { const next = { ...old }; delete next[destination.id]; return next })
               setTikTokOptions(old => { const next = { ...old }; delete next[destination.id]; return next })
             }
-          }} />{destination.title}{' · '}{({ youtube: 'YouTube', instagram: 'Instagram', tiktok: 'TikTok', telegram: 'Telegram' })[destination.platform] || destination.platform || 'Telegram'}{' · '}{t(`videoPublish.format.${destination.format || 'video'}`)}</label>) : <p>{t(throughBridges ? 'videoBridge.noRoutes' : 'videoPublish.noDestinations')}</p>}
+          }} /><PlatformLogo platform={destination.platform} compact />{destination.title}{' · '}{({ youtube: 'YouTube', instagram: 'Instagram', tiktok: 'TikTok', telegram: 'Telegram' })[destination.platform] || destination.platform || 'Telegram'}{' · '}{t(`videoPublish.format.${destination.format || 'video'}`)}</label>) : <p>{t(throughBridges ? 'videoBridge.noRoutes' : 'videoPublish.noDestinations')}</p>}
         </fieldset>
         {throughBridges && <>
           <p className="muted">{t('videoBridge.reviewHint')}</p>

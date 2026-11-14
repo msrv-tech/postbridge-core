@@ -1,3 +1,4 @@
+import PlatformLogo from '../components/PlatformLogo'
 import { useState, useEffect } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { getChannelRegistryItem, updateChannelRegistryItem } from '../adapters/channels'
@@ -100,7 +101,7 @@ export default function EditChannel() {
       }
     >
       <div className="card">
-        <h3>{t('editChannel.settings.title')}</h3>
+        <h3><PlatformLogo platform={channel.platform} compact />{t('editChannel.settings.title')}</h3>
         <p className="muted" style={{ marginBottom: '1rem' }}>
           {t('editChannel.settings.text')}
         </p>

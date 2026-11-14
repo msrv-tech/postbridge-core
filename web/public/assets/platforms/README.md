@@ -40,3 +40,20 @@ The SVGs were parsed and inspected: no scripts, event handlers, linked resources
 embedded raster images, external references, fonts, or URL-based styles. No new
 asset package or runtime dependency is used. Source captures and downloads are
 retained in the review artifacts under `meta-ui-owner-inventory-20261113/brand-input`.
+
+## Other platform marks
+
+`SOURCES.json` pins the source URL, archive/commit, original and local SHA-256,
+transformations and SVG safety inspection for every canonical platform. MAX,
+LinkedIn and Zen are exact members/downloads from their official brand pages.
+The eight small Simple Icons glyphs are vendored from one pinned upstream commit,
+with its CC0 license in `SIMPLE-ICONS-LICENSE.txt`; only inherited root fill is
+resolved to the upstream brand color. Brand/trademark rights remain with owners.
+Postbridge reuses the existing project mark. No asset is fetched remotely at render time.
+
+The shared image component keeps the original aspect ratio and provides a neutral
+icon if an unknown platform or broken local asset is encountered; the visible
+platform name remains the accessible label. Default marks use 32px artwork and
+12px clear space. Compact marks scale both by half (16px/6px). White mattes keep
+black and colored official marks legible in both themes. No mark claims provider
+approval, permission, capability, or commercial availability.

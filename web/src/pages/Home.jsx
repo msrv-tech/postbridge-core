@@ -1,3 +1,4 @@
+import PlatformLogo from '../components/PlatformLogo'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import PublicLayout from '../components/PublicLayout'
@@ -381,9 +382,7 @@ export default function Home() {
           <div className="platform-showcase" aria-label={t('home.platforms.aria')}>
             {supportedPlatforms.map((platform) => (
               <article className={`platform-showcase-item platform-showcase-item-${platform.key}`} key={platform.key}>
-                <span className={`platform-glyph platform-glyph-${platform.key}`} aria-hidden>
-                  {platform.name.slice(0, 2)}
-                </span>
+                <PlatformLogo platform={platform.key} />
                 <h3>{platform.name}</h3>
               </article>
             ))}

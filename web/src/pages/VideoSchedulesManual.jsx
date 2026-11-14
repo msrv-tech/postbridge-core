@@ -1,3 +1,4 @@
+import PlatformLogo from '../components/PlatformLogo'
 import VoicePreview from '../components/VoicePreview'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -270,7 +271,7 @@ export default function VideoSchedulesManual() {
             <label><input type="checkbox" checked={autoPublish} onChange={(e) => setAutoPublish(e.target.checked)} />{t('videoAuto.toggle')}</label>
             {autoPublish && <fieldset><legend>{t('videoAuto.title')}</legend>
               <p className="muted">{t('videoAuto.hint')}</p>
-              {autoBridges.map((bridge) => <label key={bridge.id}><input type="checkbox" checked={autoSelected.includes(bridge.id)} onChange={(e) => { setAutoConfirmed(false); setAutoSelected((old) => e.target.checked ? [...old, bridge.id] : old.filter((id) => id !== bridge.id)) }} />{bridge.title} · {bridge.platform} · {bridge.options.visibility || bridge.format}</label>)}
+              {autoBridges.map((bridge) => <label key={bridge.id}><input type="checkbox" checked={autoSelected.includes(bridge.id)} onChange={(e) => { setAutoConfirmed(false); setAutoSelected((old) => e.target.checked ? [...old, bridge.id] : old.filter((id) => id !== bridge.id)) }} /><PlatformLogo platform={bridge.platform} compact />{bridge.title} · {bridge.platform} · {bridge.options.visibility || bridge.format}</label>)}
               {!autoBridges.length && <p>{t('videoAuto.noBridges')}</p>}
               <label>{t('videoAuto.caption')}<textarea required maxLength={1024} value={autoCaption} onChange={(e) => { setAutoCaption(e.target.value); setAutoConfirmed(false) }} /></label>
             <><label><input type="checkbox" checked={splitLanguages} onChange={(e) => { setSplitLanguages(e.target.checked); setAutoConfirmed(false) }} />{t('videoSchedule.routeLanguages')}</label>{splitLanguages && languages.map((lang) => <fieldset key={lang}><legend>{t(`videoVoice.language.${lang}`)}</legend>{autoBridges.filter((b) => autoSelected.includes(b.id)).map((b) => <label key={b.id}><input type="checkbox" checked={(languageBridges[lang] || []).includes(b.id)} onChange={(e) => { setAutoConfirmed(false); setLanguageBridges((old) => ({ ...old, [lang]: e.target.checked ? [...(old[lang] || []), b.id] : (old[lang] || []).filter((id) => id !== b.id) })) }} />{b.title}</label>)}</fieldset>)}</>

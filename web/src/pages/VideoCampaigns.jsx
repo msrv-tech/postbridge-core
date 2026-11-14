@@ -1,3 +1,4 @@
+import PlatformLogo from '../components/PlatformLogo'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import AppShell from '../components/AppShell'
@@ -92,7 +93,7 @@ export default function VideoCampaigns() {
           <div className="video-funnel">{kinds.map((kind) => <div key={kind}><strong>{number(variant.events[kind])}</strong><span>{t(`videoCampaign.${kind}`)}</span></div>)}</div>
           {variant.publication?.targets.map((target) => {
             const metric = variant.metrics.find((value) => value.target_id === target.id)
-            return <p key={target.id}>{target.platform} · {target.status}{' · '}{t('videoCampaign.views')}: {number(metric?.metrics?.views?.value)}{' · '}{t('videoCampaign.likes')}: {number(metric?.metrics?.likes?.value)}{' · '}{t('videoCampaign.comments')}: {number(metric?.metrics?.comments?.value)}{target.external_url && <> · <a href={target.external_url} target="_blank" rel="noreferrer">{t('videoPost.open')}</a></>}</p>
+            return <p key={target.id}><PlatformLogo platform={target.platform} compact />{target.platform} · {target.status}{' · '}{t('videoCampaign.views')}: {number(metric?.metrics?.views?.value)}{' · '}{t('videoCampaign.likes')}: {number(metric?.metrics?.likes?.value)}{' · '}{t('videoCampaign.comments')}: {number(metric?.metrics?.comments?.value)}{target.external_url && <> · <a href={target.external_url} target="_blank" rel="noreferrer">{t('videoPost.open')}</a></>}</p>
           })}
           {!variant.publication && <p className="muted">{t('videoCampaign.notPublished')}</p>}
         </section>)}

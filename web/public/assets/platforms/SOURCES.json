@@ -1,0 +1,232 @@
+{
+  "task_id": "UI-PLATFORM-LOGOS-20261114",
+  "download_date": "2026-11-14",
+  "runtime_remote_requests": false,
+  "simple_icons_metadata": {
+    "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/cd796c98565fc466923fc1128b962e133fa3c612/data/simple-icons.json",
+    "sha256": "833fe5a31295929aaac80a4477e20b1df048284da93ef281f551ed6d9ad7958f"
+  },
+  "simple_icons_license": {
+    "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/cd796c98565fc466923fc1128b962e133fa3c612/LICENSE.md",
+    "sha256": "9046848b63a5c92bff14e4accca80bd987e0623b74adf9226ce5198d312b79d5"
+  },
+  "marks": [
+    {
+      "id": "bluesky",
+      "file": "bluesky.svg",
+      "source_url": "https://raw.githubusercontent.com/simple-icons/simple-icons/cd796c98565fc466923fc1128b962e133fa3c612/icons/bluesky.svg",
+      "upstream_commit": "cd796c98565fc466923fc1128b962e133fa3c612",
+      "brand_source": "https://bsky.social/about/blog/press-faq",
+      "guidelines": "https://bsky.social/about/blog/press-faq",
+      "source_sha256": "49752973164fbbf4464fbb4776f011c1eff207e5d7ad9254e031af025814eb75",
+      "local_sha256": "2e936b654c0ae98ea6245170d5eaf05e94977f40841e6a4803cea1d31eadde1f",
+      "transformation": "Only root fill resolved to upstream brand hex; original paths/viewBox preserved.",
+      "license": "Simple Icons CC0-1.0; brand rights remain with owners.",
+      "svg_inspection": {
+        "viewBox": "0 0 24 24",
+        "elements": 3,
+        "safe": true
+      }
+    },
+    {
+      "id": "facebook",
+      "file": "facebook.svg",
+      "existing_source": "README.md; accepted Meta official brand package",
+      "local_sha256": "86a0f88d4cf4d25d10fec3a2f4d50ecbcafb0682db389c04b16fff02f56f2fe1",
+      "transformation": "None; existing accepted asset unchanged.",
+      "svg_inspection": {
+        "viewBox": "0 0 500 500",
+        "elements": 5,
+        "safe": true
+      }
+    },
+    {
+      "id": "instagram",
+      "file": "instagram.svg",
+      "existing_source": "README.md; accepted Meta official brand package",
+      "local_sha256": "a036f8197b3856b02d1e236e08dd1b50a4ed68cb148686beb274eabf29794d51",
+      "transformation": "None; existing accepted asset unchanged.",
+      "svg_inspection": {
+        "viewBox": "0 0 1000 1000",
+        "elements": 2,
+        "safe": true
+      }
+    },
+    {
+      "id": "linkedin",
+      "file": "linkedin.png",
+      "source_url": "https://content.linkedin.com/content/dam/me/business/en-us/amp/xbu/linkedin-revised-brand-guidelines/logos/in-logo.zip",
+      "official_page": "https://brand.linkedin.com/downloads",
+      "archive_sha256": "32c4b7bbf902c1d957881e2eca16bc765891dc86da8ce4d416a849f161222a87",
+      "archive_member": "in-logo/LI-In-Bug.png",
+      "source_sha256": "3c0149f26168b5fe0f43e68664abe40341a6443b3cd435d18a73e12f64f8b600",
+      "local_sha256": "3c0149f26168b5fe0f43e68664abe40341a6443b3cd435d18a73e12f64f8b600",
+      "transformation": "None; exact official archive member.",
+      "license": "Brand asset; subject to owner guidelines.",
+      "svg_inspection": null
+    },
+    {
+      "id": "mastodon",
+      "file": "mastodon.svg",
+      "source_url": "https://raw.githubusercontent.com/simple-icons/simple-icons/cd796c98565fc466923fc1128b962e133fa3c612/icons/mastodon.svg",
+      "upstream_commit": "cd796c98565fc466923fc1128b962e133fa3c612",
+      "brand_source": "https://github.com/mastodon/mastodon/blob/7ccf7a73f1c47a8c03712c39f7c591e837cf6d08/app/javascript/images/logo-symbol-icon.svg",
+      "guidelines": "https://joinmastodon.org/branding",
+      "source_sha256": "b27197d1e47e19f31a80bf5d08b3dc9a8d073083436215f672e8e1016178cbe4",
+      "local_sha256": "c97d1209d3d337f281d7449be73dcf031de86527ea4108f65507d97213669693",
+      "transformation": "Only root fill resolved to upstream brand hex; original paths/viewBox preserved.",
+      "license": "Simple Icons CC0-1.0; brand rights remain with owners.",
+      "svg_inspection": {
+        "viewBox": "0 0 24 24",
+        "elements": 3,
+        "safe": true
+      }
+    },
+    {
+      "id": "max",
+      "file": "max.svg",
+      "source_url": "https://st.max.ru/brandbook/max-colored.zip",
+      "official_page": "https://go.max.ru/brandbook",
+      "archive_sha256": "bfb540772c667ba12a2e9052295cd91dad39ebd8d270038262f2f2404303c206",
+      "archive_member": "Max colored.svg",
+      "source_sha256": "5caa61a4b0731d0d89421b4fb24f41433025e5aea59155a14cf3a3fada6c9174",
+      "local_sha256": "5caa61a4b0731d0d89421b4fb24f41433025e5aea59155a14cf3a3fada6c9174",
+      "transformation": "None; exact official archive member.",
+      "license": "Brand asset; subject to owner guidelines.",
+      "svg_inspection": {
+        "viewBox": "0 0 100 100",
+        "elements": 732,
+        "safe": true
+      }
+    },
+    {
+      "id": "postbridge",
+      "file": "../../postbridge-mark.svg",
+      "existing_source": "Current accepted main Postbridge brand mark",
+      "local_sha256": "a8a92a6ae7429729fbfc0968de129cafc09a4261fd9069b0b225064516bac3ba",
+      "transformation": "None; existing project mark unchanged.",
+      "svg_inspection": {
+        "viewBox": "0 0 512 512",
+        "elements": 9,
+        "safe": true
+      }
+    },
+    {
+      "id": "rss",
+      "file": "rss.svg",
+      "source_url": "https://raw.githubusercontent.com/simple-icons/simple-icons/cd796c98565fc466923fc1128b962e133fa3c612/icons/rss.svg",
+      "upstream_commit": "cd796c98565fc466923fc1128b962e133fa3c612",
+      "brand_source": "https://en.wikipedia.org/wiki/Feed_icon",
+      "guidelines": null,
+      "source_sha256": "b31e1d6c3147795d2aa186e7515b624bb2b8046b30fce1063f111b36c99b9ef8",
+      "local_sha256": "d976830642e30ff634c11c092f78059e9ab5705c020812195377ab8d2e289147",
+      "transformation": "Only root fill resolved to upstream brand hex; original paths/viewBox preserved.",
+      "license": "Simple Icons CC0-1.0; brand rights remain with owners.",
+      "svg_inspection": {
+        "viewBox": "0 0 24 24",
+        "elements": 3,
+        "safe": true
+      }
+    },
+    {
+      "id": "telegram",
+      "file": "telegram.svg",
+      "source_url": "https://raw.githubusercontent.com/simple-icons/simple-icons/cd796c98565fc466923fc1128b962e133fa3c612/icons/telegram.svg",
+      "upstream_commit": "cd796c98565fc466923fc1128b962e133fa3c612",
+      "brand_source": "https://telegram.org/tour/screenshots",
+      "guidelines": null,
+      "source_sha256": "147fd8f8923e7e5f463fe98c0eb9913bead6b2ae59935728cda141002ec8a7c9",
+      "local_sha256": "4435c9a57e165a1c3b7f27e0b5b11b82b10d674ea4fff7f6748cb67b7fcb994e",
+      "transformation": "Only root fill resolved to upstream brand hex; original paths/viewBox preserved.",
+      "license": "Simple Icons CC0-1.0; brand rights remain with owners.",
+      "svg_inspection": {
+        "viewBox": "0 0 24 24",
+        "elements": 3,
+        "safe": true
+      }
+    },
+    {
+      "id": "tiktok",
+      "file": "tiktok.svg",
+      "source_url": "https://raw.githubusercontent.com/simple-icons/simple-icons/cd796c98565fc466923fc1128b962e133fa3c612/icons/tiktok.svg",
+      "upstream_commit": "cd796c98565fc466923fc1128b962e133fa3c612",
+      "brand_source": "https://tiktok.com",
+      "guidelines": null,
+      "source_sha256": "6f54ac8d325faacea8935bdc44cbed60206a6b408641799e5fea1cba7c1a0af7",
+      "local_sha256": "474e542d15b871647fb7b1f7eeeebf899de7de7577c43dc9005c4ac82e2fa4a9",
+      "transformation": "Only root fill resolved to upstream brand hex; original paths/viewBox preserved.",
+      "license": "Simple Icons CC0-1.0; brand rights remain with owners.",
+      "svg_inspection": {
+        "viewBox": "0 0 24 24",
+        "elements": 3,
+        "safe": true
+      }
+    },
+    {
+      "id": "vk",
+      "file": "vk.svg",
+      "source_url": "https://raw.githubusercontent.com/simple-icons/simple-icons/cd796c98565fc466923fc1128b962e133fa3c612/icons/vk.svg",
+      "upstream_commit": "cd796c98565fc466923fc1128b962e133fa3c612",
+      "brand_source": "https://vk.com/brand",
+      "guidelines": "https://vk.com/brand",
+      "source_sha256": "2d8fae863c9fdf5937f49326708dcf6cff0f5617ee67b502776b426bbe2cace8",
+      "local_sha256": "84a5b49cf1678a7e370935db87a836974a8054774a5968c5355b76dbcedd9713",
+      "transformation": "Only root fill resolved to upstream brand hex; original paths/viewBox preserved.",
+      "license": "Simple Icons CC0-1.0; brand rights remain with owners.",
+      "svg_inspection": {
+        "viewBox": "0 0 24 24",
+        "elements": 3,
+        "safe": true
+      }
+    },
+    {
+      "id": "x",
+      "file": "x.svg",
+      "source_url": "https://raw.githubusercontent.com/simple-icons/simple-icons/cd796c98565fc466923fc1128b962e133fa3c612/icons/x.svg",
+      "upstream_commit": "cd796c98565fc466923fc1128b962e133fa3c612",
+      "brand_source": "https://x.com",
+      "guidelines": "https://about.x.com/en/who-we-are/brand-toolkit",
+      "source_sha256": "693e68863eceb8dc9f72e2acd386ab9c20a10858dab2c076212f7084cb7a32fe",
+      "local_sha256": "07099f0e2eea46fe8cef6a2422dee63e1aa98c3cab07f3edf9a0b333314f758b",
+      "transformation": "Only root fill resolved to upstream brand hex; original paths/viewBox preserved.",
+      "license": "Simple Icons CC0-1.0; brand rights remain with owners.",
+      "svg_inspection": {
+        "viewBox": "0 0 24 24",
+        "elements": 3,
+        "safe": true
+      }
+    },
+    {
+      "id": "youtube",
+      "file": "youtube.svg",
+      "source_url": "https://raw.githubusercontent.com/simple-icons/simple-icons/cd796c98565fc466923fc1128b962e133fa3c612/icons/youtube.svg",
+      "upstream_commit": "cd796c98565fc466923fc1128b962e133fa3c612",
+      "brand_source": "https://www.youtube.com/howyoutubeworks/resources/brand-resources/#logos-icons-and-colors",
+      "guidelines": "https://www.youtube.com/howyoutubeworks/resources/brand-resources/#logos-icons-and-colors",
+      "source_sha256": "5038808acbbc4e6edda16cbeb1cc6dec80e4e4ee4e227e039c41229fa222aa8c",
+      "local_sha256": "7f5156448b9c1b65156e34e4443f0eff8b85f5afa783fc8a8d09f49380fed424",
+      "transformation": "Only root fill resolved to upstream brand hex; original paths/viewBox preserved.",
+      "license": "Simple Icons CC0-1.0; brand rights remain with owners.",
+      "svg_inspection": {
+        "viewBox": "0 0 24 24",
+        "elements": 3,
+        "safe": true
+      }
+    },
+    {
+      "id": "zen",
+      "file": "zen.svg",
+      "source_url": "https://dzen.ru/about/images/download//dzen-dark/dark-icon.svg",
+      "official_page": "https://dzen.ru/about/download",
+      "source_sha256": "03da7aa439aa09c292d5c80e47cbd0b0452de33d32b1494c2d942043a8a3830d",
+      "local_sha256": "03da7aa439aa09c292d5c80e47cbd0b0452de33d32b1494c2d942043a8a3830d",
+      "transformation": "None; exact official dark icon.",
+      "license": "Brand asset; subject to owner guidelines.",
+      "svg_inspection": {
+        "viewBox": "0 0 169 169",
+        "elements": 7,
+        "safe": true
+      }
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import PlatformLogo from '../components/PlatformLogo'
 import { canManageWorkspaceBilling, preferredWorkspaceId } from '../adapters/workspace'
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -974,6 +975,7 @@ export default function Channels() {
               const rights = [ch.can_read && t('channels.right.read'), ch.can_write && t('channels.right.write')].filter(Boolean).join(', ');
               const ChannelContent = () => (
                 <>
+                  <PlatformLogo platform={ch.platform} compact />
                   <span className="channel-link-badge-label">{label}</span>
                   <span className="channel-link-badge-name">{display}</span>
                   {rssUrl && (
@@ -1081,11 +1083,13 @@ export default function Channels() {
                             window.open(srcLink, '_blank', 'noopener,noreferrer');
                           }}
                         >
+                          <PlatformLogo platform={ch.source_platform} compact />
                           <span className="channel-link-badge-label">{srcLabel}</span>
                           <span className="channel-link-badge-name">{ch.source_display}</span>
                         </a>
                       ) : (
                         <span className={badgeClass(ch.source_platform)}>
+                          <PlatformLogo platform={ch.source_platform} compact />
                           <span className="channel-link-badge-label">{srcLabel}</span>
                           <span className="channel-link-badge-name">{ch.source_display}</span>
                         </span>
@@ -1103,11 +1107,13 @@ export default function Channels() {
                             window.open(tgtLink, '_blank', 'noopener,noreferrer');
                           }}
                         >
+                          <PlatformLogo platform={ch.target_platform} compact />
                           <span className="channel-link-badge-label">{tgtLabel}</span>
                           <span className="channel-link-badge-name">{ch.target_display}</span>
                         </a>
                       ) : (
                         <span className={badgeClass(ch.target_platform)}>
+                          <PlatformLogo platform={ch.target_platform} compact />
                           <span className="channel-link-badge-label">{tgtLabel}</span>
                           <span className="channel-link-badge-name">{ch.target_display}</span>
                         </span>

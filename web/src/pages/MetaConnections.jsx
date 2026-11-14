@@ -1,3 +1,4 @@
+import PlatformLogo from '../components/PlatformLogo'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppShell from '../components/AppShell'
@@ -8,7 +9,6 @@ import { useAuth } from '../useAuth'
 import { useI18n } from '../i18n'
 
 const emptyView = (owner, token) => ({ owner, token, items: [], next: null, confirmed: false, loading: false, error: '' })
-const brandBase = `${import.meta.env.BASE_URL}assets/platforms/`
 
 export default function MetaConnections() {
   const { user } = useAuth()
@@ -95,9 +95,7 @@ export default function MetaConnections() {
       && <div className="card empty-state"><p>{t('metaConnections.empty')}</p></div>}
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 19rem), 1fr))', gap: '1rem' }}>
       {current.items.map(item => <article className="card" data-meta-connection-id={item.id} key={item.id} style={{ minWidth: 0 }}>
-        <div style={{ background: '#fff', borderRadius: '10px', padding: '12px', width: '56px', height: '56px', marginBottom: '1rem' }}>
-          <img src={`${brandBase}${item.platform}.svg`} width="32" height="32" alt="" style={{ display: 'block', objectFit: 'contain' }} />
-        </div>
+        <div style={{ marginBottom: '1rem' }}><PlatformLogo platform={item.platform} /></div>
         <p className="muted">{item.platform === 'facebook' ? 'Facebook' : 'Instagram'}</p>
         <h2 style={{ fontSize: '1.1rem', overflowWrap: 'anywhere' }}>{item.title || item.platform_channel_id || (item.platform === 'facebook' ? 'Facebook' : 'Instagram')}</h2>
         <p><strong>{t(`metaConnections.state.${item.state}`)}</strong></p>

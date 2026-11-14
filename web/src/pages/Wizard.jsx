@@ -1,3 +1,4 @@
+import PlatformLogo from '../components/PlatformLogo'
 import { useState, useEffect, useMemo } from 'react'
 import { Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { createChannelRegistryItem, createConnection, listChannelRegistry } from '../adapters/channels'
@@ -200,7 +201,7 @@ export default function Wizard() {
           </p>
 
           <div className="form-group">
-            <label htmlFor="source-channel-id">{t('wizard.sourceChannel')}</label>
+            <label htmlFor="source-channel-id">{sourceChannel && <PlatformLogo platform={sourceChannel.platform} compact />}{t('wizard.sourceChannel')}</label>
             <select
               id="source-channel-id"
               value={sourceChannelId}
@@ -225,7 +226,7 @@ export default function Wizard() {
           </div>
 
           <div className="form-group">
-            <label htmlFor="target-channel-id">{t('wizard.targetChannel')}</label>
+            <label htmlFor="target-channel-id">{targetChannel && <PlatformLogo platform={targetChannel.platform} compact />}{t('wizard.targetChannel')}</label>
             <select
               id="target-channel-id"
               value={targetValue}

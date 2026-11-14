@@ -1,3 +1,4 @@
+import PlatformLogo from '../components/PlatformLogo'
 import { useState, useEffect } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
@@ -538,7 +539,7 @@ export default function AddChannel() {
         <h3>{t('addChannel.newChannel')}</h3>
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label htmlFor="platform">{t('common.platform')}</label>
+            <label htmlFor="platform"><PlatformLogo platform={platform} compact />{t('common.platform')}</label>
             <select
               id="platform"
               value={platform}

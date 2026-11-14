@@ -1,3 +1,4 @@
+import PlatformLogo from '../components/PlatformLogo'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
@@ -2073,7 +2074,7 @@ export default function PostEditor() {
                 return (
                   <div key={item.id || `${item.platform}-${index}`} className="post-editor-platform-preview">
                     <div className="post-editor-platform-preview-head">
-                      <strong>{item.platform.toUpperCase()}</strong>
+                      <strong><PlatformLogo platform={item.platform} compact />{item.platform.toUpperCase()}</strong>
                       <div className="post-editor-platform-preview-badges">
                         <span className="post-editor-platform-preview-mode">
                           {bridgeAdaptationModeLabel(item.adaptation_mode, t)}

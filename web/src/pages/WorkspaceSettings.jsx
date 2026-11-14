@@ -1,3 +1,4 @@
+import PlatformLogo from '../components/PlatformLogo'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { updateCurrentUser } from '../adapters/account'
@@ -1451,7 +1452,7 @@ export default function WorkspaceSettings() {
                       </code>
                     </td>
                     <td>{row.status}</td>
-                    <td>{row.platform || '—'}</td>
+                    <td>{row.platform && <PlatformLogo platform={row.platform} compact />}{row.platform || '—'}</td>
                     <td>
                       <code style={{ fontSize: '0.85em' }}>{row.channel_id || '—'}</code>
                     </td>

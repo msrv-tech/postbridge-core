@@ -4,6 +4,7 @@ import { connectorAllowsSetup, connectorPersonalState } from '../adapters/connec
 import { connectorCopy, connectorLogo, connectorStatusLabel, mcpLogoUrl } from '../connectorPresentation'
 import { useI18n } from '../i18n'
 import './Connectors.css'
+import LocalBrandImage from './LocalBrandImage'
 
 export function connectorPath(item, workspaceId = '') {
   const base = workspaceId ? `/workspaces/${encodeURIComponent(workspaceId)}/connectors` : '/connectors'
@@ -13,7 +14,7 @@ export function connectorPath(item, workspaceId = '') {
 export function ConnectorLogo({ item }) {
   const logo = connectorLogo(item)
   return logo && <span className={`connector-logo connector-logo-${logo.shape}`} aria-hidden="true">
-    <img src={logo.src} alt="" draggable="false" width="100" height="36" />
+    <LocalBrandImage src={logo.src} width={100} height={36} />
   </span>
 }
 
