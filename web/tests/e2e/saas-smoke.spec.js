@@ -2072,6 +2072,26 @@ test('news articles reject URL tricks and use only declared allowlisted image MI
   expect(result.destinations).toEqual([null, null, null, null])
 })
 
+// Public hosted descriptors stay separate from private owner inventory.
+const metaPublicProviderCatalog = {
+  service: {"name": "Postbridge.io", "canonical_url": "https://postbridge.io"},
+  items: [
+    {"id": "telegram", "display_name": "Telegram", "presentation_role": "direct_publication", "detail_path": "/platforms/telegram", "status": "available"},
+    {"id": "facebook", "display_name": "Facebook Pages", "presentation_role": "direct_publication", "detail_path": "/platforms/facebook", "status": "available"},
+    {"id": "instagram", "display_name": "Instagram", "presentation_role": "direct_publication", "detail_path": "/platforms/instagram", "status": "available"},
+    {"id": "youtube", "display_name": "YouTube", "presentation_role": "video_publication", "detail_path": "/platforms/youtube", "status": "available"},
+    {"id": "tiktok", "display_name": "TikTok", "presentation_role": "video_publication", "detail_path": "/platforms/tiktok", "status": "available"},
+    {"id": "x", "display_name": "X", "presentation_role": "direct_publication", "detail_path": "/platforms/x", "status": "available"},
+    {"id": "linkedin", "display_name": "LinkedIn", "presentation_role": "direct_publication", "detail_path": "/platforms/linkedin", "status": "available"},
+    {"id": "bluesky", "display_name": "Bluesky", "presentation_role": "direct_publication", "detail_path": "/platforms/bluesky", "status": "available"},
+    {"id": "mastodon", "display_name": "Mastodon", "presentation_role": "direct_publication", "detail_path": "/platforms/mastodon", "status": "available"},
+    {"id": "vk", "display_name": "VK", "presentation_role": "direct_publication", "detail_path": "/platforms/vk", "status": "available"},
+    {"id": "zen", "display_name": "Dzen", "presentation_role": "rss_import_or_feed", "detail_path": "/platforms/zen", "status": "available"},
+    {"id": "rss", "display_name": "RSS", "presentation_role": "rss_import_or_feed", "detail_path": "/platforms/rss", "status": "available"},
+    {"id": "postbridge", "display_name": "Postbridge", "presentation_role": "internal_source", "detail_path": "/platforms/postbridge", "status": "available"},
+  ],
+}
+
 // Owner inventory is deliberately separate from workspace publication registries.
 const metaInventory = (items = [], next_cursor = null) => ({ schema_version: 1, scope: 'owner_inventory', items, next_cursor })
 const metaRow = (id, values = {}) => ({ id, platform: 'facebook', platform_channel_id: '00012345678901234567890', title: 'Saved page', state: 'pending', usable: false, ...values })
@@ -2083,7 +2103,7 @@ const metaCards = page => page.locator('[data-meta-connection-id]')
 const deferredMeta = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
 
 async function mockMetaOwner(page, { locale = 'en', theme = 'dark', ignoreAbort = false } = {}) {
-  const state = { users: { 'owner-a': metaOwner('owner-a'), 'owner-b': metaOwner('owner-b') }, calls: [], errors: [],
+  const state = { users: { 'owner-a': metaOwner('owner-a'), 'owner-b': metaOwner('owner-b') }, calls: [], publicCalls: [], errors: [],
     result: metaInventory([metaRow('native-a')]), inventory: null, me: null }
   page.on('pageerror', error => state.errors.push(error.message))
   await page.addInitScript(({ locale, theme, ignoreAbort }) => {
@@ -2109,6 +2129,10 @@ async function mockMetaOwner(page, { locale = 'en', theme = 'dark', ignoreAbort 
     if (path === '/api/app/runtime-config') return json({ app_mode: 'saas', i18n: { default_locale: locale } })
     if (path === '/api/news') return json({ items: [], source_url: null })
     if (path === '/api/connectors') return json({ schema_version: 1, deployment: 'io', items: [] })
+    if (path === '/api/providers') {
+      state.publicCalls.push({ path, method: request.method(), query: [...url.searchParams], authorization_present: Boolean(request.headers().authorization), cookie_present: Boolean(request.headers().cookie) })
+      return json(metaPublicProviderCatalog)
+    }
     if (path === '/auth/providers') return json({ providers: [{ id: 'email', label: 'Email', type: 'magic_code' }] })
     if (['fetch', 'xhr'].includes(request.resourceType()) && !path.startsWith('/src/') && !path.startsWith('/node_modules/') && !path.startsWith('/@')) {
       state.calls.push({ path, method: request.method(), actor })
@@ -2126,6 +2150,7 @@ for (const locale of ['en', 'ru']) {
     const hostile = '<img src="https://attacker.invalid/x" onerror="alert(1)">'
     state.result = metaInventory([metaRow('native-a'), metaRow('native-b', { title: hostile }), metaRow('native-c', { platform: 'instagram', title: 'Instagram account', state: 'reconnect_required' })])
     await page.goto('/home')
+    await expect(page.locator('#platforms [data-provider-id]')).toHaveCount(13)
     await page.locator('.public-nav').getByRole('link', { name: locale === 'en' ? 'Log in' : 'Войти', exact: true }).click()
     await expect(page).toHaveURL(/\/settings\/meta-connections$/)
     await expect(metaCards(page)).toHaveCount(3)
@@ -2154,6 +2179,8 @@ for (const locale of ['en', 'ru']) {
     await page.getByRole('button', { name: locale === 'en' ? 'Open menu' : 'Открыть меню', exact: true }).click()
     await page.locator('.app-nav').getByRole('link', { name: locale === 'en' ? 'Meta connections' : 'Подключения Meta', exact: true }).click()
     expect(state.calls.every(call => call.path === '/me/meta-connections' && call.method === 'GET' && call.actor === 'owner-a' && JSON.stringify(call.query) === JSON.stringify([['limit', '50']]))).toBe(true)
+    expect(state.publicCalls.length).toBeGreaterThan(0)
+    expect(state.publicCalls.every(call => call.path === '/api/providers' && call.method === 'GET' && call.query.length === 0 && !call.authorization_present && !call.cookie_present)).toBe(true)
     expect(state.errors).toEqual([])
   })
 }

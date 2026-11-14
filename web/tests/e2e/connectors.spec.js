@@ -8,8 +8,15 @@ const user = { id: 'connector-review-user', display_name: 'Review user', is_plat
   workspaces: [{ id: 'ws-one', name: 'Studio', role: 'owner' }, { id: 'ws-two', name: 'Shop', role: 'owner' }],
   features: { billing: { enabled: false } }, app_mode: 'saas' }
 const observedApiCalls = new WeakMap()
+const homeAssetProbes = new WeakMap()
+const homeRouteTasks = new WeakMap()
 
 test.afterEach(async ({ page }, testInfo) => {
+  const pending = homeRouteTasks.get(page)
+  while (pending?.size) await Promise.all([...pending])
+  await page.unrouteAll({ behavior: 'wait' })
+  const probe = homeAssetProbes.get(page)
+  if (probe) expect(probe.fulfilled).toBe(true)
   const calls = observedApiCalls.get(page) || []
   await testInfo.attach('catalog-data-api-calls', { body: Buffer.from(JSON.stringify(calls)), contentType: 'application/json' })
   expect(calls.filter(call => /^\/workspaces\/[^/]+\/connectors(?:\/[^/]+)?$/.test(call.path))).toEqual([])
@@ -324,16 +331,34 @@ function homeCatalog(market) {
 }
 
 
-async function mockHomeCatalog(page, { market = 'io', locale = 'en', authenticated = false, catalog = homeCatalog(market), providerStatus = 200, providerBody, waitForCatalog } = {}) {
+async function mockHomeCatalog(page, { market = 'io', locale = 'en', authenticated = false, catalog = homeCatalog(market), providerStatus = 200, providerBody, waitForCatalog, assetDelayMs = 0 } = {}) {
   const calls = await mockApi(page, { market, locale, authenticated })
   const baseURL = test.info().project.use.baseURL
+  const assetProbe = { requested: false, fulfilled: false }
+  if (assetDelayMs) homeAssetProbes.set(page, assetProbe)
+  const pending = new Set()
+  homeRouteTasks.set(page, pending)
   // Keep the actual market hostname in the browser while serving only local
   // test assets; no DNS or production/provider requests are involved.
   await page.route(/^http:\/\/postbridge\.(?:ru|io)\//, async route => {
-    const url = new URL(route.request().url())
-    if (/^\/(?:api\/|workspaces\/|auth\/|me$|assistant\/)/.test(url.pathname) && !route.request().isNavigationRequest()) return route.fallback()
-    const response = await route.fetch({ url: `${baseURL}${url.pathname}${url.search}` })
-    return route.fulfill({ response })
+    const task = (async () => {
+      const url = new URL(route.request().url())
+      if (/^\/(?:api\/|workspaces\/|auth\/|me$|assistant\/)/.test(url.pathname) && !route.request().isNavigationRequest()) return route.fallback()
+      const delayed = assetDelayMs && url.pathname === '/connector-brands/openai.svg'
+      if (delayed) {
+        assetProbe.requested = true
+        await new Promise(resolve => setTimeout(resolve, assetDelayMs))
+      }
+      const response = await route.fetch({ url: `${baseURL}${url.pathname}${url.search}` })
+      await route.fulfill({ response })
+      if (delayed) assetProbe.fulfilled = true
+    })()
+    pending.add(task)
+    try {
+      return await task
+    } finally {
+      pending.delete(task)
+    }
   })
   const providerRequests = []
   await page.route('**/api/providers', async route => {
@@ -341,8 +366,19 @@ async function mockHomeCatalog(page, { market = 'io', locale = 'en', authenticat
     if (waitForCatalog) await waitForCatalog
     return route.fulfill({ status: providerStatus, contentType: providerBody === undefined ? 'application/json' : 'text/html', body: providerBody ?? JSON.stringify(catalog) })
   })
-  return { calls, providerRequests }
+  return { calls, providerRequests, assetProbe }
 }
+
+test('Home canonical catalog drains a pending local asset handler before page teardown', async ({ page }) => {
+  const { assetProbe } = await mockHomeCatalog(page, { assetDelayMs: 1000 })
+  const requested = page.waitForRequest('**/connector-brands/openai.svg')
+  await page.goto('http://postbridge.io/home', { waitUntil: 'domcontentloaded' })
+  await requested
+  await expect.poll(() => assetProbe.requested).toBe(true)
+  expect(assetProbe.fulfilled).toBe(false)
+  // The shared afterEach must finish the real pending proxy handler while the
+  // page/request context is still alive, then assert successful fulfillment.
+})
 
 async function visibleHomeIds(page) {
   return page.locator('#platforms [data-provider-id]').evaluateAll(cards => cards.map(card => card.dataset.providerId))
