@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from urllib.parse import parse_qsl
 
 import httpx
 import pytest
@@ -81,7 +82,8 @@ class _RecordingClient:
             upload_count = len([p for p in type(self).posts if p.url.endswith("/2/media/upload")])
             return _Response({"data": {"id": f"media-{upload_count}"}})
         if url.endswith("/api/v2/media"):
-            return _Response({"id": "mastodon-media-1"})
+            upload_count = len([p for p in type(self).posts if p.url.endswith("/api/v2/media")])
+            return _Response({"id": f"mastodon-media-{upload_count}"})
         if url.endswith("/photos"):
             return _Response({"id": f"photo-{len(type(self).posts)}"})
         if url.endswith("/videos"):
@@ -379,6 +381,13 @@ def test_bluesky_publisher_uploads_image_embed():
     assert record_req.json["record"]["embed"]["images"][0]["image"]["ref"]["$link"] == "blob-cid"
 
 
+def _mastodon_form_fields(recorded):
+    # Exercise HTTPX's real encoder; the recording client alone accepts invalid data shapes.
+    request = httpx.Request("POST", recorded.url, headers=recorded.headers, data=recorded.data)
+    assert request.headers["Content-Type"] == "application/x-www-form-urlencoded"
+    return parse_qsl(request.read().decode("ascii"), keep_blank_values=True)
+
+
 def test_mastodon_publisher_posts_status():
     publisher = MastodonPublisher(
         settings=SimpleNamespace(
@@ -401,7 +410,7 @@ def test_mastodon_publisher_posts_status():
     req = _RecordingClient.posts[0]
     assert req.url == "https://mastodon.social/api/v1/statuses"
     assert req.headers["Authorization"] == "Bearer token"
-    assert req.data == [("status", "Hello Mastodon"), ("visibility", "public")]
+    assert _mastodon_form_fields(req) == [("status", "Hello Mastodon"), ("visibility", "public")]
 
 
 def test_mastodon_publisher_uploads_media_before_status():
@@ -426,8 +435,46 @@ def test_mastodon_publisher_uploads_media_before_status():
     status = _RecordingClient.posts[1]
     assert upload.url == "https://mastodon.social/api/v2/media"
     assert upload.files["file"][0] == "a.png"
-    assert status.data == [
+    assert _mastodon_form_fields(status) == [
         ("status", "Hello Mastodon"),
         ("visibility", "public"),
         ("media_ids[]", "mastodon-media-1"),
+    ]
+
+
+def test_mastodon_publisher_encodes_all_media_ids_and_text():
+    publisher = MastodonPublisher(
+        settings=SimpleNamespace(
+            mastodon_access_token=None,
+            mastodon_instance_url=None,
+            mastodon_visibility="public",
+        )
+    )
+    text = "Привет & + = % /? #\nhttps://example.test/?a=1&b=2"
+
+    external_id = publisher.publish_post(
+        "",
+        PostPayload(
+            source_post_id="p1",
+            text=f"  {text}  ",
+            media_urls=[f"https://cdn.test/{name}.png" for name in "abcd"],
+        ),
+        credentials=MastodonCredentials(
+            access_token="token",
+            instance_url="https://mastodon.social",
+            visibility="unlisted",
+        ),
+    )
+
+    uploads = _RecordingClient.posts[:-1]
+    status = _RecordingClient.posts[-1]
+    assert external_id == "status-1"
+    assert [request.files["file"][0] for request in uploads] == [f"{name}.png" for name in "abcd"]
+    assert all(request.url == "https://mastodon.social/api/v2/media" for request in uploads)
+    assert status.url == "https://mastodon.social/api/v1/statuses"
+    assert status.headers["Authorization"] == "Bearer token"
+    assert _mastodon_form_fields(status) == [
+        ("status", text),
+        ("visibility", "unlisted"),
+        *(("media_ids[]", f"mastodon-media-{number}") for number in range(1, 5)),
     ]

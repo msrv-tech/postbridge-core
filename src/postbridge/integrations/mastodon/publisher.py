@@ -53,11 +53,12 @@ class MastodonPublisher:
                     payload=payload,
                     target_channel=target_channel,
                 )
-                data: list[tuple[str, str]] = [
-                    ("status", _trim_text(payload.text)),
-                    ("visibility", visibility),
-                ]
-                data.extend(("media_ids[]", media_id) for media_id in media_ids)
+                data: dict[str, str | list[str]] = {
+                    "status": _trim_text(payload.text),
+                    "visibility": visibility,
+                }
+                if media_ids:
+                    data["media_ids[]"] = media_ids
                 response = client.post(
                     f"{instance_url}/api/v1/statuses",
                     headers={"Authorization": f"Bearer {creds.access_token}"},
