@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -19,10 +21,12 @@ from sqlalchemy.orm import Session
 
 from postbridge.domain.errors import InternalError, PostbridgeError, ValidationError
 from postbridge.domain.models import PostPayload
+from postbridge.infrastructure.media_storage import managed_s3_media_asset_id, read_bounded_s3_media_object
 from postbridge.integrations.base import TargetPublisher
 from postbridge.integrations.platform_policy import assert_channel_enabled, disabled_platforms
 from postbridge.integrations.channel_credentials import load_channel_credential_row
 from postbridge.integrations.registry import decode_publish_credentials_for_platform, get_publisher
+from postbridge.integrations.telegram.photo_validation import has_decodable_photo_frame
 from postbridge.services.publication_delivery_state import (
     SAFE_OUTCOMES, UNKNOWN_CODE, UNKNOWN_MESSAGE, begin_text_dispatch,
     mark_text_failure, retry_is_proven_safe, text_delivery_state,
@@ -36,6 +40,7 @@ from postbridge.storage.publication_status_event_outbox import (
 from postbridge.models.domain import (
     ChannelOrm,
     ContentItemOrm,
+    MediaAssetOrm,
     PublicationPlanOrm,
     PublicationTargetOrm,
     RenderVariantOrm,
@@ -47,6 +52,11 @@ PUBLICATION_TARGET_PENDING = "pending"
 PUBLICATION_TARGET_PUBLISHING = "publishing"
 PUBLICATION_TARGET_PUBLISHED = "published"
 PUBLICATION_TARGET_FAILED = "failed"
+
+# Telegram applies the lower photo limit when it fetches a URL.
+TELEGRAM_PHOTO_URL_MAX_BYTES = 5_000_000
+_TELEGRAM_PHOTO_SIGNATURES = {"image/jpeg": b"\xff\xd8\xff", "image/jpg": b"\xff\xd8\xff",
+                              "image/png": b"\x89PNG\r\n\x1a\n"}
 
 
 def _resolve_target_channel_slug(channel: ChannelOrm) -> str:
@@ -262,6 +272,45 @@ def _build_post_payload(
     )
 
 
+def _set_telegram_managed_image_type(session: Session, tenant_id: str, post: PostPayload) -> None:
+    media_url = post.media_url or (post.media_urls[0] if post.media_urls else None)
+    asset_id = managed_s3_media_asset_id(media_url) if media_url else None
+    if asset_id is None:
+        return
+    asset = session.get(MediaAssetOrm, asset_id)
+    if (
+        asset is None
+        or asset.tenant_id != tenant_id
+        or asset.content_type not in _TELEGRAM_PHOTO_SIGNATURES
+        or type(asset.byte_size) is not int
+        or not 0 < asset.byte_size <= TELEGRAM_PHOTO_URL_MAX_BYTES
+    ):
+        return
+    from postbridge.services.video_media import inspect_media
+
+    try:
+        data = read_bounded_s3_media_object(asset.object_key, max_bytes=asset.byte_size)
+        if len(data) != asset.byte_size or not data.startswith(_TELEGRAM_PHOTO_SIGNATURES[asset.content_type]):
+            return
+        png = asset.content_type == "image/png"
+        with TemporaryDirectory(prefix="postbridge-telegram-photo-") as directory:
+            path = Path(directory) / ("photo.png" if png else "photo.jpg")
+            path.write_bytes(data)
+            metadata = inspect_media(path)
+            width, height = metadata["width"], metadata["height"]
+            if (
+                metadata["kind"] == "image"
+                and min(width, height) > 0
+                and width + height <= 10_000
+                and max(width, height) <= 20 * min(width, height)
+                and has_decodable_photo_frame(path, png=png)
+            ):
+                post.media_type = "image"
+    except (OSError, RuntimeError, ValidationError):
+        # Classification failed before dispatch. Keep the existing document route.
+        return
+
+
 class PublicationTargetExecutor:
     """Публикация одного publication_target через TargetPublisher."""
 
@@ -349,6 +398,8 @@ class PublicationTargetExecutor:
         try:
             post = approved_payload(self.session, target, content, render, check_time=not resuming_video) or _build_post_payload(
                 content_item_id=content_item_id_for_payload, render=render, content=content)
+            if target.platform == "telegram" and not video_approval:
+                _set_telegram_managed_image_type(self.session, target.tenant_id, post)
             slug = _resolve_target_channel_slug(channel)
             cred_row = load_channel_credential_row(self.session, channel.id, target.tenant_id)
             credentials = decode_publish_credentials_for_platform(target.platform, cred_row)

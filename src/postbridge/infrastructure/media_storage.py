@@ -6,6 +6,7 @@ import logging
 import shutil
 from pathlib import Path
 from urllib.parse import quote, urljoin
+from uuid import UUID
 
 from postbridge.config import get_settings
 
@@ -41,11 +42,29 @@ def upload_media_file(object_key: str, source: Path, content_type: str) -> None:
         raise RuntimeError("Media storage is not configured")
 
 
+def _managed_media_base_url(settings) -> str:
+    return (settings.media_base_url or f"{settings.core_base_url.rstrip('/')}/media").rstrip("/")
+
+
 def managed_media_url(asset_id: str, object_key: str) -> str:
     """Stable public URL using the existing Core proxy for private S3 objects."""
     settings = get_settings()
-    base = (settings.media_base_url or f"{settings.core_base_url.rstrip('/')}/media").rstrip("/")
+    base = _managed_media_base_url(settings)
     return f"{base}/{asset_id}" if settings.media_storage_type == "s3" else f"{base}/{quote(object_key)}"
+
+
+def managed_s3_media_asset_id(url: str) -> str | None:
+    """Recognize only the canonical public proxy URL for an S3 asset."""
+    settings = get_settings()
+    if settings.media_storage_type != "s3":
+        return None
+    base, _, asset_id = url.rpartition("/")
+    if base != _managed_media_base_url(settings):
+        return None
+    try:
+        return asset_id if str(UUID(asset_id)) == asset_id else None
+    except ValueError:
+        return None
 
 
 def upload_media_object(object_key: str, data: bytes, content_type: str) -> str:
@@ -173,7 +192,14 @@ def _delete_s3(object_key: str, settings) -> None:
     client.delete_object(Bucket=settings.s3_bucket, Key=object_key)
 
 
-def _read_s3(object_key: str, settings) -> bytes:
+def read_bounded_s3_media_object(object_key: str, *, max_bytes: int) -> bytes:
+    settings = get_settings()
+    if settings.media_storage_type != "s3":
+        raise RuntimeError("S3 media storage is required")
+    return _read_s3(object_key, settings, max_bytes=max_bytes)
+
+
+def _read_s3(object_key: str, settings, *, max_bytes: int | None = None) -> bytes:
     from botocore.exceptions import BotoCoreError, ClientError
 
     client = _s3_client(settings)
@@ -191,7 +217,18 @@ def _read_s3(object_key: str, settings) -> bytes:
     if body is None or not hasattr(body, "read"):
         raise RuntimeError("s3 media response body is missing")
     try:
-        data = body.read()
+        if max_bytes is None:
+            data = body.read()
+        else:
+            content_length = response.get("ContentLength")
+            if isinstance(content_length, int) and content_length > max_bytes:
+                raise RuntimeError("S3 media exceeds requested limit")
+            try:
+                data = body.read(max_bytes + 1)
+            except BotoCoreError as exc:
+                raise RuntimeError("failed to read bounded media from s3") from exc
+            if isinstance(data, bytes) and len(data) > max_bytes:
+                raise RuntimeError("S3 media exceeds requested limit")
     finally:
         close = getattr(body, "close", None)
         if callable(close):

@@ -1,7 +1,12 @@
 """Исполнение publication_target: claim, publisher, идемпотентность."""
 
+from functools import lru_cache
+from io import BytesIO
+from types import SimpleNamespace
 from uuid import uuid4
+import subprocess
 
+import httpx
 import pytest
 from datetime import UTC, datetime, timedelta
 
@@ -9,11 +14,13 @@ from postbridge.db import Base, ENGINE, SESSION_LOCAL, BatchImportRunOrm, init_d
 from postbridge.models.domain import (  # noqa: E402
     ChannelOrm,
     ContentItemOrm,
+    MediaAssetOrm,
     PublicationPlanOrm,
     PublicationTargetOrm,
     RenderVariantOrm,
     TenantOrm,
 )
+from postbridge.integrations.telegram.publisher import TelegramPublisher
 from postbridge.services.publication_target_executor import (  # noqa: E402
     PUBLICATION_TARGET_PENDING,
     PUBLICATION_TARGET_PUBLISHED,
@@ -224,3 +231,169 @@ def test_dispatch_endpoint_enqueues(monkeypatch: pytest.MonkeyPatch):
     assert r.status_code == 200
     assert r.json() == {"status": "enqueued", "target_id": target_id}
     assert delayed == [True]
+
+
+@lru_cache
+def _telegram_fixture_image(codec="mjpeg", width=640, height=480):
+    return subprocess.run(
+        ["ffmpeg", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", f"color=size={width}x{height}",
+         "-frames:v", "1", "-threads", "1", "-vcodec", codec, "-f", "image2pipe", "pipe:1"],
+        check=True, capture_output=True, timeout=15,
+    ).stdout
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_method", "field"),
+    [
+        ("managed-jpeg", "sendPhoto", "photo"),
+        ("managed-jpeg-first", "sendPhoto", "photo"),
+        ("managed-png", "sendPhoto", "photo"),
+        ("url-limit", "sendPhoto", "photo"),
+        ("over-url-limit", "sendDocument", "document"),
+        ("unknown-size", "sendDocument", "document"),
+        ("zero-size", "sendDocument", "document"),
+        ("invalid-image", "sendDocument", "document"),
+        ("dimension-limit", "sendPhoto", "photo"),
+        ("over-dimension-limit", "sendDocument", "document"),
+        ("ratio-limit", "sendPhoto", "photo"),
+        ("over-ratio-limit", "sendDocument", "document"),
+        ("object-size-mismatch", "sendDocument", "document"),
+        ("object-read-failure", "sendDocument", "document"),
+        ("managed-document", "sendDocument", "document"),
+        ("foreign-workspace", "sendDocument", "document"),
+        ("foreign-origin", "sendDocument", "document"),
+        ("missing-asset", "sendDocument", "document"),
+        ("suffix-fallback", "sendPhoto", "photo"),
+        ("primary-document", "sendDocument", "document"),
+        ("no-media", "sendMessage", "text"),
+    ],
+)
+def test_telegram_executor_selects_method_from_managed_media(case, expected_method, field, monkeypatch):
+    base_url = "https://postbridge.example.test/core/media"
+    monkeypatch.setenv("MEDIA_STORAGE_TYPE", "s3")
+    monkeypatch.setenv("S3_BUCKET", "fixture-bucket")
+    monkeypatch.setenv("S3_ACCESS_KEY", "fixture-access")
+    monkeypatch.setenv("S3_SECRET_KEY", "fixture-secret")
+    monkeypatch.setenv("MEDIA_BASE_URL", base_url)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fixture-token")
+
+    def fail_on_http(*args, **kwargs):
+        pytest.fail("Media classification must not make HTTP requests")
+
+    monkeypatch.setattr(httpx, "Client", fail_on_http)
+    calls = []
+    storage_gets = []
+    storage_read_sizes = []
+
+    class TrackedBody(BytesIO):
+        def read(self, size=-1):
+            storage_read_sizes.append(size)
+            return super().read(size)
+
+    def get_object(**request):
+        storage_gets.append(request)
+        if case == "object-read-failure":
+            from botocore.exceptions import ClientError
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+        # Exercise the streaming cap even when object response size is absent.
+        return {"Body": TrackedBody(data)}
+
+    monkeypatch.setattr("postbridge.infrastructure.media_storage._s3_client",
+                        lambda _: SimpleNamespace(get_object=get_object))
+
+    def bot_request(self, method, url, **kwargs):
+        body = kwargs["json"]
+        calls.append((method, url.rsplit("/", 1)[-1], body))
+        return httpx.Response(200, request=httpx.Request(method, url), json={"result": {"message_id": 12}})
+
+    monkeypatch.setattr(TelegramPublisher, "_request_bot_api", bot_request)
+    with SESSION_LOCAL() as session:
+        tenant_id = str(uuid4())
+        asset_tenant_id = str(uuid4()) if case == "foreign-workspace" else tenant_id
+        session.add(TenantOrm(id=tenant_id, name="Telegram workspace"))
+        if asset_tenant_id != tenant_id:
+            session.add(TenantOrm(id=asset_tenant_id, name="Different workspace"))
+        session.flush()
+        asset_id = str(uuid4())
+        if case != "missing-asset":
+            mime = {
+                "managed-document": "application/pdf",
+                "managed-png": "image/png",
+            }.get(case, "image/jpeg")
+            width, height = {
+                "dimension-limit": (8400, 1600),
+                "over-dimension-limit": (8402, 1600),
+                "ratio-limit": (2000, 100),
+                "over-ratio-limit": (2002, 100),
+            }.get(case, (640, 480))
+            codec = "png" if case == "managed-png" else "mjpeg"
+            data = _telegram_fixture_image(codec, width, height)
+            if case == "url-limit":
+                data = data.ljust(5_000_000, b"\0")
+            elif case == "invalid-image":
+                data = b"not an image"
+            size = {
+                "over-url-limit": 5_000_001,
+                "zero-size": 0,
+                "object-size-mismatch": len(data) - 1,
+            }.get(case, len(data))
+            session.add(MediaAssetOrm(
+                id=asset_id, tenant_id=asset_tenant_id, object_key=f"media/{asset_id}",
+                content_type=mime, byte_size=size,
+            ))
+        if case == "unknown-size":
+            get = session.get
+
+            def get_with_missing_size(model, identity, **kwargs):
+                if model is MediaAssetOrm and identity == asset_id:
+                    return SimpleNamespace(tenant_id=tenant_id, content_type="image/jpeg", byte_size=None)
+                return get(model, identity, **kwargs)
+
+            monkeypatch.setattr(session, "get", get_with_missing_size)
+        channel_id = str(uuid4())
+        session.add(ChannelOrm(
+            id=channel_id, tenant_id=tenant_id, platform="telegram", kind="destination",
+            title="Telegram", external_id="demo", status="connected",
+        ))
+        session.commit()
+
+        managed_url = f"{base_url}/{asset_id}"
+        media_url = managed_url
+        media_urls = None
+        if case == "managed-jpeg-first":
+            media_url = None
+            media_urls = [managed_url, "https://external.example.test/other.jpg"]
+        elif case == "foreign-origin":
+            media_url = managed_url.replace("postbridge.example.test", "external.example.test")
+        elif case == "suffix-fallback":
+            media_url = "https://external.example.test/PHOTO.JPEG?v=1"
+        elif case == "primary-document":
+            media_url = "https://external.example.test/document.pdf"
+            media_urls = [managed_url]
+        elif case == "no-media":
+            media_url = None
+
+        result = create_content_with_plan_and_targets(
+            session, tenant_id=tenant_id, channel_ids=[channel_id], title="Title", body_markdown="Body",
+            target_status=PUBLICATION_TARGET_PENDING, media_url=media_url, media_urls=media_urls,
+        )
+        session.commit()
+        target_id = result.publication_target_ids[0]
+        executor = PublicationTargetExecutor(session)
+        assert executor.run(target_id) == 1
+        assert executor.run(target_id) == 0
+        assert session.get(PublicationTargetOrm, target_id).external_post_id == "12"
+
+    body = {"chat_id": "@demo", field: media_url or (media_urls[0] if media_urls else "Body")}
+    if field != "text":
+        body["caption"] = "Body"
+    assert calls == [("POST", expected_method, body)]
+
+    if case in {"managed-jpeg", "managed-jpeg-first", "managed-png", "url-limit", "invalid-image",
+                "dimension-limit", "over-dimension-limit", "ratio-limit", "over-ratio-limit",
+                "object-size-mismatch", "object-read-failure"}:
+        assert storage_gets == [{"Bucket": "fixture-bucket", "Key": f"media/{asset_id}"}]
+        assert storage_read_sizes == ([] if case == "object-read-failure" else [size + 1])
+    else:
+        assert storage_gets == []
+        assert storage_read_sizes == []

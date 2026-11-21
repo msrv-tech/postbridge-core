@@ -97,15 +97,11 @@ class TelegramPublisher:
         try:
             if payload.media_type == "video":
                 return self._send_video(token, chat_id, payload.media_url or "", text)
-            if payload.media_url and _is_image_url(payload.media_url):
-                return self._send_photo(token, chat_id, payload.media_url, text)
-            if payload.media_url:
-                return self._send_document(token, chat_id, payload.media_url, text)
-            if payload.media_urls:
-                first = payload.media_urls[0]
-                if _is_image_url(first):
-                    return self._send_photo(token, chat_id, first, text)
-                return self._send_document(token, chat_id, first, text)
+            media_url = payload.media_url or (payload.media_urls[0] if payload.media_urls else None)
+            if media_url is not None:
+                if payload.media_type == "image" or _is_image_url(media_url):
+                    return self._send_photo(token, chat_id, media_url, text)
+                return self._send_document(token, chat_id, media_url, text)
             return self._send_message(token, chat_id, text)
         except httpx.HTTPStatusError as exc:
             raise ExternalApiError(
