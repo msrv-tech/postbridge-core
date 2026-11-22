@@ -5,28 +5,28 @@ description = "Postbridge core sync engine"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "aiogram>=3.31.0",
+  "aiogram>=3.32.0",
   "aiohttp-socks>=0.12.0",
   "alembic>=1.20.0",
-  "fastapi>=0.142.2",
-  "python-multipart>=0.0.32",
+  "fastapi>=0.165.0",
+  "python-multipart>=0.0.34",
   "uvicorn>=0.54.0",
-  "celery>=5.6.3",
+  "celery>=5.7.0",
   "redis>=8.1.0",
-  "sqlalchemy>=2.1.2",
+  "sqlalchemy>=2.1.9",
   "psycopg2-binary>=2.9.13",
-  "telethon>=1.45.0",
+  "telethon>=1.46.0",
   "requests>=2.34.2",
   "httpx[socks]>=0.28.1",
-  "openai-agents==0.24.0",
-  "httpx2>=2.12.0,<3",
+  "openai-agents==0.25.0",
+  "httpx2>=2.16.2,<3",
   "PySocks>=1.7.1",
   "feedparser>=6.0.14",
-  "pydantic>=2.13.5",
+  "pydantic>=2.14.4",
   "cryptography>=50.0.2",
-  "croniter>=6.2.4",
-  "sentry-sdk[celery,fastapi]>=2.71.0",
-  "boto3>=1.43.107",
+  "croniter>=7.0.0",
+  "sentry-sdk[celery,fastapi]>=2.75.0",
+  "boto3>=1.44.6",
   "pgvector>=0.5.0",
 ]
 
@@ -34,14 +34,14 @@ dependencies = [
 postbridge-telegram-bot = "postbridge.botkit.platforms.telegram.runtime:main"
 
 [project.optional-dependencies]
-video = ["faster-whisper==1.2.1", "av>=11,<16"]
+video = ["faster-whisper==1.2.1", "av>=18.1.0,<19"]
 dev = [
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
 ]
 
 [build-system]
-requires = ["setuptools>=84.0.0", "wheel"]
+requires = ["setuptools>=84.2.1", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
