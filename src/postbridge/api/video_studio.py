@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from postbridge.api.service_auth import require_service_tenant
+from postbridge.config import get_settings
 from postbridge.db import get_db_session
 from postbridge.services import video_studio as service
 from postbridge.services.video_media import MAX_UPLOAD_BYTES, video_error
@@ -36,6 +37,12 @@ class CancelVideo(BaseModel):
 
 def build_router(prefix, tenant_dependency):
     router = APIRouter(prefix=prefix, tags=["video-studio"])
+
+    def batch_policy(request: Request) -> dict | None:
+        if (tenant_dependency is require_service_tenant and get_settings().core_service_token
+                and request.headers.get("X-Video-Workspace-Quota-Bypass") == "true"):
+            return {"workspace_quota_bypass": True}
+        return None
 
     @router.get("/capabilities")
     def capabilities(tenant_id: str = Depends(tenant_dependency)):
@@ -147,9 +154,9 @@ def build_router(prefix, tenant_dependency):
         return read_video_metrics(session, tenant_id, payload)
 
     @router.post("/batches", status_code=201)
-    def create_batch(payload: batches.ProjectBatchCreate, tenant_id: str = Depends(tenant_dependency),
+    def create_batch(payload: batches.ProjectBatchCreate, request: Request, tenant_id: str = Depends(tenant_dependency),
                      session: Session = Depends(get_db_session)):
-        return batches.create_project_batch(session, tenant_id, payload)
+        return batches.create_project_batch(session, tenant_id, payload, policy=batch_policy(request))
 
     @router.get("/batches/{batch_id}")
     def get_batch(batch_id: UUID, tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
@@ -160,9 +167,9 @@ def build_router(prefix, tenant_dependency):
         return batches.cancel_batch(session, tenant_id, str(batch_id))
 
     @router.post("/{project_id}/voice-batches", status_code=201)
-    def create_voice_batch(project_id: UUID, payload: batches.VoiceBatchCreate,
+    def create_voice_batch(project_id: UUID, payload: batches.VoiceBatchCreate, request: Request,
                            tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):
-        return batches.create_voice_batch(session, tenant_id, str(project_id), payload)
+        return batches.create_voice_batch(session, tenant_id, str(project_id), payload, policy=batch_policy(request))
 
     @router.get("/posts/{content_id}/publication")
     def publication(content_id: UUID, tenant_id: str = Depends(tenant_dependency), session: Session = Depends(get_db_session)):

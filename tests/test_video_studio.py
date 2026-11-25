@@ -261,13 +261,15 @@ def test_service_api_checks_auth_and_rejects_invalid_payloads(state):
     from fastapi import FastAPI
     from fastapi.responses import JSONResponse
     from fastapi.testclient import TestClient
-    from postbridge.api.video_studio import router
+    from postbridge.api.video_studio import router, selfhost_router, selfhost_tenant
     from postbridge.db import get_db_session
     from postbridge.domain.errors import PostbridgeError
     session, tenant, _, material, _ = state
     app = FastAPI()
     app.include_router(router)
+    app.include_router(selfhost_router)
     app.dependency_overrides[get_db_session] = lambda: session
+    app.dependency_overrides[selfhost_tenant] = lambda: tenant
     @app.exception_handler(PostbridgeError)
     async def error_response(request, exc):
         return JSONResponse({"code": exc.code}, status_code=400)
@@ -280,6 +282,18 @@ def test_service_api_checks_auth_and_rejects_invalid_payloads(state):
     response = client.post("/internal/service/videos", headers=headers, json=request(material).model_dump())
     assert response.status_code == 201, response.text
     assert response.json()["current"]["status"] == "queued"
+
+    batch = {"video": request(material).model_dump(), "request_key": str(uuid4())}
+    bypass = {"X-Video-Workspace-Quota-Bypass": "true"}
+    internal_batches = "/internal/service/videos/batches"
+    assert client.post(internal_batches, json=batch, headers=bypass).status_code == 400
+    submitted = client.post(internal_batches, json=batch, headers={**headers, **bypass})
+    assert submitted.status_code == 201, submitted.text
+    batch_id = submitted.json()["id"]
+    assert client.get(f"{internal_batches}/{batch_id}", headers=headers).json()["policy"]["workspace_quota_bypass"] is True
+    selfhosted = client.post("/api/app/videos/batches", json={**batch, "request_key": str(uuid4())}, headers=bypass)
+    assert selfhosted.status_code == 201, selfhosted.text
+    assert "workspace_quota_bypass" not in selfhosted.json()["policy"]
 
 
 @pytest.mark.parametrize("filename", ["20261019_video_studio.py", "20261019_video_autopilot.py"])
