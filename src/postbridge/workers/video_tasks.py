@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 import logging
+import math
 import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -14,6 +15,7 @@ from postbridge.db import SESSION_LOCAL
 from postbridge.domain.errors import PostbridgeError
 from postbridge.infrastructure.media_storage import copy_media_object_to_file, delete_media_object, upload_media_file
 from postbridge.models.domain import MediaAssetOrm, VideoRevisionOrm, VideoProductionJobOrm
+from postbridge.services.video_autopilot import WaitingForStoredImage
 from postbridge.services.video_media import MAX_UPLOAD_BYTES, inspect_media, render_montage, video_error
 from postbridge.services.video_generation import WaitingForVideo
 from postbridge.workers.celery_app import celery_app
@@ -161,6 +163,9 @@ def process_video_job(job_id: str):
             output = render_montage(scenes, sources, directory, on_scene=lambda _index: set_stage("assembling"),
                                     speech_sources=speech_sources, options=options)
             set_stage("validating")
+            duration = inspect_media(output)["duration_seconds"]
+            if not math.isfinite(duration) or duration <= 0:
+                raise video_error("VIDEO_INVALID_OUTPUT", "The assembled file has no measurable duration")
             from postbridge.services.video_media import _ffmpeg
             previews, elapsed = [], 0
             for index, scene in enumerate(scenes):
@@ -194,7 +199,8 @@ def process_video_job(job_id: str):
                     if session.get(MediaAssetOrm, preview["asset_id"]) is None:
                         session.add(MediaAssetOrm(id=preview["asset_id"], tenant_id=tenant_id, object_key=preview["object_key"],
                             content_type="image/jpeg", byte_size=preview["byte_size"]))
-                job.progress_json = {**(job.progress_json or {}), "scenes": scenes, "previews": previews, "cover": cover}
+                job.progress_json = {**(job.progress_json or {}), "scenes": scenes, "previews": previews, "cover": cover,
+                                     "output_duration_seconds": duration}
                 session.add(MediaAssetOrm(id=output_id, tenant_id=tenant_id, object_key=uploaded_key,
                                            content_type="video/mp4", byte_size=output.stat().st_size))
                 session.flush()
@@ -202,12 +208,18 @@ def process_video_job(job_id: str):
                 job.completed_at = datetime.now(UTC)
                 session.commit()
                 uploaded_key = None
-    except WaitingForVideo:
+    except (WaitingForVideo, WaitingForStoredImage) as wait:
         with SESSION_LOCAL() as session:
             job = session.scalar(select(VideoProductionJobOrm).where(VideoProductionJobOrm.id == job_id).with_for_update())
             if job.status == "running" and job.lease_token == token:
-                job.status, job.stage = "queued", "generating_video"
-                job.attempts = max(0, job.attempts - 1)
+                if isinstance(wait, WaitingForVideo):
+                    job.status, job.stage = "queued", "generating_video"
+                    job.attempts = max(0, job.attempts - 1)
+                elif job.attempts < 3:
+                    job.status, job.stage = "queued", "generating_images"
+                else:
+                    job.status, job.stage, job.error_code = "failed", "failed", "VIDEO_IMAGE_STORAGE_UNAVAILABLE"
+                    job.completed_at = datetime.now(UTC)
                 job.lease_until = datetime.now(UTC) + timedelta(seconds=20)
                 session.commit()
     except InterruptedError:

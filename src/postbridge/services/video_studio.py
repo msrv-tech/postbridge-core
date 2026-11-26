@@ -189,6 +189,14 @@ def project_payload(session: Session, project: VideoProjectOrm) -> dict:
                       "job_id": job.id if job else None, "error_code": job.error_code if job else None,
                       "output_url": managed_media_url(asset.id, asset.object_key) if asset else None,
                       "output_asset_id": asset.id if asset else None,
+                      "output_duration_seconds": progress.get("output_duration_seconds"),
+                      "publication": progress.get("publication"),
+                      "storyboard_attempts": [
+                          {"step": name, "state": step["state"], "model": step.get("model"),
+                           "charged_units": step.get("units"), "diagnostic": step.get("diagnostic")}
+                          for name, step in progress.get("steps", {}).items()
+                          if name in {"storyboard", "storyboard:retry"}
+                      ],
                       "cover_url": managed_media_url(cover.id, cover.object_key) if cover and cover.tenant_id == project.tenant_id else None,
                       "cover_title": (progress.get("cover") or {}).get("title"),
                       "storyboard": {"schema_version": 1, "scenes": public_scenes,

@@ -103,3 +103,49 @@ def test_auto_approval_keeps_frozen_time_and_refuses_late_ready_video(automatic)
     db.commit()
     with error("VIDEO_DELIVERY_MISSED"):
         auto_approval(db, tenant, run.id, post_id)
+
+
+def test_two_short_episodes_use_separate_story_copy_and_original_platform_settings(automatic):
+    from postbridge.models.domain import PublicationTargetOrm, VideoProductionJobOrm
+    from postbridge.services.video_studio import create_project, VideoCreate
+    from postbridge.workers import video_tasks
+
+    db, tenant, _, previous_post, bridge, first_run, task = automatic
+    bridge.settings_json = {"video_delivery": {**bridge.settings_json["video_delivery"], "title": "Same series title"}}
+    config = json.loads(task.task_config_json)
+    reviewed = schedule_bridges(db, tenant, bridge.source_channel_id)["items"][0]
+    policy = {**config["auto_publication"], "caption": "Made with Postbridge",
+              "expected_bridges": {bridge.id: reviewed["settings_hash"]}}
+    task.task_config_json = json.dumps({**config, "auto_publication": policy})
+    db.commit()
+    receipt = db.scalar(select(VideoPostDraftOrm).where(VideoPostDraftOrm.content_item_id == previous_post))
+    revision = db.get(VideoRevisionOrm, receipt.revision_id)
+    first_run.status = "completed"
+    db.commit()
+    results = []
+    for index, (title, description) in enumerate((("The Archive", "An archivist opens a sealed letter."),
+                                                  ("The Watch", "A watchmaker uncovers a hidden switch.")), 1):
+        run = enqueue_video_agent_run(db, tenant_id=tenant, task_id=task.id, occurrence_key=f"episode-{index}")
+        execution = db.get(VideoAgentExecutionOrm, run.id)
+        project = create_project(db, tenant, VideoCreate(brief="Confidential brief", request_key=execution.input_snapshot["video"]["request_key"],
+            scenes=[{"asset_id": revision.scenes[0]["asset_id"], "duration_seconds": 1, "caption": title}]), agent_run_id=run.id)
+        video_tasks.process_video_job.run(project["current"]["job_id"])
+        db.expire_all()
+        job = db.get(VideoProductionJobOrm, project["current"]["job_id"])
+        job.progress_json = {**job.progress_json, "publication": {"title": title, "description": description}}
+        execution.project_id, run.status = project["id"], "awaiting_review"
+        db.commit()
+        post_id = prepare_auto_posts(db, tenant, run.id)["items"][0]["content_item_id"]
+        assert prepare_auto_posts(db, tenant, run.id)["items"][0]["content_item_id"] == post_id
+        view = approve_auto_post(db, tenant, run.id, post_id, auto_approval(db, tenant, run.id, post_id))
+        target = db.get(PublicationTargetOrm, view["targets"][0]["id"])
+        payload = approved_payload(db, target, db.get(ContentItemOrm, post_id), None)
+        assert payload.publication_format == "short" and payload.visibility == "private"
+        assert payload.made_for_kids is False and payload.contains_synthetic_media is True
+        assert payload.video_title == title
+        assert payload.text == f"{description}\n\nMade with Postbridge"
+        assert payload.video_duration_seconds == view["source_duration_seconds"] == job.progress_json["output_duration_seconds"]
+        results.append((payload.video_title, payload.text))
+        run.status = "completed"
+        db.commit()
+    assert results[0][0] != results[1][0] and results[0][1] != results[1][1]

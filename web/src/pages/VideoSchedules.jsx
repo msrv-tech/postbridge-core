@@ -6,7 +6,7 @@ import { useAuth } from '../useAuth'
 import { useI18n } from '../i18n'
 import { clearToken } from '../adapters/sessionToken'
 import { isSelfhostMode } from '../adapters/runtime'
-import { listVideoSchedules } from '../adapters/video'
+import { listVideoSchedules, updateVideoScheduleFunding } from '../adapters/video'
 import { listAgentRuns, pauseAgentTask } from '../adapters/agent'
 import VideoSchedulesManual from './VideoSchedulesManual'
 import './VideoStudio.css'
@@ -96,6 +96,9 @@ function HostedVideoSchedules() {
           <p>{t(`topicScout.taskStatus.${task.status}`)} · {task.timezone}</p>
           <p className="muted">{t('videoSchedule.nextRun', { date: date(task.next_run_at) })}</p>
           {task.task_config?.auto_publication && <p>{t('videoAuto.activePolicy')}</p>}
+          {task.budget && <ScheduleBudget task={task} workspaceId={workspaceId} onChange={(budget) => {
+            if (context.current === workspaceId) setTasks((old) => old.map((item) => item.id === task.id ? { ...item, budget } : item))
+          }} />}
           {task.status !== 'archived' && <div className="inline-actions">
             <button className="btn btn-secondary" onClick={() => { setEditing(task); setQuestion(''); field.current?.focus(); field.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }}>{t('videoSchedule.agentEdit')}</button>
             {task.status === 'active' && <button className="btn btn-secondary" disabled={busy} onClick={() => pause(task)}>{t('videoSchedule.pause')}</button>}
@@ -103,7 +106,7 @@ function HostedVideoSchedules() {
           <ul>{runs.filter((run) => run.agent_task_id === task.id).slice(0, 10).map((run) => <li key={run.id}>
             {date(run.created_at)} · {t(`videoSchedule.run.${run.status}`, { defaultValue: run.status })}{' '}
             {run.video_execution?.auto_publication?.status && <span>{t(`videoAuto.status.${run.video_execution.auto_publication.status}`)}{' '}</span>}
-            {run.error_code && <span>{t(`api.error.${run.error_code}`, { defaultValue: t('videoSchedule.run.failed') })}{' '}</span>}
+            {run.error_code && <span>{run.error_message || t(`api.error.${run.error_code}`, { defaultValue: t('videoSchedule.run.failed') })}{' '}</span>}
             {run.video_execution?.project_id && <Link to={`/workspaces/${workspaceId}/content/videos/${run.video_execution.project_id}`}>{t('video.open')}</Link>}{' '}
             <Link to={`/workspaces/${workspaceId}/agents/runs/${run.id}`}>{t('videoSchedule.runDetails')}</Link>
           </li>)}</ul>
@@ -112,4 +115,63 @@ function HostedVideoSchedules() {
       </div>
     </AgentSectionLayout>
   </AppShell>
+}
+
+function ScheduleBudget({ task, workspaceId, onChange }) {
+  const { t, locale } = useI18n()
+  const { budget } = task
+  const [editing, setEditing] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const number = (value) => value == null ? '—' : new Intl.NumberFormat(locale).format(value)
+  const save = async (payload) => {
+    setBusy(true)
+    setError('')
+    try {
+      const result = await updateVideoScheduleFunding(workspaceId, task.id, payload)
+      onChange(result.budget)
+      setEditing(false)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const enable = (event) => {
+    event.preventDefault()
+    const values = new FormData(event.currentTarget)
+    void save({ enabled: true, run_units: Number(values.get('run')), month_units: Number(values.get('month')) })
+  }
+  return <div>
+    <p>{t(`videoSchedule.budget.${budget.source}`)}</p>
+    {budget.workspace_remaining_percent != null && <p>
+      {t('videoSchedule.budget.workspaceRemaining', { value: number(budget.workspace_remaining_percent) })}
+      {budget.workspace_month_limit != null && ` · ${t('videoSchedule.budget.workspaceMonth', {
+        used: number(budget.workspace_month_used), limit: number(budget.workspace_month_limit),
+      })}`}
+      {budget.workspace_day_limit != null && ` · ${t('videoSchedule.budget.workspaceDay', {
+        used: number(budget.workspace_day_used), limit: number(budget.workspace_day_limit),
+      })}`}
+    </p>}
+    <p>{t('videoSchedule.budget.limits', { run: number(budget.run_units), month: number(budget.month_units),
+      spent: number(budget.month_actual_units), remaining: number(budget.month_remaining_units) })}</p>
+    {budget.error_code && <p role="status">{t('videoSchedule.budget.' + budget.error_code, {
+      defaultValue: budget.source === 'workspace' ? t('videoSchedule.budget.workspaceBlocked') : t('videoSchedule.budget.scheduleBlocked'),
+    })}</p>}
+    {error && <p role="alert">{error}</p>}
+    {budget.can_allocate && task.status !== 'archived' && <div className="inline-actions">
+      <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setEditing(!editing)}>
+        {t(editing ? 'common.cancel' : 'videoSchedule.budget.allocate')}
+      </button>
+      {budget.source === 'platform' && <button type="button" className="btn btn-secondary" disabled={busy}
+        onClick={() => void save({ enabled: false })}>{t('videoSchedule.budget.revoke')}</button>}
+    </div>}
+    {editing && <form className="video-create" onSubmit={enable}>
+      <label>{t('videoSchedule.budget.run')}<input name="run" type="number" min="1" max="100000000"
+        defaultValue={budget.run_units ?? ''} required /></label>
+      <label>{t('videoSchedule.budget.month')}<input name="month" type="number" min="1" max="100000000"
+        defaultValue={budget.month_units ?? ''} required /></label>
+      <button className="btn" disabled={busy}>{t('videoSchedule.budget.save')}</button>
+    </form>}
+  </div>
 }

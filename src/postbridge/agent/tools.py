@@ -9,7 +9,7 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from sqlalchemy import desc, select
+from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.orm import Session
 
 from postbridge.agent.retrieval import collect_topic_sources, fetch_seed_sources
@@ -18,6 +18,7 @@ from postbridge.config import get_settings
 from postbridge.domain.errors import ValidationError
 from postbridge.integrations.registry import RULE_POST_TEXT_LIMITS, get_platform_capabilities
 from postbridge.models.domain import (
+    AgentRunOrm,
     ChannelOrm,
     ChannelStyleProfileOrm,
     ContentCandidateOrm,
@@ -65,15 +66,21 @@ def get_channel_style_profile(session: Session, *, tenant_id: str, channel_id: s
 
 
 def list_recent_publications(
-    session: Session, *, tenant_id: str, channel_id: str, limit: int = 10
+    session: Session, *, tenant_id: str, channel_id: str, limit: int = 10, include_editorial_albums: bool = False
 ) -> list[dict[str, Any]]:
+    channel_match = PublicationTargetOrm.channel_id == channel_id
+    if include_editorial_albums:
+        from postbridge.services.editorial_photo import PHOTO_STRATEGY
+        editorial_origin = select(AgentRunOrm.id).where(AgentRunOrm.tenant_id == tenant_id,
+            AgentRunOrm.channel_id == channel_id, AgentRunOrm.content_item_id == ContentItemOrm.id).exists()
+        channel_match = or_(channel_match, and_(PublicationPlanOrm.strategy == PHOTO_STRATEGY, editorial_origin))
     stmt = (
         select(ContentItemOrm, PublicationTargetOrm)
         .join(PublicationPlanOrm, PublicationPlanOrm.content_item_id == ContentItemOrm.id)
         .join(PublicationTargetOrm, PublicationTargetOrm.publication_plan_id == PublicationPlanOrm.id)
         .where(
             ContentItemOrm.tenant_id == tenant_id,
-            PublicationTargetOrm.channel_id == channel_id,
+            channel_match,
             PublicationTargetOrm.status == "published",
         )
         .order_by(desc(PublicationTargetOrm.published_at), desc(ContentItemOrm.updated_at))

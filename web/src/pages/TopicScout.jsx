@@ -18,6 +18,7 @@ import AppShell from '../components/AppShell'
 import { useWorkspaceSwitchGuard } from '../components/WorkspaceNavigation'
 import AgentSectionLayout from '../components/AgentSectionLayout'
 import { isBillingEnabled } from '../adapters/billing'
+import { getVideoScheduleBridges } from '../adapters/video'
 import { useI18n } from '../i18n'
 
 function isAgentEditorialChannel(channel) {
@@ -174,6 +175,10 @@ export default function TopicScout() {
   const [maxCandidatesPerRun, setMaxCandidatesPerRun] = useState(5)
   const [autonomyMode, setAutonomyMode] = useState('guarded_auto_publish')
   const [searchImageMode, setSearchImageMode] = useState('none')
+  const [photoEnabled, setPhotoEnabled] = useState(false)
+  const [photoBridgeId, setPhotoBridgeId] = useState('')
+  const [photoBridges, setPhotoBridges] = useState([])
+  const [minimumPassage, setMinimumPassage] = useState('70')
   const [seedUrls, setSeedUrls] = useState('')
   const [isCreateTaskExpanded, setIsCreateTaskExpanded] = useState(true)
   const [selectedTaskId, setSelectedTaskId] = useState('')
@@ -188,6 +193,17 @@ export default function TopicScout() {
   const autonomyModeOptions = getAutonomyModeOptions(t)
   const scheduleModeOptions = getScheduleModeOptions(t)
   const weekdayOptions = getWeekdayOptions(t)
+  const photoBridge = photoBridges.find((bridge) => bridge.id === photoBridgeId)
+
+  useEffect(() => {
+    setPhotoBridges([]); setPhotoBridgeId('')
+    if (!photoEnabled || !workspaceId || !channelId) return
+    let current = true
+    getVideoScheduleBridges(workspaceId, channelId).then((result) => {
+      if (current) setPhotoBridges((result.items || []).filter((bridge) => bridge.platform === 'telegram'))
+    }).catch((err) => { if (current) setError(err.message) })
+    return () => { current = false }
+  }, [channelId, photoEnabled, workspaceId])
 
   const handleLogout = () => {
     clearToken()
@@ -283,7 +299,7 @@ export default function TopicScout() {
   }, [location.hash, latestReviewItems.length])
 
   useWorkspaceSwitchGuard({
-    dirty: isCreateTaskExpanded && Boolean(goalText.trim() || editorialInstructions.trim() || seedUrls.trim() || scheduleMode !== 'daily' || scheduleTime !== '07:00' || scheduleWeekday !== '1' || maxCandidatesPerRun !== 5 || autonomyMode !== 'guarded_auto_publish' || searchImageMode !== 'none'),
+    dirty: isCreateTaskExpanded && Boolean(goalText.trim() || editorialInstructions.trim() || seedUrls.trim() || scheduleMode !== 'daily' || scheduleTime !== '07:00' || scheduleWeekday !== '1' || maxCandidatesPerRun !== 5 || autonomyMode !== 'guarded_auto_publish' || searchImageMode !== 'none' || photoEnabled),
     busy: saving || Boolean(runningTaskId || updatingTaskId),
   })
 
@@ -301,6 +317,11 @@ export default function TopicScout() {
       setError(t('topicScout.errors.invalidSchedule'))
       return
     }
+    if (photoEnabled && (!photoBridge || !scheduleCron || !Number.isInteger(Number(minimumPassage))
+        || Number(minimumPassage) < 70 || Number(minimumPassage) > 150)) {
+      setError(t('topicScout.photo.required'))
+      return
+    }
     setSaving(true)
     setError('')
     try {
@@ -310,9 +331,16 @@ export default function TopicScout() {
         goal_text: goalText.trim(),
         editorial_instructions: editorialInstructions.trim() || null,
         schedule_cron: scheduleCron.trim() || null,
-        max_candidates_per_run: maxCandidatesPerRun,
-        autonomy_mode: autonomyMode,
-        search_image_mode: searchImageMode,
+        max_candidates_per_run: photoEnabled ? 1 : maxCandidatesPerRun,
+        autonomy_mode: photoEnabled ? 'draft_approval' : autonomyMode,
+        search_image_mode: photoEnabled ? 'none' : searchImageMode,
+        ...(photoEnabled && {
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          task_config: { editorial_photo: {
+            confirmed: true, bridge_id: photoBridge.id, settings_hash: photoBridge.settings_hash,
+            minimum_passage_cm: Number(minimumPassage), language: locale === 'en' ? 'en' : 'ru',
+          } },
+        }),
         seed_urls: seedUrls
           .split('\n')
           .map((item) => item.trim())
@@ -578,7 +606,7 @@ export default function TopicScout() {
                 </select>
               </div>
 
-              <div className="form-group" style={{ marginBottom: 0 }}>
+              {!photoEnabled && <div className="form-group" style={{ marginBottom: 0 }}>
                 <label htmlFor="scout-autonomy">{t('topicScout.form.autonomy')}</label>
                 <select
                   id="scout-autonomy"
@@ -595,9 +623,9 @@ export default function TopicScout() {
                 <p className="muted" style={{ margin: '0.35rem 0 0 0' }}>
                   <strong>{selectedAutonomyMode.label}:</strong> {selectedAutonomyMode.hint}
                 </p>
-              </div>
+              </div>}
 
-              <div className="form-group" style={{ marginBottom: 0 }}>
+              {!photoEnabled && <div className="form-group" style={{ marginBottom: 0 }}>
                 <label>{t('topicScout.form.searchImageMode')}</label>
                 <div className="segmented-control topic-scout-image-mode" role="radiogroup" aria-label={t('topicScout.form.searchImageMode')}>
                   {SEARCH_IMAGE_MODES.map((mode) => (
@@ -616,7 +644,25 @@ export default function TopicScout() {
                 <p className="muted" style={{ margin: '0.35rem 0 0 0' }}>
                   {t(`topicScout.form.searchImageModeHint.${searchImageMode}`)}
                 </p>
-              </div>
+              </div>}
+
+              {isBillingEnabled(user) && <div className="form-group">
+                <label>
+                  <input type="checkbox" checked={photoEnabled} onChange={(event) => setPhotoEnabled(event.target.checked)} />
+                  {' '}{t('topicScout.photo.enable')}
+                </label>
+                {photoEnabled && <>
+                  <label htmlFor="scout-photo-bridge">{t('topicScout.photo.bridge')}</label>
+                  <select id="scout-photo-bridge" className="form-control" value={photoBridgeId}
+                    onChange={(event) => setPhotoBridgeId(event.target.value)}>
+                    <option value="">{t('topicScout.photo.selectBridge')}</option>
+                    {photoBridges.map((bridge) => <option key={bridge.id} value={bridge.id}>{bridge.title}</option>)}
+                  </select>
+                  <label htmlFor="scout-photo-width">{t('topicScout.photo.min')}</label>
+                  <input id="scout-photo-width" className="form-control" type="number" min="70" max="150"
+                    value={minimumPassage} onChange={(event) => setMinimumPassage(event.target.value)} />
+                </>}
+              </div>}
 
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label htmlFor="scout-seeds">{t('topicScout.form.seedUrls')}</label>
@@ -692,7 +738,9 @@ export default function TopicScout() {
                           </p>
                         ) : null}
                         <p className="muted" style={{ margin: '0.3rem 0 0 0' }}>
-                          {humanizeCron(task.schedule_cron, weekdayOptions, t)} · {autonomyModeLabel(task.autonomy_mode, t)} · {t(`topicScout.imageMode.short.${task.task_config?.search_image_mode || 'none'}`)}
+                          {humanizeCron(task.schedule_cron, weekdayOptions, t)} · {task.task_config?.editorial_photo
+                            ? t('topicScout.photo.enable')
+                            : `${autonomyModeLabel(task.autonomy_mode, t)} · ${t(`topicScout.imageMode.short.${task.task_config?.search_image_mode || 'none'}`)}`}
                         </p>
                       </div>
                     </button>

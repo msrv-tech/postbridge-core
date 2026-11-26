@@ -102,7 +102,8 @@ def make_topic_operations(
             "channel_context": get_channel_context(session, tenant_id=tenant_id, channel_id=channel_id),
             "style_profile": get_channel_style_profile(session, tenant_id=tenant_id, channel_id=channel_id),
             "recent_publications": list_recent_publications(
-                session, tenant_id=tenant_id, channel_id=channel_id, limit=10
+                session, tenant_id=tenant_id, channel_id=channel_id, limit=10,
+                include_editorial_albums=bool(state.get("editorial_photo")),
             ),
             "source_bundle": collect_topic_evidence(
                 session,
@@ -225,6 +226,9 @@ def make_topic_operations(
                 ),
             },
         ]
+        if state.get("editorial_photo"):
+            from postbridge.services.editorial_photo import LAYOUT_INSTRUCTIONS
+            messages[0]["content"] += "\n" + LAYOUT_INSTRUCTIONS
         return messages
 
     def accept_candidates(state: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, Any]:

@@ -349,6 +349,15 @@ export default function VideoStudio() {
             {current.output_url && <video key={current.output_url} src={current.output_url} poster={current.cover_url || undefined} controls playsInline preload="metadata" aria-label={t('video.preview')} />}
             {current.status === 'draft' && <p className="muted">{t('video.draftHint')}</p>}
             {current.error_code && <p className="error">{t(failureKey(current))}</p>}
+            {!!current.storyboard_attempts?.length && <details open={current.error_code === 'VIDEO_AI_INVALID_STORYBOARD'}>
+              <summary>{t('video.storyboardAttempts')}</summary>
+              <ul>{current.storyboard_attempts.map((attempt) => <li key={attempt.step}>
+                {t(attempt.step.endsWith(':retry') ? 'video.storyboardRetry' : 'video.stage.storyboard')}
+                {' · '}{attempt.model}{' · '}{attempt.charged_units == null
+                  ? t('video.storyboardChargeUnknown') : t('video.storyboardCharge', { units: attempt.charged_units })}
+                {attempt.diagnostic && ` · ${attempt.diagnostic}`}
+              </li>)}</ul>
+            </details>}
             <div className="inline-actions">
               {current.cover_url && <a className="btn secondary" href={`${current.cover_url}?download=1`} download target="_blank" rel="noreferrer">{t("video.cover")}</a>}
               {current.output_url && <a className="btn" href={`${current.output_url}?download=1`} download={`postbridge-${project.id}.mp4`} target="_blank" rel="noreferrer">{t('video.download')}</a>}

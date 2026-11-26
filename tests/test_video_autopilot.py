@@ -28,7 +28,7 @@ def request(scenes=None):
                        scenes=scenes or [], language="en")
 
 
-def mock_gateway(monkeypatch, *, assets=None, fail_image=False, no_usage=False):
+def mock_gateway(monkeypatch, *, assets=None, fail_image=False, no_usage=False, bad_storyboards=0):
     calls = []
     def gateway(path, body, correlation_id):
         calls.append((path, body, correlation_id))
@@ -40,7 +40,11 @@ def mock_gateway(monkeypatch, *, assets=None, fail_image=False, no_usage=False):
             scenes = [{"asset_id": asset, "duration_seconds": 5, "caption": f"Scene {index + 1}",
                        "image_prompt": "A calm product illustration" if not asset else ""}
                       for index, asset in enumerate(assets or [None, None])]
-            return {"usage": {"total_tokens": 10}, "choices": [{"message": {"content": json.dumps({"scenes": scenes})}}]}
+            invalid = len([call for call in calls if ":storyboard" in call[2]]) <= bad_storyboards
+            return {"usage": {"total_tokens": 10}, "choices": [{"message": {"content": json.dumps({
+                "scenes": [] if invalid else scenes,
+                "publication": {"title": "A product demo", "description": "See the product at work."},
+            })}}]}
         if fail_image:
             raise httpx.ReadTimeout("paid response lost")
         return {"usage": {} if no_usage else {"total_tokens": 20},
@@ -59,6 +63,8 @@ def test_autopilot_without_uploads_creates_images_and_real_mp4(auto, monkeypatch
     session.expire_all()
     result = get_project(session, tenant, project["id"])
     assert result["current"]["status"] == "succeeded"
+    assert result["current"]["publication"]["description"] == "See the product at work."
+    assert result["current"]["output_duration_seconds"] > 10
     assert result["current"]["usage"]["tokens_charged"] == 50
     assert not result["current"]["usage"]["uncertain"]
     assert len(result["current"]["scenes"]) == 2
@@ -68,6 +74,22 @@ def test_autopilot_without_uploads_creates_images_and_real_mp4(auto, monkeypatch
     video_tasks.process_video_job.run(project["current"]["job_id"])
     assert len(calls) == 3
     assert project_by_request(session, tenant, body.request_key)["requested_revision"]["usage"]["tokens_charged"] == 50
+
+
+@pytest.mark.parametrize("invalid,expected_charge,expected_status", [(1, 60, "succeeded"), (2, 20, "failed")])
+def test_invalid_storyboard_has_one_charged_retry(auto, monkeypatch, invalid, expected_charge, expected_status):
+    session, tenant, _, _, _ = auto
+    calls = mock_gateway(monkeypatch, bad_storyboards=invalid)
+    project = create_project(session, tenant, request())
+    video_tasks.process_video_job.run(project["current"]["job_id"])
+    session.expire_all()
+    revision = get_project(session, tenant, project["id"])["current"]
+    assert revision["status"] == expected_status
+    assert revision["usage"]["tokens_charged"] == expected_charge
+    assert len([call for call in calls if ":storyboard" in call[2]]) == 2
+    first, second = revision["storyboard_attempts"]
+    assert first["state"] == "invalid" and "scenes" in first["diagnostic"]
+    assert first["charged_units"] == second["charged_units"] == 10
 
 
 def test_unsupported_studio_image_model_rejects_before_paid_storyboard(auto, monkeypatch):
@@ -176,8 +198,8 @@ def test_storyboard_cannot_reference_a_material_not_supplied(auto, monkeypatch):
     video_tasks.process_video_job.run(project["current"]["job_id"])
     session.expire_all()
     current = get_project(session, tenant, project["id"])["current"]
-    assert current["error_code"] == "VIDEO_AI_INVALID_STORYBOARD" and len(calls) == 1
-    assert current["usage"]["tokens_charged"] == 10 and not current["usage"]["uncertain"]
+    assert current["error_code"] == "VIDEO_AI_INVALID_STORYBOARD" and len(calls) == 2
+    assert current["usage"]["tokens_charged"] == 20 and not current["usage"]["uncertain"]
 
 
 def test_cancel_while_gateway_responds_still_records_actual_usage(auto, monkeypatch):
@@ -216,6 +238,33 @@ def test_recovery_reuses_paid_results_after_worker_dies_before_montage(auto, mon
     session.expire_all()
     assert get_project(session, tenant, project["id"])["current"]["status"] == "succeeded"
     assert len(calls) == 3
+
+
+def test_charged_inline_image_survives_a_crash_before_asset_registration(auto, monkeypatch):
+    session, tenant, _, _, _ = auto
+    calls = mock_gateway(monkeypatch)
+    project = create_project(session, tenant, request())
+    job_id = project["current"]["job_id"]
+    original = video_autopilot.store_video_material
+    def crash(*args, **kwargs):
+        raise KeyboardInterrupt("lease lost before media registration")
+    monkeypatch.setattr(video_autopilot, "store_video_material", crash)
+    with pytest.raises(KeyboardInterrupt):
+        video_tasks.process_video_job.run(job_id)
+    session.expire_all()
+    job = session.get(VideoProductionJobOrm, job_id)
+    receipt = job.progress_json["steps"]["image:0"]
+    assert (receipt["state"], receipt["units"]) == ("received", 20)
+    job.lease_until = datetime.now(UTC) - timedelta(seconds=1)
+    session.commit()
+    monkeypatch.setattr(video_autopilot, "store_video_material", original)
+    video_tasks.process_video_job.run(job_id)
+    session.expire_all()
+    assert [(path, call) for path, _, call in calls if call.endswith(":image:0")] == [
+        ("/v1/bounded/images/generations", f"video:{job_id}:image:0")]
+    revision = get_project(session, tenant, project["id"])["current"]
+    assert revision["status"] == "succeeded" and revision["usage"]["tokens_charged"] == 50
+    assert "image_response" not in job.progress_json["steps"]["image:0"]
 
 
 def test_saved_visual_analysis_is_reused_for_another_storyboard(auto, monkeypatch):

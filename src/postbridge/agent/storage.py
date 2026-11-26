@@ -79,6 +79,16 @@ def create_agent_task(
         return create_video_agent_task(session, tenant_id=tenant_id, channel_id=channel_id, goal_text=goal_text,
             schedule_cron=schedule_cron, timezone=timezone, task_config=task_config, created_by=created_by,
             autonomy_mode=autonomy_mode, max_candidates_per_run=max_candidates_per_run)
+    if "editorial_photo" in task_config:
+        from postbridge.services.editorial_photo import EditorialPhotoPolicy, photo_error, selected_bridge
+        if mode != "topic_scout" or not schedule_cron or not created_by or content_item_id:
+            raise photo_error("EDITORIAL_PHOTO_INVALID", "Choose a recurring editorial source task for the album")
+        try:
+            policy = EditorialPhotoPolicy.model_validate(task_config["editorial_photo"])
+        except ValueError:
+            raise photo_error("EDITORIAL_PHOTO_INVALID", "Confirm the reviewed Telegram bridge and passage settings") from None
+        selected_bridge(session, tenant_id, channel_id, policy, created_by)
+        task_config = {**task_config, "editorial_photo": policy.model_dump(mode="json")}
     row = AgentTaskOrm(
         id=str(uuid4()),
         tenant_id=tenant_id,
@@ -391,6 +401,7 @@ def mark_run_completed(
     result: dict,
     review_created: bool,
     token_usage: dict | None = None,
+    schedule_claimed: bool = False,
 ) -> None:
     run.status = "awaiting_review" if review_created else "completed"
     run.completed_at = datetime.now(UTC)
@@ -409,7 +420,8 @@ def mark_run_completed(
         task = session.get(AgentTaskOrm, run.agent_task_id)
         if task is not None:
             task.last_run_at = run.completed_at
-            task.next_run_at = next_run_at_from_cron(task.schedule_cron, base=run.completed_at, timezone=task.timezone)
+            if not schedule_claimed:
+                task.next_run_at = next_run_at_from_cron(task.schedule_cron, base=run.completed_at, timezone=task.timezone)
     session.flush()
 
 

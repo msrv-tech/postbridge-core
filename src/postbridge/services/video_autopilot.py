@@ -8,14 +8,20 @@ from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
 import httpx
+from botocore.exceptions import BotoCoreError, ClientError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select
 
 from postbridge.ai.urls import join_openai_compatible_path
 from postbridge.config import get_settings
+from postbridge.domain.errors import PostbridgeError
 from postbridge.models.domain import MediaAssetOrm, VideoMaterialOrm, VideoProductionJobOrm
 from postbridge.services.video_media import video_error
 from postbridge.services.video_studio import store_video_material
+
+
+class WaitingForStoredImage(Exception):
+    """Retry local storage from the checkpointed image, without calling the provider."""
 
 
 class PlannedScene(BaseModel):
@@ -53,6 +59,38 @@ class Storyboard(BaseModel):
         if any(s.asset_id is None and not (s.image_prompt or "").strip() for s in self.scenes):
             raise ValueError("Generated scenes require an image prompt")
         return self
+
+
+class PublicVideoCopy(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    title: str = Field(min_length=1, max_length=100, pattern=r"^[^<>\r\n]+$")
+    description: str = Field(min_length=1, max_length=650, pattern=r"^[^<>]+$")
+
+
+class PublishableStoryboard(Storyboard):
+    publication: PublicVideoCopy
+
+
+def response_text(body):
+    choices = body.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return None
+    message = choices[0].get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    return content if isinstance(content, str) and len(content) <= 65536 else None
+
+
+def storyboard_error(exc):
+    if isinstance(exc, ValidationError):
+        errors = exc.errors(include_input=False, include_context=False, include_url=False)
+        fields = [
+            f"{'.'.join(map(str, error['loc'][:-1] if error['type'] == 'extra_forbidden' else error['loc'])) or 'storyboard'} ({error['type']})"
+            for error in errors[:5]
+        ]
+        return "Schema validation failed at " + ", ".join(fields)
+    if isinstance(exc, PostbridgeError) and exc.code == "VIDEO_AI_INVALID_STORYBOARD":
+        return exc.message
+    return None
 
 
 def structured_output(model, name):
@@ -162,31 +200,37 @@ class VideoAutopilot:
             if response.status_code != 200 or response.json().get("authorized") is not True:
                 raise video_error("VIDEO_BUDGET_NOT_AUTHORIZED", "Video budget is no longer available")
 
-    def paid_step(self, name: str, path: str, payload: dict, consume, *, restore=None, artifact_id=None):
+    def paid_step(self, name: str, path: str, payload: dict, consume, *, restore=None, artifact_id=None,
+                  storyboard=False, checkpoint_image=False):
         steps = self.progress.setdefault("steps", {})
         step = steps.get(name, {})
         if step.get("state") == "done":
             return step["result"]
+        if step.get("state") == "invalid":
+            raise video_error("VIDEO_AI_INVALID_STORYBOARD", step["diagnostic"])
         if step.get("state") in {"started", "unknown"}:
             raise video_error("VIDEO_AI_RECONCILIATION_REQUIRED", "The external result needs reconciliation; no paid retry was made")
         if step.get("state") == "received":
-            if step.get("response_text") is not None:
-                result = consume({"choices": [{"message": {"content": step["response_text"]}}]})
-                step.update(state="done", result=result)
-                step.pop("processing_error", None)
-                self.save(financial=True)
-                return result
             if restore:
                 result = restore()
                 if result:
                     step.update(state="done", result=result)
+                    step.pop("image_response", None)
+                    step.pop("processing_error", None)
                     self.save(financial=True)
                     return result
+            if step.get("image_response") is not None:
+                return self.consume_step(step, {"data": [{"b64_json": step["image_response"]}]}, consume)
+            if step.get("response_text") is not None or storyboard and "response_text" in step:
+                return self.consume_step(step, {"choices": [{"message": {"content": step["response_text"]}}]},
+                                         consume, storyboard=storyboard)
             # The bill is known, but response processing was interrupted. Do not repay.
             raise video_error("VIDEO_AI_RESULT_LOST", "The paid result could not be restored")
         correlation_id = f"video:{self.job_id}:{name}"
         steps[name] = {"state": "authorizing", "model": payload["model"], "artifact_id": artifact_id,
                        "correlation_id": correlation_id}
+        if storyboard:
+            steps[name]["publication_schema"] = True
         self.save()
         self.authorize()
         steps[name]["state"] = "started"
@@ -196,7 +240,6 @@ class VideoAutopilot:
             body = gateway_json(bounded, {**payload, "max_units": self.progress["billing"]["limit_units"] - self.spent()}, correlation_id)
             units = charged_units(body)
         except Exception as exc:
-            from postbridge.domain.errors import PostbridgeError
             if isinstance(exc, PostbridgeError) and exc.code in {"VIDEO_BUDGET_EXHAUSTED", "VIDEO_BUDGET_CAP_UNAVAILABLE"}:
                 steps[name].update(state="rejected", units=0)
                 self.save(financial=True)
@@ -204,21 +247,39 @@ class VideoAutopilot:
             steps[name]["state"] = "unknown"
             self.save(financial=True)
             raise video_error("VIDEO_AI_RECONCILIATION_REQUIRED", "The external result needs reconciliation; no paid retry was made") from exc
-        steps[name].update(state="received", units=units, external_request_id=body.get("id"))
+        step = steps[name]
+        step.update(state="received", units=units, external_request_id=body.get("id"))
         if path.endswith("/chat/completions"):
-            content = (body.get("choices") or [{}])[0].get("message", {}).get("content")
-            if isinstance(content, str) and len(content) <= 65536:
-                steps[name]["response_text"] = content
+            step["response_text"] = response_text(body)
+        if checkpoint_image:
+            data = body.get("data")
+            if isinstance(data, list) and data and isinstance(data[0], dict):
+                encoded = data[0].get("b64_json")
+                if isinstance(encoded, str):
+                    step["image_response"] = encoded
+        # Atomically preserve the charge and the bounded inline image until the
+        # deterministic managed asset has been committed.
         self.save(financial=True)
+        return self.consume_step(step, body, consume, storyboard=storyboard)
+
+    def consume_step(self, step, body, consume, *, storyboard=False):
         try:
             result = consume(body)
         except Exception as exc:
-            steps[name]["processing_error"] = type(exc).__name__
+            diagnostic = storyboard_error(exc) if storyboard else None
+            if diagnostic:
+                step.update(state="invalid", diagnostic=diagnostic)
+                step.pop("response_text", None)
+            step["processing_error"] = type(exc).__name__
             self.save(financial=True)
+            if diagnostic:
+                raise video_error("VIDEO_AI_INVALID_STORYBOARD", diagnostic) from exc
             if isinstance(exc, (ValidationError, json.JSONDecodeError)):
                 raise video_error("VIDEO_AI_INVALID_STORYBOARD", "The generated storyboard did not match its schema") from exc
             raise
-        steps[name].update(state="done", result=result)
+        step.update(state="done", result=result)
+        step.pop("image_response", None)
+        step.pop("processing_error", None)
         self.save(financial=True)
         return result
 
@@ -297,12 +358,20 @@ class VideoAutopilot:
                 "Preserve uploaded demo VIDEO clips. Generated content must not invent readable interfaces or product facts.")
         else:
             instruction += " Set generation_kind=image for missing visuals. Do not request video generation or animate uploaded images."
+        instruction += (" Provide publication.title and publication.description in the requested language, based "
+                        "on the finished story. The title must be one line. The description describes this episode. "
+                        "Exclude instructions, editorial notes, private inputs, markup and platform attribution.")
         on_stage("storyboard")
         def parse_storyboard(body):
-            text = body["choices"][0]["message"]["content"].strip()
+            text = response_text(body)
+            if not text or not text.strip():
+                raise video_error("VIDEO_AI_INVALID_STORYBOARD", "The provider response had no storyboard text")
+            text = text.strip()
             if text.startswith("```"):
                 text = "\n".join(text.splitlines()[1:-1])
-            plan = Storyboard.model_validate_json(text)
+            # An in-flight response saved by an older worker can lack public copy.
+            model = PublishableStoryboard if self.progress["steps"].get(storyboard_step, {}).get("publication_schema") else Storyboard
+            plan = model.model_validate_json(text)
             if any(s.asset_id and s.asset_id not in allowed for s in plan.scenes):
                 raise video_error("VIDEO_AI_INVALID_STORYBOARD", "The storyboard referenced an unavailable material")
             if abs(sum(s.duration_seconds for s in plan.scenes) - options["duration_seconds"]) > 1:
@@ -321,13 +390,32 @@ class VideoAutopilot:
                 raise video_error("VIDEO_AI_INVALID_STORYBOARD", "The storyboard exceeded its video-scene budget")
             fit_clip_fragments(plan, by_id)
             return plan.model_dump(exclude_none=True)
-        plan = self.paid_step("storyboard", "/v1/chat/completions", {
+        payload = {
             "model": settings.ai_gateway_default_model, "messages": [
                 {"role": "system", "content": instruction},
                 {"role": "user", "content": json.dumps({"task": brief, "language": options["language"],
                     "target_seconds": options["duration_seconds"], "style": options["style"], "template": options.get("template"), "brand_name": options.get("brand_name"), "materials": context}, ensure_ascii=False)}],
-            "response_format": structured_output(Storyboard, "video_storyboard"),
-            "temperature": 0.3, "max_tokens": 2500}, parse_storyboard)
+            "response_format": structured_output(PublishableStoryboard, "video_storyboard"),
+            "temperature": 0.3, "max_tokens": 2500}
+        storyboard_step = "storyboard"
+        try:
+            plan = self.paid_step(storyboard_step, "/v1/chat/completions", payload, parse_storyboard, storyboard=True)
+        except PostbridgeError as exc:
+            original = self.progress.get("steps", {}).get(storyboard_step, {})
+            if exc.code != "VIDEO_AI_INVALID_STORYBOARD" or original.get("state") != "invalid":
+                raise
+            repair = {"role": "system", "content": f"Correct the previous storyboard. {original['diagnostic']}"}
+            storyboard_step = "storyboard:retry"
+            try:
+                plan = self.paid_step(storyboard_step, "/v1/chat/completions",
+                    {**payload, "messages": [*payload["messages"], repair]}, parse_storyboard, storyboard=True)
+            except PostbridgeError as retry_error:
+                if retry_error.code.startswith("VIDEO_BUDGET_"):
+                    raise video_error(retry_error.code, "The storyboard was invalid and the remaining budget "
+                                      "did not authorize a correction") from retry_error
+                raise
+        if plan.get("publication"):
+            self.progress["publication"] = plan["publication"]
         return self.materialize(plan["scenes"], options=options, directory=directory, on_stage=on_stage)
 
     def materialize(self, items, *, options, directory, on_stage):
@@ -357,20 +445,25 @@ class VideoAutopilot:
                         raise video_error("VIDEO_AI_INVALID_IMAGE", "The gateway did not return an inline image")
                     decoded = base64.b64decode(encoded, validate=True)
                     path = directory / f"generated-{index}.png"
-                    path.write_bytes(decoded)
-                    # A deterministic asset id makes a stored paid image recoverable.
-                    with self.factory() as session:
-                        existing = session.get(MediaAssetOrm, generated_id)
-                        if existing:
-                            return {"asset_id": existing.id}
-                        material = store_video_material(session, self.tenant_id, path, asset_id=generated_id)
-                        return {"asset_id": material["media_asset_id"]}
+                    try:
+                        path.write_bytes(decoded)
+                        # A deterministic id also handles a lost storage commit acknowledgement.
+                        with self.factory() as session:
+                            existing = session.get(MediaAssetOrm, generated_id)
+                            if existing:
+                                if existing.tenant_id != self.tenant_id:
+                                    raise video_error("VIDEO_ASSET_NOT_FOUND", "The generated material is unavailable")
+                                return {"asset_id": existing.id}
+                            material = store_video_material(session, self.tenant_id, path, asset_id=generated_id)
+                    except (OSError, RuntimeError, BotoCoreError, ClientError) as exc:
+                        raise WaitingForStoredImage from exc
+                    return {"asset_id": material["media_asset_id"]}
                 result = self.paid_step(f"image:{index}", "/v1/images/generations", {
                     "model": settings.video_image_model, "prompt": (
                         "Create one vertical 9:16 illustrative scene. No text, no readable UI, no logos, no watermark. "
                         + item["image_prompt"] + "\nStyle: " + options["style"]),
                     "size": "1024x1536", "n": 1, "response_format": "b64_json"}, store_image,
-                    restore=restore_image, artifact_id=generated_id)
+                    restore=restore_image, artifact_id=generated_id, checkpoint_image=True)
                 asset_id = result["asset_id"]
             scene = {k: v for k, v in item.items() if v is not None and k not in {"regenerate_image", "regenerate_video"}}
             if generated:

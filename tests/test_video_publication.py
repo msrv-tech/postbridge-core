@@ -47,6 +47,21 @@ def approval(publication):
     return approve_publication(db, tenant, post_id, body), body
 
 
+def test_legacy_autopilot_with_an_empty_template_uses_its_finished_mp4_duration(publication):
+    from postbridge.models.domain import VideoPostDraftOrm, VideoProductionJobOrm, VideoRevisionOrm
+    db, tenant, _, post_id, _ = publication
+    receipt = db.scalar(select(VideoPostDraftOrm).where(VideoPostDraftOrm.content_item_id == post_id))
+    revision = db.get(VideoRevisionOrm, receipt.revision_id)
+    job = db.scalar(select(VideoProductionJobOrm).where(VideoProductionJobOrm.revision_id == revision.id))
+    expected = job.progress_json["output_duration_seconds"]
+    job.progress_json = {key: value for key, value in job.progress_json.items() if key != "output_duration_seconds"}
+    revision.scenes = []
+    revision.production_options = {**revision.production_options, "mode": "autopilot"}
+    db.commit()
+    assert expected > 0
+    assert publication_view(db, tenant, post_id)["source_duration_seconds"] == expected
+
+
 class Publisher:
     def __init__(self, exc=None):
         self.calls = []

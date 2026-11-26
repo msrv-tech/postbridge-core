@@ -27,7 +27,8 @@ def draft_payload(session: Session, draft: VideoPostDraftOrm) -> dict:
             "created_at": draft.created_at.replace(tzinfo=UTC) if draft.created_at.tzinfo is None else draft.created_at.astimezone(UTC)}
 
 
-def prepare_post_draft(session: Session, tenant_id: str, project_id: str, payload: PrepareVideoPost) -> dict:
+def prepare_post_draft(session: Session, tenant_id: str, project_id: str, payload: PrepareVideoPost, *,
+                       automatic_title: str | None = None) -> dict:
     require_enabled()
     # Serialize handoff and scene revisions on the same project. No network call or queue
     # operation belongs in this transaction; Core commits the post and receipt together.
@@ -54,9 +55,11 @@ def prepare_post_draft(session: Session, tenant_id: str, project_id: str, payloa
     # The production brief can contain private instructions. Only the explicit caption
     # becomes publishable text. A later video revision never rewrites this post.
     content = create_postbridge_content_item(session, tenant_id=tenant_id, author_user_id=None,
-        content_md=payload.caption, content_plain=None, title=None, media_url=url, media_urls=[url],
+        content_md=payload.caption, content_plain=None, title=automatic_title, media_url=url, media_urls=[url],
         summary=None, link_url=None, cta=None, tags=None, author=None, cover_image_url=cover_url, status="draft")
     content.language = (revision.production_options or {}).get("language")
+    if automatic_title:
+        origin["episode_copy"] = True
     content.body_structured_json = _dump_extra({**_load_extra(content.body_structured_json), "video_origin": origin})
     receipt = VideoPostDraftOrm(id=str(uuid4()), tenant_id=tenant_id, revision_id=revision.id,
                                content_item_id=content.id, caption=payload.caption)

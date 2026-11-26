@@ -101,6 +101,8 @@ class EditorialExecutionService:
         seed_urls: list[str] | None = None,
         approved_image_urls: list[str] | None = None,
         require_source_approval: bool = False,
+        editorial_photo_policy=None,
+        editorial_photo_publish: bool = False,
     ) -> dict[str, Any]:
         record_editor_timeline = bool(mode == "post_copilot" and content_item_id)
         timeline_content_item_id = content_item_id
@@ -120,6 +122,10 @@ class EditorialExecutionService:
             search_image_mode,
             fallback_image_request=image_request,
         )
+        if editorial_photo_policy:
+            normalized_search_image_mode = "none"
+            image_request = False
+            max_candidates = 1
         effective_image_request = (
             normalized_search_image_mode in {"web_search", "generate"}
             if mode == "topic_scout" and search_image_mode is not None
@@ -220,6 +226,7 @@ class EditorialExecutionService:
                     "image_request": effective_image_request,
                     "search_image_mode": normalized_search_image_mode,
                     "search_image_mode_source": "task" if search_image_mode is not None else "legacy_image_request",
+                    "editorial_photo": bool(editorial_photo_policy),
                     "content_item_id": content_item_id,
                     "agent_task_id": agent_task.id if agent_task else None,
                     "agent_run_id": run.id,
@@ -435,6 +442,7 @@ class EditorialExecutionService:
                     result=result,
                     review_created=True,
                     token_usage=tool_summary["usage_totals"],
+                    schedule_claimed=bool(editorial_photo_policy),
                 )
                 if mode == "post_copilot" and timeline_content_item_id:
                     append_agent_editor_run_completed(
@@ -587,6 +595,25 @@ class EditorialExecutionService:
                         headline=row.headline,
                         topic=row.topic,
                     )
+                if editorial_photo_policy:
+                    from postbridge.services.editorial_photo import materialize_photo
+                    duplicate = "possible_duplicate" in risk_flags_payload or (
+                        row.dedup_summary or ""
+                    ).startswith("embedding near-duplicate")
+                    content_id, error = materialize_photo(self._session, agent_task, run, row, candidate.get("layout"),
+                        editorial_photo_policy, guardrail_blocked=duplicate, publish=editorial_photo_publish)
+                    step = {"candidate_id": row.id, "content_item_id": content_id, "diagnostic": error}
+                    append_run_step(self._session, agent_run_id=run.id, tenant_id=tenant_id,
+                                    step_name="editorial_photo_album", status="warning" if error else "ok",
+                                    output_payload=step)
+                    if error:
+                        review = create_review_queue_item(self._session, tenant_id=tenant_id, channel_id=channel_id,
+                            agent_run_id=run.id, candidate_id=row.id,
+                            review_payload={**build_review_payload(row, autonomy_mode="draft_approval"), **step})
+                        review_items.append({"review_item_id": review.id, "candidate_id": row.id, "status": review.status})
+                    else:
+                        auto_materialized.append(step)
+                    continue
                 if policy.requires_review:
                     if mode == "post_copilot" and content_item_id and policy.mode == "draft_approval":
                         materialization = materialize_candidate_on_approval(
@@ -835,6 +862,7 @@ class EditorialExecutionService:
                 result=result,
                 review_created=bool(review_items),
                 token_usage=tool_summary["usage_totals"],
+                schedule_claimed=bool(editorial_photo_policy),
             )
             if mode == "post_copilot" and timeline_content_item_id:
                 if not record_editor_timeline:

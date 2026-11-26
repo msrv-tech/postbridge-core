@@ -661,6 +661,10 @@ def run_service_agent_task(
         )
     orchestrator = EditorialExecutionService(session)
     task_config = orchestrator.parse_task_config(task.task_config_json)
+    photo_policy = None
+    if task_config.get("editorial_photo"):
+        from postbridge.services.editorial_photo import EditorialPhotoPolicy
+        photo_policy = EditorialPhotoPolicy.model_validate(task_config["editorial_photo"])
     result = orchestrator.run_once(
         tenant_id=tenant_id,
         channel_id=task.channel_id,
@@ -679,6 +683,7 @@ def run_service_agent_task(
         ),
         seed_urls=task_config.get("seed_urls") if isinstance(task_config.get("seed_urls"), list) else None,
         require_source_approval=bool(task_config.get("require_source_approval")),
+        editorial_photo_policy=photo_policy,
     )
     session.commit()
     run_payload = _agent_run_response_from_result(session, tenant_id=tenant_id, result=result)

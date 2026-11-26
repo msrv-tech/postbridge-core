@@ -32,9 +32,12 @@ def speech(auto, monkeypatch):
     def gateway(path, body, correlation):
         calls.append((path, body))
         if path.endswith("completions"):
-            count = len(json.loads(body["messages"][-1]["content"])["scenes"])
-            return {"usage_tokens_charged": 7, "choices": [{"message": {"content": json.dumps({"scenes": [
-                {"caption": "Try the product", "narration_text": "Try our product today."} for _ in range(count)]})}}]}
+            context = json.loads(body["messages"][-1]["content"])
+            result = {"scenes": [{"caption": "Try the product", "narration_text": "Try our product today."}
+                                 for _ in context["scenes"]]}
+            if context.get("publication"):
+                result["publication"] = {"title": "At the archive", "description": "A new clue in the archive."}
+            return {"usage_tokens_charged": 7, "choices": [{"message": {"content": json.dumps(result)}}]}
         return {"id": "speech-external-id", "usage_tokens_charged": 11,
             "audio": {"b64_pcm": base64.b64encode(pcm).decode(), "sample_rate": 24000, "sample_width": 2, "channels": 1}}
     monkeypatch.setattr(video_autopilot, "gateway_json", gateway)
@@ -80,6 +83,19 @@ def test_generated_speech_controls_scene_length_and_real_audible_output(speech):
     assert len(calls) == 1 and calls[0][0] == "/v1/bounded/audio/generations"
     with error("VALIDATION_MEDIA_ASSET_IN_USE"):
         delete_media_asset(session, tenant_id=tenant, media_asset_id=scene["speech_asset_id"])
+
+
+def test_episode_copy_is_localized_with_the_voice_variant(speech):
+    session, _, _, _, _, calls = speech
+    project = make(speech)
+    job = session.get(VideoProductionJobOrm, project["current"]["job_id"])
+    job.progress_json = {**job.progress_json, "publication": {"title": "В архиве", "description": "Новая улика в архиве."}}
+    session.commit()
+    localized, _ = variant(speech, project)
+    assert localized["current"]["status"] == "succeeded"
+    assert localized["current"]["publication"] == {"title": "At the archive", "description": "A new clue in the archive."}
+    translation = next(body for path, body in calls if path.endswith("/chat/completions"))
+    assert json.loads(translation["messages"][-1]["content"])["publication"] == job.progress_json["publication"]
 
 
 def test_language_and_voice_versions_reuse_visuals_and_have_independent_posts(speech):

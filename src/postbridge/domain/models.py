@@ -30,6 +30,7 @@ class PostPayload:
     contains_synthetic_media: bool | None = None
     tiktok_options: dict[str, Any] | None = None
     video_duration_seconds: float | None = None
+    telegram_album: tuple[bytes, ...] | None = None
 
 
 @dataclass(slots=True)

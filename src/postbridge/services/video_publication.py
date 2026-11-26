@@ -115,9 +115,10 @@ def _snapshot(session, post, receipt):
     text = "\n\n".join(str(part).strip() for part in parts if part and str(part).strip())
     source = {"title": post.title, "body": post.body_markdown, "extra": {k: v for k, v in extra.items() if k != "published_at"},
               "media_url": post.media_url, "media_urls": post.media_urls, "language": post.language}
+    youtube_description = post.body_markdown if (extra.get("video_origin") or {}).get("episode_copy") else None
     return {"project_id": revision.project_id, "version": revision.version, "text": text, "output_url": url,
         "output_asset_id": asset.id, "byte_size": asset.byte_size, "object_key": asset.object_key,
-        "source_hash": fingerprint(source)}
+        "source_hash": fingerprint(source), **({"youtube_description": youtube_description} if youtube_description else {})}
 
 
 def _slug(channel):
@@ -130,7 +131,32 @@ VIDEO_FORMATS = {"telegram": "video", "instagram": "reel", "youtube": "short", "
 
 def _source_duration(session, receipt):
     revision = session.get(VideoRevisionOrm, receipt.revision_id)
-    return sum(float(scene.get("duration_seconds", 0)) for scene in revision.scenes)
+    job = session.scalar(select(VideoProductionJobOrm).where(VideoProductionJobOrm.revision_id == revision.id))
+    progress = (job.progress_json or {}) if job else {}
+    if progress.get("output_duration_seconds"):
+        return progress["output_duration_seconds"]
+    if job and job.status == "succeeded" and (revision.production_options or {}).get("mode") == "autopilot":
+        # Older autopilots did not measure the output. Probe the same managed
+        # MP4 the publisher uses, without rewriting the historical approval.
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from postbridge.domain.errors import PostbridgeError
+        from postbridge.infrastructure.media_storage import read_media_object
+        from postbridge.services.video_media import MAX_UPLOAD_BYTES, inspect_media
+
+        asset = session.get(MediaAssetOrm, job.output_asset_id) if job.output_asset_id else None
+        if (asset and asset.tenant_id == receipt.tenant_id and asset.content_type == "video/mp4"
+                and 0 < asset.byte_size <= MAX_UPLOAD_BYTES):
+            try:
+                with TemporaryDirectory(prefix="postbridge-video-duration-") as directory:
+                    path = Path(directory) / "output.mp4"
+                    path.write_bytes(read_media_object(asset.object_key, max_bytes=asset.byte_size))
+                    return inspect_media(path)["duration_seconds"]
+            except (OSError, RuntimeError, PostbridgeError):
+                pass
+    # Older workers saved effective scene durations but did not persist the
+    # measured output duration. Templates for those autopilots can be empty.
+    return sum(float(scene.get("duration_seconds", 0)) for scene in progress.get("scenes") or revision.scenes)
 
 
 def _options(payload):
@@ -228,8 +254,10 @@ def approve_publication(session: Session, tenant_id: str, content_id: str, paylo
                 raise video_error("VIDEO_DELIVERY_FILE_TOO_LARGE", "URL-based Telegram delivery is limited to 20 MB")
         if ch.platform == "instagram" and len(snapshot["text"]) > 2200:
             raise video_error("VIDEO_CAPTION_TOO_LONG", "Instagram captions may contain at most 2200 characters")
-        if ch.platform == "youtube" and (not settings.get("title", "").strip() or settings.get("made_for_kids") is None
-                or len(snapshot["text"].encode("utf-8")) > 5000 or any(c in settings["title"] + snapshot["text"] for c in "<>")):
+        description = snapshot.get("youtube_description", snapshot["text"])
+        if ch.platform == "youtube" and (not settings.get("title", "").strip() or len(settings["title"]) > 100
+                or settings.get("made_for_kids") is None or len(description.encode("utf-8")) > 5000
+                or any(c in settings["title"] + description for c in "<>")):
             raise video_error("VIDEO_DESTINATION_OPTIONS_INVALID", "Review the YouTube title, description, audience and visibility")
         if ch.platform == "tiktok":
             from postbridge.integrations.tiktok.api import validate_post
@@ -297,7 +325,8 @@ def approved_payload(session, target, content, render, *, check_time=True):
     assert_approved_bridge(session, target.tenant_id, content, destination)
     # Ignore render variants: the immutable approval is the only source for sending.
     settings = destination.get("options", {})
-    return PostPayload(source_post_id=content.id, text=snapshot["text"], media_url=snapshot["output_url"],
+    text = snapshot.get("youtube_description", snapshot["text"]) if target.platform == "youtube" else snapshot["text"]
+    return PostPayload(source_post_id=content.id, text=text, media_url=snapshot["output_url"],
         media_urls=[snapshot["output_url"]], media_type="video", publication_format=settings.get("format", "video"),
         video_title=settings.get("title"), visibility=settings.get("visibility"), made_for_kids=settings.get("made_for_kids"),
         contains_synthetic_media=settings.get("contains_synthetic_media"),

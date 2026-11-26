@@ -34,13 +34,15 @@ def context_for(session, tenant_id, bridge, post):
             or not source or source.tenant_id != tenant_id or source.platform != "postbridge" or source.kind != "source" or source.status != "connected"
             or not target or target.tenant_id != tenant_id or target.platform not in FORMATS or target.kind != "destination" or target.status != "connected"):
         raise video_error("VIDEO_BRIDGE_UNAVAILABLE", "This video bridge is paused, disconnected or unavailable")
-    workspace_id = _load_extra(post.body_structured_json).get("saas_workspace_id")
+    extra = _load_extra(post.body_structured_json)
+    workspace_id = extra.get("saas_workspace_id")
     if workspace_id and source.external_id != f"pb/{workspace_id}":
         raise video_error("VIDEO_BRIDGE_UNAVAILABLE", "The bridge belongs to another workspace source")
     settings = normalize_bridge_settings(bridge.settings_json, source, target, bridge.mode) or {}
     options = dict(settings.get("video_delivery") or {"format": FORMATS[target.platform]})
     if target.platform == "youtube":
-        options["title"] = options.get("title") or (post.title or post.body_markdown or "Video").splitlines()[0].strip()[:100] or "Video"
+        episode_title = post.title if (extra.get("video_origin") or {}).get("episode_copy") else None
+        options["title"] = episode_title or options.get("title") or (post.title or post.body_markdown or "Video").splitlines()[0].strip()[:100] or "Video"
     context = {"id": bridge.id, "source_channel_id": source.id, "target_channel_id": target.id,
                "settings_hash": fingerprint(bridge.settings_json or {})}
     return target, options, context

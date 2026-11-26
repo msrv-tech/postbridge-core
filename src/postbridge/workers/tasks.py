@@ -314,7 +314,7 @@ def recover_stuck_jobs_task() -> int:
 
 
 @celery_app.task(name="postbridge.agent.run_task")
-def run_agent_task_task(task_id: str, tenant_id: str) -> dict:
+def run_agent_task_task(task_id: str, tenant_id: str, scheduled_for: str | None = None) -> dict:
     session = SESSION_LOCAL()
     try:
         task = get_agent_task(session, tenant_id=tenant_id, task_id=task_id)
@@ -326,6 +326,23 @@ def run_agent_task_task(task_id: str, tenant_id: str) -> dict:
             return {"agent_run_id": run.id} if run else {}
         orchestrator = EditorialExecutionService(session)
         task_config = orchestrator.parse_task_config(task.task_config_json)
+        photo_policy = None
+        if task_config.get("editorial_photo"):
+            from postbridge.agent.scheduling import next_run_at_from_cron
+            from postbridge.models.domain import AgentTaskOrm
+            from postbridge.services.editorial_photo import EditorialPhotoPolicy
+            task = session.scalar(select(AgentTaskOrm).where(AgentTaskOrm.id == task_id, AgentTaskOrm.tenant_id == tenant_id)
+                                  .with_for_update().execution_options(populate_existing=True))
+            due = task.next_run_at if task else None
+            if due and due.tzinfo is None:
+                due = due.replace(tzinfo=UTC)
+            now = datetime.now(UTC)
+            if not task or task.status != "active" or not due or scheduled_for != due.isoformat() or due > now:
+                return {}
+            task_config = orchestrator.parse_task_config(task.task_config_json)
+            photo_policy = EditorialPhotoPolicy.model_validate(task_config["editorial_photo"])
+            task.next_run_at = next_run_at_from_cron(task.schedule_cron, base=now, timezone=task.timezone)
+            session.commit()
         result = orchestrator.run_once(
             tenant_id=tenant_id,
             channel_id=task.channel_id,
@@ -339,7 +356,10 @@ def run_agent_task_task(task_id: str, tenant_id: str) -> dict:
             image_request=bool(
                 isinstance(task.editorial_instructions, str) and _IMAGE_INTENT_RE.search(task.editorial_instructions)
             ),
+            search_image_mode=task_config.get("search_image_mode"),
             seed_urls=task_config.get("seed_urls") if isinstance(task_config.get("seed_urls"), list) else None,
+            editorial_photo_policy=photo_policy,
+            editorial_photo_publish=bool(photo_policy),
         )
         usage_event_payload: dict | None = None
         run_id = str(result.get("agent_run_id") or "")
@@ -400,6 +420,8 @@ def process_due_agent_tasks_task() -> int:
     try:
         due = list_due_agent_tasks(session)
         from postbridge.services.video_schedules import enqueue_video_agent_run
+        from postbridge.models.domain import PublicationPlanOrm
+        from postbridge.services.editorial_photo import PHOTO_STRATEGY
         task_refs = []
         video_count = 0
         for row in due:
@@ -407,11 +429,21 @@ def process_due_agent_tasks_task() -> int:
                 enqueue_video_agent_run(session, tenant_id=row.tenant_id, task_id=row.id, scheduled=True)
                 video_count += 1
             else:
-                task_refs.append((row.id, row.tenant_id))
+                config = EditorialExecutionService.parse_task_config(row.task_config_json)
+                if config.get("editorial_photo"):
+                    at = row.next_run_at
+                    task_refs.append((row.id, row.tenant_id, (at if at.tzinfo else at.replace(tzinfo=UTC)).isoformat()))
+                else:
+                    task_refs.append((row.id, row.tenant_id))
+        album_targets = session.scalars(select(PublicationTargetOrm.id).join(PublicationPlanOrm).where(
+            PublicationPlanOrm.strategy == PHOTO_STRATEGY, PublicationPlanOrm.status == "scheduled",
+            PublicationTargetOrm.status == "pending").order_by(PublicationTargetOrm.created_at).limit(25)).all()
         session.commit()
         session.close()
-        for task_id, tenant_id in task_refs:
-            run_agent_task_task.delay(task_id, tenant_id)
+        for target_id in album_targets:
+            process_publication_target_task.delay(target_id, f"editorial-photo:{target_id}")
+        for args in task_refs:
+            run_agent_task_task.delay(*args)
         return len(task_refs) + video_count
     finally:
         try:

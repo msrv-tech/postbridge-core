@@ -297,6 +297,9 @@ def synchronize_video_agent_runs(session):
         run.status = "awaiting_review" if job.status == "succeeded" else job.status
         run.completed_at = datetime.now(UTC)
         run.error_code = job.error_code
+        steps = (job.progress_json or {}).get("steps", {})
+        if job.error_code == "VIDEO_AI_INVALID_STORYBOARD":
+            run.error_message = (steps.get("storyboard:retry") or steps.get("storyboard") or {}).get("diagnostic")
         run.trace_json = json.dumps({"result": {"video_project_id": execution.project_id,
             "video_version": revision.version, "status": job.status}, "trace": [], "tool_summary": {}})
         # Generation charges belong only to the video ledger, never the generic agent usage event.

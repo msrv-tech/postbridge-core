@@ -31,6 +31,7 @@ class EditorialCandidate(BaseModel):
     source_bundle: Any = Field(default_factory=dict)
     scores: dict[str, Any] = Field(default_factory=dict)
     risk_flags: list[str] = Field(default_factory=list)
+    layout: dict[str, Any] | None = None
 
 
 class PostSubmission(BaseModel):

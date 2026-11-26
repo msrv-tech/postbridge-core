@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 
 from postbridge.models.domain import (AgentTaskOrm, AgentRunOrm, VideoAgentExecutionOrm, VideoBatchItemOrm,
-    VideoBatchOrm, VideoRevisionOrm, VideoProjectOrm, VideoPostDraftOrm)
+    VideoBatchOrm, VideoRevisionOrm, VideoProjectOrm, VideoPostDraftOrm, VideoProductionJobOrm)
 from postbridge.services.video_media import video_error
 from postbridge.services.video_bridges import reviewed_bridges
 from postbridge.services.video_post_drafts import PrepareVideoPost, prepare_post_draft
@@ -90,6 +90,14 @@ def execution(db, tenant_id, run_id):
     return value
 
 
+def episode_copy(db, revision, attribution):
+    job = db.scalar(select(VideoProductionJobOrm).where(VideoProductionJobOrm.revision_id == revision.id))
+    publication = (job.progress_json or {}).get("publication") if job else None
+    if not publication:
+        return None, attribution
+    return publication["title"], f"{publication['description']}\n\n{attribution}"
+
+
 def prepare_auto_posts(db, tenant_id, run_id):
     value = execution(db, tenant_id, run_id)
     policy = assert_policy(db, tenant_id, value)
@@ -97,8 +105,9 @@ def prepare_auto_posts(db, tenant_id, run_id):
     result = []
     for revision in revisions:
         project = db.get(VideoProjectOrm, revision.project_id)
+        title, description = episode_copy(db, revision, policy.caption)
         post = prepare_post_draft(db, tenant_id, project.id, PrepareVideoPost(expected_version=project.current_version,
-            source_version=revision.version, caption=policy.caption))
+            source_version=revision.version, caption=description), automatic_title=title)
         result.append({'content_item_id': post['content_item_id'], 'approved': bool(approval_for_content(db, post['content_item_id']))})
     return {'items': result}
 
@@ -115,9 +124,11 @@ def auto_approval(db, tenant_id, run_id, content_id, *, lock=False):
     if not receipt:
         raise video_error('VIDEO_POST_NOT_FOUND', 'The post is not an output of this schedule occurrence')
     view = publication_view(db, tenant_id, content_id)
-    if view['snapshot']['text'] != policy.caption:
-        raise video_error('VIDEO_APPROVAL_CONFLICT', 'A post was edited after automatic publication was configured')
     revision = next(r for r in revisions if r.id == receipt.revision_id)
+    title, description = episode_copy(db, revision, policy.caption)
+    expected_text = f"{title}\n\n{description}" if title else description
+    if view['snapshot']['text'] != expected_text:
+        raise video_error('VIDEO_APPROVAL_CONFLICT', 'A post was edited after automatic publication was configured')
     language = (revision.production_options or {}).get('language', 'ru')
     bridges = policy.language_bridge_ids.get(language, []) if policy.language_bridge_ids else policy.bridge_ids
     if not bridges:

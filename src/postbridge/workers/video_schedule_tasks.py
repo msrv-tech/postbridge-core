@@ -179,7 +179,7 @@ def prepare_video_agent_run(run_id):
                 run.status = "queued"
             else:
                 run.status, run.completed_at = "failed", datetime.now(UTC)
-                run.error_code = exc.code if isinstance(exc, PostbridgeError) else "VIDEO_SCHEDULE_PREPARATION_FAILED"
+                run.error_code, run.error_message = exc.code, exc.message[:1024]
                 if run.error_code == "VIDEO_SCHEDULE_ACTOR_REVOKED" and execution.task_id:
                     from postbridge.models.domain import AgentTaskOrm
                     task = db.get(AgentTaskOrm, execution.task_id)

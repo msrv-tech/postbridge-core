@@ -398,11 +398,17 @@ class PublicationTargetExecutor:
         try:
             post = approved_payload(self.session, target, content, render, check_time=not resuming_video) or _build_post_payload(
                 content_item_id=content_item_id_for_payload, render=render, content=content)
+            photo_approval = False
             if target.platform == "telegram" and not video_approval:
-                _set_telegram_managed_image_type(self.session, target.tenant_id, post)
+                from postbridge.services.editorial_photo import approved_album
+                photo_approval = approved_album(self.session, target, content, post)
+                if not photo_approval:
+                    _set_telegram_managed_image_type(self.session, target.tenant_id, post)
             slug = _resolve_target_channel_slug(channel)
             cred_row = load_channel_credential_row(self.session, channel.id, target.tenant_id)
             credentials = decode_publish_credentials_for_platform(target.platform, cred_row)
+            if photo_approval and (not credentials or not credentials.bot_token):
+                raise ValidationError(code="EDITORIAL_PHOTO_BRIDGE_CHANGED", message="Connect the selected album destination's Telegram bot")
             publisher = self._publisher or get_publisher(target.platform)
         except PostbridgeError as exc:
             pre_dispatch_failed(exc)
@@ -480,7 +486,7 @@ class PublicationTargetExecutor:
             target.external_post_id = str(external_id) if external_id else None
             if receipt:
                 target.external_url = receipt.url
-            elif video_approval and external_id:
+            elif (video_approval or photo_approval) and external_id:
                 raw_slug = slug.removeprefix("tg/").removeprefix("@")
                 import re
                 if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{3,}", raw_slug):
@@ -491,7 +497,7 @@ class PublicationTargetExecutor:
             enqueue_publication_target_status_changed(
                 self.session, target, correlation_id=correlation_id
             )
-            if video_approval and content:
+            if (video_approval or photo_approval) and content:
                 self.session.flush()
                 remaining = self.session.scalar(select(PublicationTargetOrm.id).where(
                     PublicationTargetOrm.publication_plan_id == target.publication_plan_id,

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from urllib.parse import urlparse
 
 import httpx
@@ -95,6 +96,8 @@ class TelegramPublisher:
         text = payload.text or ""
 
         try:
+            if payload.telegram_album:
+                return self._send_album(token, chat_id, payload.telegram_album, text)
             if payload.media_type == "video":
                 return self._send_video(token, chat_id, payload.media_url or "", text)
             media_url = payload.media_url or (payload.media_urls[0] if payload.media_urls else None)
@@ -120,8 +123,27 @@ class TelegramPublisher:
                 message="Telegram Bot API request failed",
                 source="telegram",
                 retryable=True,
-                details={"target_channel": target_channel, "reason": str(exc)},
+                details={"target_channel": target_channel, "reason": type(exc).__name__},
             ) from exc
+
+    def _send_album(self, token: str, chat_id: str, photos: tuple[bytes, ...], caption: str) -> str:
+        media = [{"type": "photo", "media": f"attach://photo{index}", **({"caption": caption} if index == 0 else {})}
+                 for index in range(len(photos))]
+        files = {f"photo{index}": (f"photo{index}.png", photo, "image/png") for index, photo in enumerate(photos)}
+        # The ordinary delivery journal will hold an ambiguous POST. Do not
+        # repeat the send through a different transport.
+        with httpx.Client(timeout=httpx.Timeout(self._BOT_API_TIMEOUT),
+                          proxy=httpx_proxy_arg(self.settings.telegram_proxy_url)) as client:
+            response = client.post(f"{TG_BOT_API}{token}/sendMediaGroup",
+                data={"chat_id": chat_id, "media": json.dumps(media, ensure_ascii=False)}, files=files)
+            response.raise_for_status()
+            body = response.json()
+        results = body.get("result") if isinstance(body, dict) and body.get("ok") is True else None
+        if (not isinstance(results, list) or len(results) != len(photos)
+                or any(not isinstance(message, dict) or not message.get("message_id") for message in results)):
+            raise ExternalApiError(code="EXTERNAL_API_TELEGRAM_UNKNOWN_RESULT", message="Telegram returned no album receipt",
+                source="telegram", retryable=True, details={"target_channel": chat_id})
+        return str(results[0]["message_id"])
 
     def _send_video(self, token: str, chat_id: str, video_url: str, caption: str) -> str:
         # One attempt only. A timeout after POST may mean the video was already sent.

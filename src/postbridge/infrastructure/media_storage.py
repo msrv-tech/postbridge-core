@@ -100,14 +100,14 @@ def delete_media_object(object_key: str) -> None:
     )
 
 
-def read_media_object(object_key: str) -> bytes:
+def read_media_object(object_key: str, *, max_bytes: int | None = None) -> bytes:
     """Read an object through the configured canonical media storage."""
     settings = get_settings()
     mode = settings.media_storage_type
     if mode == "local":
-        return _read_local(object_key, settings)
+        return _read_local(object_key, settings, max_bytes=max_bytes)
     if mode == "s3":
-        return _read_s3(object_key, settings)
+        return _read_s3(object_key, settings, max_bytes=max_bytes)
     raise RuntimeError(
         "MEDIA_STORAGE_NOT_CONFIGURED: set MEDIA_STORAGE_TYPE to local or s3 "
         "and configure MEDIA_STORAGE_PATH/MEDIA_BASE_URL or S3_*"
@@ -137,7 +137,7 @@ def _delete_local(object_key: str, settings) -> None:
     full_path.unlink(missing_ok=True)
 
 
-def _read_local(object_key: str, settings) -> bytes:
+def _read_local(object_key: str, settings, *, max_bytes: int | None = None) -> bytes:
     if not settings.media_storage_path:
         raise RuntimeError("local media requires MEDIA_STORAGE_PATH")
     base_path = Path(settings.media_storage_path).resolve()
@@ -146,7 +146,13 @@ def _read_local(object_key: str, settings) -> bytes:
         full_path.relative_to(base_path)
     except ValueError as exc:
         raise RuntimeError("invalid local media object key") from exc
-    return full_path.read_bytes()
+    if max_bytes is None:
+        return full_path.read_bytes()
+    with full_path.open("rb") as stored:
+        data = stored.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise RuntimeError("local media exceeds requested limit")
+    return data
 
 
 def _s3_client(settings):

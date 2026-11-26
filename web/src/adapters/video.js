@@ -37,3 +37,5 @@ export const getVideoScheduleBridges = (workspaceId, channelId) => api(path(work
 
 export const listVideoSchedules = (workspaceId) => api(path(workspaceId, '/schedules'))
 export const updateVideoSchedule = (workspaceId, id, payload) => api(path(workspaceId, `/schedules/${id}`), { method: 'PATCH', body: JSON.stringify(payload) })
+export const updateVideoScheduleFunding = (workspaceId, id, payload) => api(
+  path(workspaceId, `/schedules/${id}/funding`), { method: 'PUT', body: JSON.stringify(payload) })

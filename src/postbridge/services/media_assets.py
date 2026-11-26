@@ -41,6 +41,7 @@ def store_media_asset(
     content_type: str,
     deduplicate: bool = False,
     library_name: str | None = None,
+    commit: bool = True,
 ) -> dict[str, str]:
     content_type = (content_type or "").split(";")[0].strip().lower()
     row = (session.scalar(select(TenantOrm).where(TenantOrm.id == tenant_id).with_for_update())
@@ -104,7 +105,7 @@ def store_media_asset(
         ) from exc
     if existing is not None:
         register_material()
-        session.commit()
+        session.commit() if commit else session.flush()
         return {"media_asset_id": asset_id, "url": managed_media_url(asset_id, object_key)}
     url = _public_media_url(asset_id=asset_id, storage_url=storage_url)
     now = datetime.now(UTC)
@@ -120,7 +121,7 @@ def store_media_asset(
         )
     )
     register_material()
-    session.commit()
+    session.commit() if commit else session.flush()
     return {"media_asset_id": asset_id, "url": url}
 
 
