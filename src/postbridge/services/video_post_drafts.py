@@ -16,7 +16,7 @@ from postbridge.services.video_studio import _project, require_enabled
 class PrepareVideoPost(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     expected_version: int = Field(ge=1)
-    caption: str = Field(default="", max_length=4000)
+    caption: str = Field(default="", max_length=5000)
     source_version: int | None = Field(default=None, ge=1)
 
 
@@ -52,10 +52,19 @@ def prepare_post_draft(session: Session, tenant_id: str, project_id: str, payloa
     cover_url = managed_media_url(cover.id, cover.object_key) if cover and cover.tenant_id == tenant_id else None
     url = managed_media_url(asset.id, asset.object_key)
     origin = {"project_id": project.id, "version": revision.version, "output_asset_id": asset.id, "output_url": url}
+    caption = payload.caption
+    if selection := (job.progress_json or {}).get("material_selection"):
+        origin["material_selection_version"] = selection["version"]
+        if not automatic_title:
+            from postbridge.services.material_selections import publication_caption
+            publication = (job.progress_json or {}).get("publication") or {}
+            automatic_title = publication.get("title")
+            caption = publication_caption(selection, (revision.production_options or {}).get("language"),
+                caption or publication.get("description", ""))
     # The production brief can contain private instructions. Only the explicit caption
     # becomes publishable text. A later video revision never rewrites this post.
     content = create_postbridge_content_item(session, tenant_id=tenant_id, author_user_id=None,
-        content_md=payload.caption, content_plain=None, title=automatic_title, media_url=url, media_urls=[url],
+        content_md=caption, content_plain=None, title=automatic_title, media_url=url, media_urls=[url],
         summary=None, link_url=None, cta=None, tags=None, author=None, cover_image_url=cover_url, status="draft")
     content.language = (revision.production_options or {}).get("language")
     if automatic_title:

@@ -414,14 +414,23 @@ def publish_agent_run_usage_event_task(payload: dict, correlation_id: str | None
     return 1
 
 
+@celery_app.task(name="postbridge.agent.process_material_run", acks_late=True, reject_on_worker_lost=True,
+                 soft_time_limit=100, time_limit=115)
+def process_agent_material_run(run_id: str) -> None:
+    from postbridge.services.material_selections import process
+    with SESSION_LOCAL() as session:
+        process(session, run_id)
+
+
 @celery_app.task(name="postbridge.agent.process_due_tasks")
 def process_due_agent_tasks_task() -> int:
     session = SESSION_LOCAL()
     try:
         due = list_due_agent_tasks(session)
         from postbridge.services.video_schedules import enqueue_video_agent_run
-        from postbridge.models.domain import PublicationPlanOrm
+        from postbridge.models.domain import AgentRunOrm, PublicationPlanOrm
         from postbridge.services.editorial_photo import PHOTO_STRATEGY
+        from postbridge.services.material_selections import MATERIAL_GRAPHS, enqueue
         task_refs = []
         video_count = 0
         for row in due:
@@ -430,11 +439,16 @@ def process_due_agent_tasks_task() -> int:
                 video_count += 1
             else:
                 config = EditorialExecutionService.parse_task_config(getattr(row, "task_config_json", None))
-                if config.get("editorial_photo"):
+                if config.get("materials"):
+                    enqueue(session, row.id, row.tenant_id, scheduled=True)
+                elif config.get("editorial_photo"):
                     at = row.next_run_at
                     task_refs.append((row.id, row.tenant_id, (at if at.tzinfo else at.replace(tzinfo=UTC)).isoformat()))
                 else:
                     task_refs.append((row.id, row.tenant_id))
+        session.flush()
+        material_runs = session.scalars(select(AgentRunOrm.id).where(AgentRunOrm.graph_name.in_(MATERIAL_GRAPHS),
+            AgentRunOrm.status == "queued").order_by(AgentRunOrm.updated_at, AgentRunOrm.id).limit(25)).all()
         album_targets = session.scalars(select(PublicationTargetOrm.id).join(PublicationPlanOrm).where(
             PublicationPlanOrm.strategy == PHOTO_STRATEGY, PublicationPlanOrm.status == "scheduled",
             PublicationTargetOrm.status == "pending").order_by(PublicationTargetOrm.created_at).limit(25)).all()
@@ -444,7 +458,9 @@ def process_due_agent_tasks_task() -> int:
             process_publication_target_task.delay(target_id, f"editorial-photo:{target_id}")
         for args in task_refs:
             run_agent_task_task.delay(*args)
-        return len(task_refs) + video_count
+        for run_id in material_runs:
+            process_agent_material_run.delay(run_id)
+        return len(task_refs) + video_count + len(material_runs)
     finally:
         try:
             session.close()

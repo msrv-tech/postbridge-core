@@ -2,7 +2,7 @@
 from datetime import UTC, datetime, timedelta
 import json
 import hashlib
-from uuid import NAMESPACE_URL, uuid4, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -31,6 +31,7 @@ class VideoTaskConfig(BaseModel):
     notify: bool = True
     production_lead_minutes: int | None = Field(default=None, ge=5, le=1440)
     auto_publication: AutoPublicationPolicy | None = None
+    material_source_task_id: str | None = Field(default=None, pattern=r"^[a-f0-9-]{36}$")
     material_folder: str | None = Field(default=None, max_length=120)
     material_limit: int = Field(default=6, ge=1, le=8)
 
@@ -60,6 +61,11 @@ def validate_template(config, goal_text):
         value = VideoTaskConfig.model_validate(config)
         if value.material_folder is not None and (value.video.mode != "autopilot" or value.video.scenes):
             raise ValueError("A dynamic folder requires autopilot without fixed materials")
+        if value.material_source_task_id is not None:
+            UUID(value.material_source_task_id)
+            if (value.material_folder is not None or value.video.mode != "autopilot" or value.video.scenes
+                    or value.count != 1 or value.video.generated_visuals != "images"):
+                raise ValueError("A material source makes one original from the verified stills")
         if value.auto_publication and value.auto_publication.language_bridge_ids:
             languages = {value.video.language, *(v.language for v in value.variants)}
             if not languages.issubset(value.auto_publication.language_bridge_ids):
@@ -120,6 +126,9 @@ def create_video_agent_task(session, *, tenant_id, channel_id, goal_text, schedu
     if channel is None or channel.tenant_id != tenant_id or channel.platform != "postbridge":
         raise video_error("VIDEO_SCHEDULE_CONTEXT_INVALID", "Choose a Postbridge editorial context")
     session.scalar(select(TenantOrm).where(TenantOrm.id == tenant_id).with_for_update())
+    if config.material_source_task_id:
+        from postbridge.services.material_selections import source_task
+        source_task(session, tenant_id, config.material_source_task_id)
     _check_assets(session, tenant_id, [scene.model_dump() for scene in config.video.scenes])
     task_id = str(uuid5(NAMESPACE_URL, f"postbridge-video-task:{tenant_id}:{config.request_key}"))
     existing = session.get(AgentTaskOrm, task_id)
@@ -176,6 +185,9 @@ def update_video_agent_task(session, *, tenant_id, task_id, expected_hash, goal_
         next_run = next_production_at(schedule_cron, timezone, config)
     except (ValueError, KeyError, ZoneInfoNotFoundError) as exc:
         raise video_error("VIDEO_SCHEDULE_INVALID", "Choose a valid schedule and timezone") from exc
+    if config.material_source_task_id:
+        from postbridge.services.material_selections import source_task
+        source_task(session, tenant_id, config.material_source_task_id)
     _check_assets(session, tenant_id, [s.model_dump() for s in config.video.scenes])
     task.goal_text, task.schedule_cron, task.timezone = goal_text, schedule_cron, timezone
     task.task_config_json = json.dumps(canonical)
@@ -231,6 +243,16 @@ def enqueue_video_agent_run(session, *, tenant_id, task_id, occurrence_key=None,
         production["scenes"] = folder_scenes(session, tenant_id, config)
         if not production["scenes"] and not active:
             run.status, run.error_code, run.completed_at = "failed", "VIDEO_FOLDER_EMPTY", now
+    selection = None
+    if config.material_source_task_id and run.status == "queued":
+        from postbridge.domain.errors import PostbridgeError
+        from postbridge.services.material_selections import claim
+        try:
+            selection = claim(session, tenant_id, config.material_source_task_id, task.id, run.id)
+            production["scenes"] = [{"asset_id": frame["asset_id"], "duration_seconds": 5, "caption": ""}
+                                    for frame in selection["frames"]]
+        except PostbridgeError as exc:
+            run.status, run.error_code, run.error_message, run.completed_at = "failed", exc.code, exc.message, now
     production["request_key"] = f"agent-video:{run_id}"
     publish_at = None
     if config.production_lead_minutes:
@@ -247,6 +269,7 @@ def enqueue_video_agent_run(session, *, tenant_id, task_id, occurrence_key=None,
             "publish_at": publish_at.isoformat() if publish_at else None,
             "production_lead_minutes": config.production_lead_minutes,
             "material_folder": config.material_folder,
+            **({"material_selection": selection} if selection else {}),
             "auto_publication": config.auto_publication.model_dump() if config.auto_publication else None}, notification_acknowledged=1 if active else 0))
     task.last_run_at = now
     if scheduled:

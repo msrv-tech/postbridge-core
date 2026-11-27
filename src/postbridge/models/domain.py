@@ -921,3 +921,28 @@ class VideoAgentExecutionOrm(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     notification_acknowledged: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class MaterialSelectionOrm(Base):
+    __tablename__ = "material_selections"
+    __table_args__ = (
+        UniqueConstraint("source_task_id", "edition_key", name="uq_material_source_edition"),
+        Index("ix_material_selections_source", "tenant_id", "source_task_id"),
+    )
+
+    id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id", ondelete="CASCADE"), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    source_task_id: Mapped[str] = mapped_column(ForeignKey("agent_tasks.id", ondelete="CASCADE"), nullable=False)
+    edition_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
+class MaterialSelectionUseOrm(Base):
+    __tablename__ = "material_selection_uses"
+    __table_args__ = (
+        UniqueConstraint("task_id", "selection_id", name="uq_material_consumer_edition"),
+    )
+
+    run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id", ondelete="CASCADE"), primary_key=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("agent_tasks.id", ondelete="CASCADE"), nullable=False)
+    selection_id: Mapped[str] = mapped_column(ForeignKey("material_selections.id", ondelete="CASCADE"), nullable=False)

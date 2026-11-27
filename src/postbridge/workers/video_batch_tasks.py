@@ -176,7 +176,12 @@ def advance_video_batch(batch_id):
                     VoiceVariantRequest.model_validate(body), commit=False)
                 row.expected_project_version = result["current_version"]
             else:
-                result = create_project(db, row.tenant_id, VideoCreate.model_validate(body), commit=False)
+                from postbridge.models.domain import VideoAgentExecutionOrm
+                run_id = (row.policy_json or {}).get("agent_run_id")
+                execution = db.get(VideoAgentExecutionOrm, run_id) if run_id else None
+                selection = execution.input_snapshot.get("material_selection") if execution else None
+                result = create_project(db, row.tenant_id, VideoCreate.model_validate(body), commit=False,
+                    material_selection=selection)
             revision = result.get("requested_revision", result["current"])
             item.project_id, item.revision_id, item.status = result["id"], revision["id"], "running"
             row.lease_until = None

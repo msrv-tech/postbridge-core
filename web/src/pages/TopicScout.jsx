@@ -259,8 +259,10 @@ export default function TopicScout() {
       setSelectedTaskId('')
       return
     }
-    setSelectedTaskId((prev) => (prev && tasks.some((task) => task.id === prev) ? prev : tasks[0].id))
-  }, [tasks])
+    const requested = new URLSearchParams(location.search).get('task')
+    setSelectedTaskId((prev) => (requested && tasks.some((task) => task.id === requested) ? requested
+      : prev && tasks.some((task) => task.id === prev) ? prev : tasks[0].id))
+  }, [tasks, location.search])
 
   const selectedTask = useMemo(() => tasks.find((task) => task.id === selectedTaskId) || null, [tasks, selectedTaskId])
   const latestRuns = useMemo(
@@ -803,6 +805,10 @@ export default function TopicScout() {
                   <div className="muted">{t('common.topic')}</div>
                   <strong>{selectedTask.goal_text}</strong>
                 </div>
+                {selectedTask.task_config?.materials?.source && <p>{t('materialSelection.catalogue', {
+                  provider: (selectedTask.task_config.materials.source.providers || [selectedTask.task_config.materials.source.provider]).filter(Boolean).join(' → '),
+                })}</p>}
+                {selectedTask.task_config?.materials?.draft && <p>{t('videoSchedule.draftOnly')}</p>}
                 {selectedTask.editorial_instructions ? (
                   <div>
                     <div className="muted">{t('common.instructions')}</div>
@@ -847,8 +853,10 @@ export default function TopicScout() {
                       <div>
                         <strong>{statusLabels[run.status] || run.status}</strong>
                         <p className="muted" style={{ margin: '0.3rem 0 0 0' }}>
-                          {run.user_request || run.topic_definition || run.id}
+                          {run.result?.material_selection?.topic || run.user_request || run.topic_definition || run.id}
                         </p>
+                        {run.error_code && run.graph_name?.startsWith('material_') && <p>{t(`api.error.${run.error_code}`, { defaultValue: run.error_message })}</p>}
+                        {run.result?.material_selection && <p>{t('materialSelection.ready', { count: run.result.material_selection.frames.length })}</p>}
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <div className="muted">{formatDate(run.created_at, locale)}</div>

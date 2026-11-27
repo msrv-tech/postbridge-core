@@ -175,13 +175,17 @@ def delete_media_asset(session: Session, *, tenant_id: str, media_asset_id: str)
         AgentRunOrm.id == VideoAgentExecutionOrm.id).where(VideoAgentExecutionOrm.tenant_id == tenant_id,
         AgentRunOrm.status.in_(["queued", "running"]),
         cast(VideoAgentExecutionOrm.input_snapshot, String).contains(media_asset_id)).limit(1))
-    from postbridge.models.domain import VideoBatchOrm, VideoBatchItemOrm
+    from postbridge.models.domain import MaterialSelectionOrm, VideoBatchOrm, VideoBatchItemOrm
     video_batch = session.scalar(select(VideoBatchItemOrm.id).join(VideoBatchOrm,
         VideoBatchOrm.id == VideoBatchItemOrm.batch_id).where(VideoBatchOrm.tenant_id == tenant_id,
         VideoBatchOrm.status.in_(["queued", "running"]),
         cast(VideoBatchItemOrm.payload_json, String).contains(media_asset_id)).limit(1))
     if video_reference or video_output or video_template or video_intent or video_batch:
         raise ValidationError(code="VALIDATION_MEDIA_ASSET_IN_USE", message="media asset is used by a video project", details={})
+    if session.scalar(select(MaterialSelectionOrm.id).where(MaterialSelectionOrm.tenant_id == tenant_id,
+            cast(MaterialSelectionOrm.snapshot, String).contains(media_asset_id)).limit(1)):
+        raise ValidationError(code="VALIDATION_MEDIA_ASSET_IN_USE",
+            message="media asset is used by a verified material selection", details={})
     if _media_asset_referenced_by_content(
         session,
         tenant_id=tenant_id,

@@ -388,6 +388,12 @@ def _agent_policy_public_dict(row) -> dict[str, Any]:
     }
 
 
+@router.get("/internal/service/agent/material-catalogues", include_in_schema=False)
+def list_material_catalogues(_tenant_id: str = Depends(require_service_tenant)):
+    from postbridge.integrations.material_catalogues import catalogue_options
+    return {"items": catalogue_options()}
+
+
 @router.post("/internal/service/agent/tasks", include_in_schema=False)
 def create_service_agent_task(
     body: AgentTaskCreateBody,
@@ -440,6 +446,7 @@ def list_service_agent_tasks(
     tenant_id: str = Depends(require_service_tenant),
     session: Session = Depends(get_db_session),
 ) -> list[dict[str, Any]]:
+    from postbridge.services.material_selections import task_hash
     rows = list_agent_tasks(session, tenant_id=tenant_id)
     return [
         {
@@ -450,6 +457,7 @@ def list_service_agent_tasks(
             "goal_text": row.goal_text,
             "editorial_instructions": row.editorial_instructions,
             "task_config": EditorialExecutionService.parse_task_config(row.task_config_json),
+            **({"template_hash": task_hash(row)} if '"materials"' in row.task_config_json else {}),
             "next_run_at": row.next_run_at, "last_run_at": row.last_run_at,
             "schedule_cron": row.schedule_cron,
             "timezone": row.timezone,
@@ -661,6 +669,22 @@ def run_service_agent_task(
         )
     orchestrator = EditorialExecutionService(session)
     task_config = orchestrator.parse_task_config(task.task_config_json)
+    if task_config.get("materials"):
+        from postbridge.services.material_selections import enqueue, material_error, DRAFT_GRAPH
+        from postbridge.workers.tasks import process_agent_material_run
+        key = request.headers.get("Idempotency-Key")
+        if key is not None and not 8 <= len(key) <= 80:
+            raise material_error("MATERIAL_SCHEDULE_INVALID", "Invalid material run request key")
+        run = enqueue(session, task.id, tenant_id, occurrence_key=key)
+        if not run:
+            raise material_error("MATERIAL_SOURCE_INVALID", "The material schedule is unavailable")
+        session.commit()
+        if run.status == "queued" and run.graph_name == DRAFT_GRAPH:
+            from postbridge.services.material_selections import process
+            process(session, run.id)
+        elif run.status == "queued":
+            process_agent_material_run.delay(run.id)
+        return {"task_id": task.id, "run": _agent_run_public_dict(run, session=session)}
     photo_policy = None
     if task_config.get("editorial_photo"):
         from postbridge.services.editorial_photo import EditorialPhotoPolicy

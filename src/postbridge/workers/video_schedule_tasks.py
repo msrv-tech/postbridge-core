@@ -163,7 +163,8 @@ def prepare_video_agent_run(run_id):
             execution = db.scalar(select(VideoAgentExecutionOrm).where(VideoAgentExecutionOrm.id == run_id).with_for_update())
             if execution.lease_token != token:
                 return
-            project = create_project(db, execution.tenant_id, body, agent_run_id=run_id)
+            project = create_project(db, execution.tenant_id, body, agent_run_id=run_id,
+                material_selection=execution.input_snapshot.get("material_selection"))
             execution.project_id = project["id"]
             execution.lease_until = None
             db.commit()

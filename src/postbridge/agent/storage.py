@@ -79,6 +79,12 @@ def create_agent_task(
         return create_video_agent_task(session, tenant_id=tenant_id, channel_id=channel_id, goal_text=goal_text,
             schedule_cron=schedule_cron, timezone=timezone, task_config=task_config, created_by=created_by,
             autonomy_mode=autonomy_mode, max_candidates_per_run=max_candidates_per_run)
+    if "materials" in task_config:
+        from postbridge.services.material_selections import save_task
+        return save_task(session, tenant_id=tenant_id, channel_id=channel_id, goal_text=goal_text,
+            editorial_instructions=editorial_instructions, schedule_cron=schedule_cron, timezone=timezone or "UTC",
+            config=task_config["materials"], created_by=created_by, mode=mode,
+            autonomy_mode=autonomy_mode, content_item_id=content_item_id)
     if "editorial_photo" in task_config:
         from postbridge.services.editorial_photo import EditorialPhotoPolicy, photo_error, selected_bridge
         if mode != "topic_scout" or not schedule_cron or not created_by or content_item_id:
@@ -1784,8 +1790,10 @@ def cleanup_agent_runtime(
     fingerprint_cutoff = now - timedelta(days=fingerprint_days)
 
     # Video occurrences retain their production/billing provenance with the video project.
-    trace_runs_stmt = select(AgentRunOrm).where(AgentRunOrm.created_at < trace_cutoff, AgentRunOrm.graph_name != "video_autopilot")
-    runs_stmt = select(AgentRunOrm).where(AgentRunOrm.created_at < review_cutoff, AgentRunOrm.graph_name != "video_autopilot")
+    from postbridge.services.material_selections import MATERIAL_GRAPHS
+    protected = ("video_autopilot", *MATERIAL_GRAPHS)
+    trace_runs_stmt = select(AgentRunOrm).where(AgentRunOrm.created_at < trace_cutoff, AgentRunOrm.graph_name.not_in(protected))
+    runs_stmt = select(AgentRunOrm).where(AgentRunOrm.created_at < review_cutoff, AgentRunOrm.graph_name.not_in(protected))
     reviews_stmt = select(ReviewQueueItemOrm).where(ReviewQueueItemOrm.created_at < review_cutoff)
     if tenant_id:
         trace_runs_stmt = trace_runs_stmt.where(AgentRunOrm.tenant_id == tenant_id)

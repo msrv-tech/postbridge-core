@@ -359,10 +359,21 @@ export default function SupportAssistantWidget({ workspaceId }) {
           )}
           {answer?.video_update && answer.video_update.project_id !== videoProjectId && <Link className="btn btn-secondary" to={`/workspaces/${workspaceId}/content/videos/${answer.video_update.project_id}`}>{t('video.open')}</Link>}
           {answer?.video_action && <div className="support-assistant-video-card">
-            <strong>{t(`videoAssistant.card.${answer.video_action.kind}`)}</strong>
+            <strong>{t(answer.video_action.summary.material_schedule ? "materialSelection.schedule" : `videoAssistant.card.${answer.video_action.kind}`)}</strong>
             <p>{answer.video_action.summary.brief}</p>
             {answer.video_action.summary.version && <p>{t('video.version', { version: answer.video_action.summary.version })}</p>}
-            {['schedule', 'schedule_edit'].includes(answer.video_action.kind) ? <>
+            {answer.video_action.summary.material_schedule ? <>
+              <p>{answer.video_action.summary.schedule_cron ? `${answer.video_action.summary.schedule_cron} · ${answer.video_action.summary.timezone}` : t('materialSelection.once')}</p>
+              {answer.video_action.summary.material_settings && <>
+                <p>{t('materialSelection.catalogue', { provider: (answer.video_action.summary.material_providers || []).join(" → ") })}</p>
+                <p>{[...answer.video_action.summary.material_settings.queries, ...answer.video_action.summary.material_settings.places].join(' · ')}</p>
+                {(answer.video_action.summary.material_settings.year_from > 1 || answer.video_action.summary.material_settings.year_to < 9999) && <p>{answer.video_action.summary.material_settings.year_from}–{answer.video_action.summary.material_settings.year_to}</p>}
+                {answer.video_action.summary.material_settings.first_topic && <p>{answer.video_action.summary.material_settings.first_topic}</p>}
+              </>}
+              {answer.video_action.summary.material_source && <p>{t('materialSelection.source', { source: answer.video_action.summary.material_source })} · {t(`videoVoice.language.${answer.video_action.summary.language}`)}</p>}
+              {answer.video_action.summary.material_source && <p>{t('videoSchedule.draftOnly')}</p>}
+              {answer.video_action.summary.material_edit && <p>{t('videoSchedule.agentStatusKept')}</p>}
+            </> : ['schedule', 'schedule_edit'].includes(answer.video_action.kind) ? <>
               <p>{answer.video_action.summary.frequency === 'custom' ? answer.video_action.summary.schedule_cron : `${t(`topicScout.schedule.${answer.video_action.summary.frequency}`)} · ${answer.video_action.summary.time}`} · {answer.video_action.summary.timezone}</p>
               {answer.video_action.summary.production_lead_minutes && <p>{t('videoSchedule.lead', { minutes: answer.video_action.summary.production_lead_minutes })}</p>}
               {answer.video_action.summary.frequency === 'weekly' && <p>{t(`weekday.${['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][answer.video_action.summary.weekday % 7]}`)}</p>}
@@ -371,6 +382,7 @@ export default function SupportAssistantWidget({ workspaceId }) {
               <p>{t('videoSchedule.agentOutput', { count: answer.video_action.summary.count || 1, language: t(`videoVoice.language.${answer.video_action.summary.language || 'ru'}`) })}</p>
               {answer.video_action.summary.variants?.map((v, i) => <p key={i}>{t(`videoVoice.language.${v.language}`)} · {v.voice} · {t(`videoVoice.style.${v.voice_style}`)}</p>)}
               {answer.video_action.summary.voice && <p>{answer.video_action.summary.voice} · {answer.video_action.summary.duration_seconds} s</p>}
+              {answer.video_action.summary.material_source && <p>{t('materialSelection.source', { source: answer.video_action.summary.material_source })}</p>}
               {answer.video_action.summary.material_folder != null && <p>{t('videoSchedule.agentFolder', { folder: answer.video_action.summary.material_folder || t('videoLibrary.noFolder'), count: answer.video_action.summary.material_limit })}</p>}
               {answer.video_action.summary.destinations?.length ? <>
                 <p>{t('videoAuto.consent', { count: (answer.video_action.summary.count || 1) * (1 + (answer.video_action.summary.variants?.length || 0)) })}</p>

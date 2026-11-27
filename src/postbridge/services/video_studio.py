@@ -263,7 +263,7 @@ def project_by_request(session: Session, tenant_id: str, request_key: str) -> di
     return result
 
 
-def _add_revision(session: Session, project: VideoProjectOrm, payload: VideoCreate):
+def _add_revision(session: Session, project: VideoProjectOrm, payload: VideoCreate, *, material_selection=None):
     scenes = [s.model_dump(exclude_none=True) for s in payload.scenes]
     # Serialize admission with media deletion and other submissions in this tenant.
     session.scalar(select(TenantOrm).where(TenantOrm.id == project.tenant_id).with_for_update())
@@ -300,11 +300,15 @@ def _add_revision(session: Session, project: VideoProjectOrm, payload: VideoCrea
         billing = {"request_key": payload.request_key, "reservation_id": payload.billing_reservation_id,
                    "limit_units": payload.billing_budget_units if settings.postbridge_app_mode == "saas" else
                        min(settings.video_ai_selfhost_budget_units, payload.billing_budget_units or settings.video_ai_selfhost_budget_units)}
+        progress = {"billing": billing, "steps": {}} if paid else {}
+        if material_selection:
+            progress["material_selection"] = material_selection
         session.add(VideoProductionJobOrm(id=str(uuid4()), tenant_id=project.tenant_id, revision_id=revision.id,
-            status="queued", stage="queued", attempts=0, progress_json={"billing": billing, "steps": {}} if paid else {}))
+            status="queued", stage="queued", attempts=0, progress_json=progress))
 
 
-def create_project(session: Session, tenant_id: str, payload: VideoCreate, *, agent_run_id: str | None = None, commit: bool = True) -> dict:
+def create_project(session: Session, tenant_id: str, payload: VideoCreate, *, agent_run_id: str | None = None,
+                   commit: bool = True, material_selection=None) -> dict:
     require_enabled()
     if payload.request_key.startswith("agent-video:") and payload.request_key != f"agent-video:{agent_run_id}":
         raise video_error("VIDEO_REQUEST_CONFLICT", "Agent video request keys belong to their scheduled run")
@@ -320,7 +324,7 @@ def create_project(session: Session, tenant_id: str, payload: VideoCreate, *, ag
     try:
         session.add(row)
         session.flush()
-        _add_revision(session, row, payload)
+        _add_revision(session, row, payload, material_selection=material_selection)
         session.commit() if commit else session.flush()
     except IntegrityError:
         session.rollback()

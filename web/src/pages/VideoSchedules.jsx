@@ -95,6 +95,7 @@ function HostedVideoSchedules() {
           <h2>{task.goal_text}</h2>
           <p>{t(`topicScout.taskStatus.${task.status}`)} · {task.timezone}</p>
           <p className="muted">{t('videoSchedule.nextRun', { date: date(task.next_run_at) })}</p>
+          {task.task_config?.material_source_task_id && <p><Link to={`/workspaces/${workspaceId}/agents/topic-scout?task=${task.task_config.material_source_task_id}`}>{t('materialSelection.schedule')}</Link></p>}
           {task.task_config?.auto_publication && <p>{t('videoAuto.activePolicy')}</p>}
           {task.budget && <ScheduleBudget task={task} workspaceId={workspaceId} onChange={(budget) => {
             if (context.current === workspaceId) setTasks((old) => old.map((item) => item.id === task.id ? { ...item, budget } : item))
@@ -106,7 +107,7 @@ function HostedVideoSchedules() {
           <ul>{runs.filter((run) => run.agent_task_id === task.id).slice(0, 10).map((run) => <li key={run.id}>
             {date(run.created_at)} · {t(`videoSchedule.run.${run.status}`, { defaultValue: run.status })}{' '}
             {run.video_execution?.auto_publication?.status && <span>{t(`videoAuto.status.${run.video_execution.auto_publication.status}`)}{' '}</span>}
-            {run.error_code && <span>{run.error_message || t(`api.error.${run.error_code}`, { defaultValue: t('videoSchedule.run.failed') })}{' '}</span>}
+            {run.error_code && <span>{t(`api.error.${run.error_code}`, { defaultValue: run.error_message || t('videoSchedule.run.failed') })}{' '}</span>}
             {run.video_execution?.project_id && <Link to={`/workspaces/${workspaceId}/content/videos/${run.video_execution.project_id}`}>{t('video.open')}</Link>}{' '}
             <Link to={`/workspaces/${workspaceId}/agents/runs/${run.id}`}>{t('videoSchedule.runDetails')}</Link>
           </li>)}</ul>

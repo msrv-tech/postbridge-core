@@ -70,7 +70,7 @@ def create_voice_variant(session, tenant_id: str, project_id: str, payload: Voic
         scenes=scenes, billing_reservation_id=payload.billing_reservation_id, billing_budget_units=payload.billing_budget_units)
     source_options = source.production_options or {}
     create = create.model_copy(update={key: source_options[key] for key in ("template", "brand_name", "brand_color") if key in source_options})
-    _add_revision(session, project, create)
+    _add_revision(session, project, create, material_selection=(job.progress_json or {}).get("material_selection"))
     revision = session.scalar(select(VideoRevisionOrm).where(VideoRevisionOrm.project_id == project.id,
         VideoRevisionOrm.version == project.current_version))
     revision.production_options = {**revision.production_options, "source_version": source.version,
@@ -105,6 +105,7 @@ def produce_speech(engine, *, scenes: list[dict], options: dict, directory: Path
         raise video_error("VIDEO_SPEECH_UNAVAILABLE", "Google speech generation was disabled")
     scenes = json.loads(json.dumps(scenes))
     publication = options.get("source_publication")
+    selection = engine.progress.get("material_selection")
     if options.get("translate_from"):
         on_stage("translating")
         script_model = LocalizedEpisode if publication else LocalizedScript
@@ -112,6 +113,11 @@ def produce_speech(engine, *, scenes: list[dict], options: dict, directory: Path
             script = script_model.model_validate_json(body["choices"][0]["message"]["content"])
             if len(script.scenes) != len(scenes):
                 raise video_error("VIDEO_INVALID_TRANSLATION", "Translation changed the scene count")
+            if selection and publication:
+                from postbridge.services.material_selections import uses_verified_year
+                words = [value for scene in script.scenes for value in (scene.caption, scene.narration_text)]
+                if not uses_verified_year(selection, script.publication.title, script.publication.description, *words):
+                    raise video_error("VIDEO_INVALID_TRANSLATION", "Translation changed the verified year")
             return script.model_dump()
         instruction = ("Localize a promotional storyboard. Return only JSON with scenes, each containing caption and narration_text. "
                        "Keep the exact scene order/count and product facts. No new promises. Keep speech concise enough for each target duration at a natural pace. "

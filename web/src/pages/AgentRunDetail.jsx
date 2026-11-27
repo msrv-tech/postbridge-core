@@ -28,6 +28,8 @@ function agentModeLabel(value, t) {
   const labels = {
     post_copilot: t('agents.nav.editor'),
     topic_scout: t('agents.nav.topicScout'),
+    material_selection: t('materialSelection.schedule'),
+    material_draft: t('materialSelection.draft'),
     video_autopilot: t('videoSchedule.title'),
   }
   return labels[value] || value || t('agentRun.title')
@@ -186,6 +188,7 @@ export default function AgentRunDetail() {
   const [reviewItems, setReviewItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const selection = run?.result?.material_selection || run?.video_execution?.input_snapshot?.material_selection
 
   const handleLogout = () => {
     clearToken()
@@ -274,6 +277,20 @@ export default function AgentRunDetail() {
                 <p style={{ margin: 0 }}>{run.user_request}</p>
               </div>
             )}
+            {run.error_code && run.error_message && <p>{t(`api.error.${run.error_code}`, { defaultValue: run.error_message })}</p>}
+            {selection && <details>
+              <summary>{t('materialSelection.ready', { count: selection.frames.length })}</summary>
+              <p>{selection.topic} · {selection.place} · {selection.year}</p>
+              <ul>{selection.frames.map((frame) => <li key={frame.reference}>
+                <a href={frame.record_url} target="_blank" rel="noreferrer">{frame.title}</a> · {frame.creator}{frame.provider ? ` · ${frame.provider}` : ''}
+              </li>)}</ul>
+            </details>}
+            {run.result?.catalogue_attempts?.length > 0 && <ul>
+              {run.result.catalogue_attempts.map((attempt, index) => <li key={index}>
+                {attempt.provider} · {t(`materialSelection.attempt.${attempt.status}`, { defaultValue: attempt.status })}
+              </li>)}
+            </ul>}
+            {run.graph_name === 'material_draft' && run.content_item_id && <Link to={`/workspaces/${workspaceId}/content/${run.content_item_id}`}>{t('materialSelection.draft')}</Link>}
             {run.video_execution?.project_id && <p><Link className="btn" to={`/workspaces/${workspaceId}/content/videos/${run.video_execution.project_id}`}>{t('video.open')}</Link></p>}
 
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>

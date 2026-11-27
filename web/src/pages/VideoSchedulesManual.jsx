@@ -166,7 +166,9 @@ export default function VideoSchedulesManual() {
       const key = createKey.current.key
       const taskConfig = { auto_publication: autoPolicy, request_key: key, video: { ...template, request_key: key },
         notify: !isSelfhostMode() && notify, ...batchOptions,
+        material_source_task_id: editing?.task_config?.material_source_task_id ?? null,
         material_folder: folderMode ? folder : null, material_limit: Number(materialLimit),
+        production_lead_minutes: editing?.task_config?.production_lead_minutes ?? null,
         max_units_per_run: editing?.task_config?.max_units_per_run ?? null,
         max_units_per_month: editing?.task_config?.max_units_per_month ?? null }
       if (editing) {
@@ -296,7 +298,7 @@ export default function VideoSchedulesManual() {
           <ul>{runs.filter((run) => run.agent_task_id === task.id).slice(0, 10).map((run) => <li key={run.id}>
             {date(run.created_at)} · {status(run)}{' '}
             {run.video_execution?.auto_publication?.status && <span>{t(`videoAuto.status.${run.video_execution.auto_publication.status}`)}{' '}{run.video_execution.auto_publication.error_code && t(`api.error.${run.video_execution.auto_publication.error_code}`, { defaultValue: run.video_execution.auto_publication.error_code })}{' '}</span>}
-            {run.error_code && run.error_code !== 'VIDEO_SCHEDULE_OVERLAP' && <span>{t(`api.error.${run.error_code}`, { defaultValue: t('videoSchedule.run.failed') })}{' '}</span>}
+            {run.error_code && run.error_code !== 'VIDEO_SCHEDULE_OVERLAP' && <span>{t(`api.error.${run.error_code}`, { defaultValue: run.error_message || t('videoSchedule.run.failed') })}{' '}</span>}
             {run.video_execution?.project_id && <Link to={`/workspaces/${workspaceId}/content/videos/${run.video_execution.project_id}`}>{t('video.open')}</Link>}{' '}
             {run.video_execution?.batch && <span>{t('videoBatch.progress', { done: run.video_execution.batch.items.filter((i) => i.status === 'succeeded').length, total: run.video_execution.batch.items.length })}{' '}{run.video_execution.batch.items.filter((i) => i.project_id && i.project_id !== run.video_execution.project_id).map((item) => <span key={item.id}><Link to={`/workspaces/${workspaceId}/content/videos/${item.project_id}`}>{t('videoBatch.variant', { number: item.position + 1 })}</Link>{' '}</span>)}</span>}
             <Link to={`/workspaces/${workspaceId}/agents/runs/${run.id}`}>{t('videoSchedule.runDetails')}</Link>

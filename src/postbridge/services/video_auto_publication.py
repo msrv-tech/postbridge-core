@@ -92,7 +92,14 @@ def execution(db, tenant_id, run_id):
 
 def episode_copy(db, revision, attribution):
     job = db.scalar(select(VideoProductionJobOrm).where(VideoProductionJobOrm.revision_id == revision.id))
-    publication = (job.progress_json or {}).get("publication") if job else None
+    progress = (job.progress_json or {}) if job else {}
+    publication = progress.get("publication")
+    if selection := progress.get("material_selection"):
+        from postbridge.services.material_selections import publication_caption
+        if not publication:
+            raise video_error("VIDEO_PUBLIC_COPY_MISSING", "Wait for the localized title and description for this selection")
+        language = (revision.production_options or {}).get("language", "ru")
+        return publication["title"], publication_caption(selection, language, publication["description"], attribution)
     if not publication:
         return None, attribution
     return publication["title"], f"{publication['description']}\n\n{attribution}"
