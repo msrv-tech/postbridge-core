@@ -25,8 +25,8 @@
 
 ## Push workflow
 
-- Treat a user request to push as a one-time authorization for that specific push only. Do not push again later unless the user explicitly asks for another push.
-- GitHub Actions are configured to run on push. After every push, check the relevant GitHub Actions logs.
+- A deploy command authorizes committing source changes directly on the local `main` and pushing to the canonical Gitea repository. Observe explicit holds and keep local CI output and credentials out of the commit.
+- When Core and SaaS both change, use the hosted release publisher from the SaaS deployment runbook to push both local `main` branches before the RU/IO release begins. Verify the Gitea Actions run and regional installation.
 - A push is not complete until the required checks and deployment have succeeded.
 - If a check or deployment fails after a push, inspect the logs, fix the failure, commit the fix, and push again as part of the same push request. Repeat until the deployment is green or there is a clear blocker that needs the user's decision.
 
