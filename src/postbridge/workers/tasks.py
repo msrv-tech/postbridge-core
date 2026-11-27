@@ -429,7 +429,7 @@ def process_due_agent_tasks_task() -> int:
                 enqueue_video_agent_run(session, tenant_id=row.tenant_id, task_id=row.id, scheduled=True)
                 video_count += 1
             else:
-                config = EditorialExecutionService.parse_task_config(row.task_config_json)
+                config = EditorialExecutionService.parse_task_config(getattr(row, "task_config_json", None))
                 if config.get("editorial_photo"):
                     at = row.next_run_at
                     task_refs.append((row.id, row.tenant_id, (at if at.tzinfo else at.replace(tzinfo=UTC)).isoformat()))
