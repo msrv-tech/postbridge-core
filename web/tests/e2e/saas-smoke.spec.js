@@ -1560,6 +1560,48 @@ async function switchToClient(page) {
   await page.locator('.workspace-option').filter({ hasText: 'Client Studio' }).click()
 }
 
+test('create workspace uses the same request on retry, then switches to the new Free workspace', async ({ page }) => {
+  await mockWorkspaceSwitching(page)
+  const requests = []
+  await page.route('**/me/workspaces', route => {
+    expect(route.request().method()).toBe('POST')
+    requests.push(route.request().postDataJSON())
+    if (requests.length === 1) return route.abort('failed')
+    return route.fulfill({ status: 201, json: {
+      id: 'ws-new', name: requests[1].name, role: 'owner', plan_code: 'free',
+      subscription_status: 'active', can_manage_billing: true,
+    } })
+  })
+  await page.route('**/workspaces/ws-new/**', route => {
+    if (route.request().isNavigationRequest()) return route.continue()
+    return route.fulfill({ json: { items: [], total: 0 } })
+  })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/workspaces/ws-1/content/new')
+  await page.locator('#title').fill('Unsaved title')
+  await page.locator('.workspace-switcher-trigger').click()
+  await page.getByRole('button', { name: 'Create workspace' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Create workspace' })
+  const submit = dialog.getByRole('button', { name: 'Create', exact: true })
+  await expect(dialog.getByLabel('Name')).toBeFocused()
+  await expect(submit).toBeDisabled()
+  await dialog.getByLabel('Name').fill('  New Studio  ')
+  await submit.click()
+  await expect(dialog.getByRole('alert')).toBeVisible()
+  await submit.click()
+
+  const unsaved = page.getByRole('dialog', { name: 'You have unsaved changes' })
+  await expect(unsaved).toBeVisible()
+  await expect(page.locator('#title')).toHaveValue('Unsaved title')
+  await unsaved.getByRole('button', { name: 'Switch without saving' }).click()
+  await expect(page).toHaveURL('/workspaces/ws-new/content')
+  await page.locator('.workspace-switcher-trigger').click()
+  await expect(page.locator('.workspace-option').filter({ hasText: 'New Studio' })).toContainText('Free · Owner')
+  expect(requests).toHaveLength(2)
+  expect(requests[0]).toEqual({ name: 'New Studio', request_id: expect.any(String) })
+  expect(requests[1]).toEqual(requests[0])
+})
+
 test('mobile workspace header keeps switching visible and collapses navigation', async ({ page }, testInfo) => {
   await mockWorkspaceSwitching(page)
   await page.setViewportSize({ width: 390, height: 844 })
@@ -2162,7 +2204,8 @@ for (const locale of ['en', 'ru']) {
     await expect.poll(() => metaCards(page).locator('img').evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0 && getComputedStyle(image).objectFit === 'contain' && image.alt === ''))).toBe(true)
     expect(await metaCards(page).locator('img').evaluateAll(images => images.every(image => new URL(image.src).pathname.startsWith('/assets/platforms/')))).toBe(true)
     await expect(page.locator('.workspace-switcher')).toHaveCount(0)
-    await expect(page.locator('.app-nav a[href="/settings/meta-connections"]')).toHaveAttribute('aria-current', 'page')
+    await expect(page.getByRole('button', { name: locale === 'en' ? 'Create workspace' : 'Создать воркспейс', exact: true })).toBeVisible()
+    await expect(page.locator('.app-nav a[href="/settings/meta-connections"]')).toHaveCount(0)
     for (const row of await metaCards(page).all()) await row.locator('summary').click()
     await expect(metaCards(page).nth(0)).toContainText('native-a')
     await expect(metaCards(page).nth(1)).toContainText('native-b')
@@ -2177,13 +2220,23 @@ for (const locale of ['en', 'ru']) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     await page.screenshot({ path: testInfo.outputPath(`meta-${locale}-${theme}-mobile.png`), fullPage: true })
     await page.getByRole('button', { name: locale === 'en' ? 'Open menu' : 'Открыть меню', exact: true }).click()
-    await page.locator('.app-nav').getByRole('link', { name: locale === 'en' ? 'Meta connections' : 'Подключения Meta', exact: true }).click()
+    await expect(page.locator('.app-nav a[href="/settings/meta-connections"]')).toHaveCount(0)
     expect(state.calls.every(call => call.path === '/me/meta-connections' && call.method === 'GET' && call.actor === 'owner-a' && JSON.stringify(call.query) === JSON.stringify([['limit', '50']]))).toBe(true)
     expect(state.publicCalls.length).toBeGreaterThan(0)
     expect(state.publicCalls.every(call => call.path === '/api/providers' && call.method === 'GET' && call.query.length === 0 && !call.authorization_present && !call.cookie_present)).toBe(true)
     expect(state.errors).toEqual([])
   })
 }
+
+test('Meta owner inventory is linked from Channels outside the workspace menu', async ({ page }) => {
+  const state = await mockMetaOwner(page)
+  state.users['owner-a'] = { ...saasUser, user_id: 'owner-a' }
+  await page.goto(`/workspaces/${saasUser.workspaces[0].id}/channels`)
+  await expect(page.locator('.app-nav a[href="/settings/meta-connections"]')).toHaveCount(0)
+  await page.getByRole('link', { name: 'Meta connections', exact: true }).click()
+  await expect(page).toHaveURL(/\/settings\/meta-connections$/)
+  await expect(metaCards(page)).toHaveCount(1)
+})
 
 test('Meta owner inventory ignores workspace selectors and never becomes a publication recipient', async ({ page }) => {
   const state = await mockMetaOwner(page)

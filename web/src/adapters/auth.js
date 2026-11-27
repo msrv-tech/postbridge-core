@@ -67,3 +67,10 @@ export function loadCurrentUser() {
     ? loadSelfhostUser()
     : api('/me').catch(() => null)
 }
+
+export function createWorkspace(name, requestId) {
+  return api('/me/workspaces', {
+    method: 'POST',
+    body: JSON.stringify({ name, request_id: requestId }),
+  })
+}

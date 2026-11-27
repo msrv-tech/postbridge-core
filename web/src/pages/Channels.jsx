@@ -768,6 +768,11 @@ export default function Channels() {
       {user.workspaces?.length > 0 && workspaceId && (
         <div className="toolbar">
           <div className="toolbar-actions">
+            {!isSelfhostMode() && (
+              <Link to="/settings/meta-connections" className="btn btn-secondary">
+                {t('metaConnections.title')}
+              </Link>
+            )}
             {channelRegistry.length > 0 && (
               <Link to={`/workspaces/${workspaceId}/migrate`} className="btn">
                 {t('wizard.title')}

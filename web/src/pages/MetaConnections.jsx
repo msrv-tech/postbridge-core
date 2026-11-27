@@ -2,6 +2,7 @@ import PlatformLogo from '../components/PlatformLogo'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppShell from '../components/AppShell'
+import CreateWorkspaceButton from '../components/CreateWorkspaceButton'
 import { listMyMetaConnections } from '../adapters/channels'
 import { clearToken, getToken } from '../adapters/sessionToken'
 import { BILLING_SUPPORT_EMAIL } from '../billingSupport'
@@ -80,6 +81,7 @@ export default function MetaConnections() {
 
   return <AppShell title={t('metaConnections.title')} subtitle={t('metaConnections.intro')} user={user} onLogout={logout} workspaceId={null}>
     <div className="inline-actions" style={{ marginBottom: '1rem', flexWrap: 'wrap' }}>
+      {user && !user.workspaces?.length && <CreateWorkspaceButton className="btn btn-small" />}
       <button className="btn btn-secondary btn-small" type="button" onClick={() => load()} disabled={current.loading}>
         {t('metaConnections.refresh')}
       </button>

@@ -125,6 +125,34 @@ def test_definite_rejection_is_distinct_from_http_200_error_and_processing_failu
     assert caught.value.code == "EXTERNAL_API_TIKTOK_PROCESSING_FAILED"
 
 
+@pytest.mark.parametrize("status,code,retryable", [(403, "spam_risk_user_banned_from_posting", False),
+    (200, "spam_risk_too_many_posts", False), (503, "internal_error", True)])
+def test_provider_failures_keep_safe_diagnostics_without_response_secrets(caplog, status, code, retryable):
+    log_id = "2026102222371518DBB4020DB184F9F2F0"
+    response = httpx.Response(status, headers={"x-tt-logid": log_id}, json={
+        "error": {"code": code, "message": "Bearer response-secret", "log_id": "20261022223714AAAAAAAAAAAAAAAAAA"},
+        "data": {"access_token": "response-secret", "upload_url": "https://example.test/?upload_token=response-secret"}})
+    with pytest.raises(ExternalApiError) as caught:
+        result(response)
+    assert caught.value.retryable is retryable
+    assert caught.value.details == {"status_code": status, "provider_code": code, "provider_log_id": log_id}
+    assert "response-secret" not in str(caught.value.to_dict("test")) + caplog.text
+    assert log_id in caplog.text and code in caplog.text
+
+
+def test_diagnostics_use_body_log_id_and_ignore_malformed_provider_fields(caplog):
+    log_id = "2026102222371518DBB4020DB184F9F2F0"
+    response = httpx.Response(403, headers={"x-tt-logid": "Bearer private-token"},
+        json={"error": {"code": {"access_token": "private-token"}, "logid": log_id}})
+    with pytest.raises(ExternalApiError) as caught:
+        result(response)
+    assert caught.value.details == {"status_code": 403, "provider_log_id": log_id}
+    assert "private-token" not in str(caught.value.details) + caplog.text
+    with pytest.raises(ExternalApiError) as malformed:
+        result(httpx.Response(403, content=b"not JSON: private-token"))
+    assert malformed.value.details == {"status_code": 403}
+
+
 def setup_channel(publication, **credential_updates):
     db, tenant, other, post_id, channels = publication
     channel = channels[0]

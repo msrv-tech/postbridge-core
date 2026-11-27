@@ -3,7 +3,9 @@ import { useLocation } from 'react-router-dom'
 import { useAuth } from '../useAuth'
 import { useI18n } from '../i18n'
 import { workspaceSwitchPath } from '../adapters/workspace'
+import { isSelfhostMode } from '../adapters/runtime'
 import { useWorkspaceNavigation } from './WorkspaceNavigation'
+import CreateWorkspaceButton from './CreateWorkspaceButton'
 
 export default function WorkspaceSwitcher({ workspaceId }) {
   const { user } = useAuth()
@@ -40,7 +42,7 @@ export default function WorkspaceSwitcher({ workspaceId }) {
         <span className="workspace-current-name">{current?.name || t('workspace.switch')}</span>
         <span aria-hidden="true">⌄</span>
       </button>
-      {open && <div className="workspace-options" id="workspace-options" aria-label={t('workspace.switch')}
+      <div className="workspace-options" id="workspace-options" aria-label={t('workspace.switch')} hidden={!open}
         style={{ '--workspace-menu-top': `${rootRef.current?.getBoundingClientRect().bottom + 8}px` }}>
         <p className="workspace-options-label">{t('workspace.title')}</p>
         {workspaces.map((workspace) => (
@@ -54,7 +56,13 @@ export default function WorkspaceSwitcher({ workspaceId }) {
           </button>
         ))}
         {current && <button type="button" className="workspace-settings-link" onClick={() => select(current, `/workspaces/${encodeURIComponent(current.id)}/settings`)}>{t('workspace.settings')}</button>}
-      </div>}
+        {!isSelfhostMode() && (
+          <CreateWorkspaceButton className="workspace-settings-link" onOpen={() => {
+            setOpen(false)
+            triggerRef.current?.focus()
+          }} />
+        )}
+      </div>
     </div>
   )
 }

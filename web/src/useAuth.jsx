@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { getToken, isAuthenticated } from './adapters/sessionToken'
 import { captureVideoAttribution, claimVideoAttribution } from './videoAttribution'
-import { loadCurrentUser } from './adapters/auth'
+import { createWorkspace as postWorkspace, loadCurrentUser } from './adapters/auth'
 
 captureVideoAttribution()
 const AuthContext = createContext(null)
@@ -27,6 +27,22 @@ export function AuthProvider({ children }) {
     return data
   }, [])
 
+  const createWorkspace = async (name, requestId) => {
+    const token = getToken()
+    const workspace = await postWorkspace(name, requestId)
+    if (getToken() !== token) return null
+    // An earlier profile request may not include the newly committed workspace.
+    requestRef.current += 1
+    setUser((current) => {
+      if (!current) return current
+      const workspaces = [...(current.workspaces || []).filter((item) => item.id !== workspace.id), workspace]
+      workspaces.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+      return { ...current, workspaces }
+    })
+    setLoading(false)
+    return workspace
+  }
+
   useEffect(() => {
     const onAuthChange = () => { setUser(null); setLoading(true); refreshUser() }
     const onStorage = (event) => { if (event.key === 'postbridge_token' || event.key === null) onAuthChange() }
@@ -40,7 +56,7 @@ export function AuthProvider({ children }) {
     }
   }, [refreshUser])
 
-  return <AuthContext.Provider value={{ user, loading, refreshUser }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ user, loading, refreshUser, createWorkspace }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {

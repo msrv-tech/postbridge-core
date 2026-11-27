@@ -1,5 +1,7 @@
 """Small TikTok v2 client; never log provider messages or token responses."""
 from time import time
+import logging
+import re
 
 import httpx
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -9,6 +11,7 @@ from postbridge.integrations.video_delivery import check_response, unknown
 
 API = "https://open.tiktokapis.com/v2"
 PRIVACY_LEVELS = {"PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "SELF_ONLY"}
+logger = logging.getLogger(__name__)
 
 
 class AuthorizationRemoved(ConfigurationError):
@@ -41,21 +44,40 @@ class TikTokPostOptions(BaseModel):
 
 
 def result(response):
-    check_response(response, "tiktok")
     try:
         body = response.json()
-        code = body["error"]["code"]
+    except ValueError:
+        body = None
+    error = body.get("error") if isinstance(body, dict) else None
+    error = error if isinstance(error, dict) else {}
+    details = {"status_code": response.status_code}
+    code = error.get("code")
+    if isinstance(code, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,99}", code):
+        details["provider_code"] = code
+    for log_id in (response.headers.get("x-tt-logid"), error.get("log_id"), error.get("logid")):
+        if isinstance(log_id, str) and re.fullmatch(r"\d{14}[A-Fa-f0-9]{10,50}", log_id):
+            details["provider_log_id"] = log_id
+            break
+    try:
+        # HTTP failures also carry TikTok's machine code and request ID. Never
+        # retain the message, response body, token fields or request URL.
+        check_response(response, "tiktok")
+        if "provider_code" not in details:
+            raise unknown("tiktok", "TikTok returned an unreadable response")
         if code == "ok":
             data = body.get("data")
             if not isinstance(data, dict):
-                raise ValueError("Missing data")
+                raise unknown("tiktok", "TikTok returned an unreadable response")
             return data
         if code in {"internal_error", "internal", "server_error"}:
             raise unknown("tiktok")
         raise ExternalApiError(code="EXTERNAL_API_TIKTOK_REJECTED", message="TikTok rejected the request; review the account and publishing settings",
-            source="tiktok", retryable=False, details={"provider_code": str(code)[:100]})
-    except (ValueError, KeyError, TypeError):
-        raise unknown("tiktok", "TikTok returned an unreadable response") from None
+            source="tiktok", retryable=False, details={})
+    except ExternalApiError as exc:
+        exc.details.update(details)
+        logger.warning("TikTok request failed: status=%s provider_code=%s log_id=%s",
+            response.status_code, details.get("provider_code", "unavailable"), details.get("provider_log_id", "unavailable"))
+        raise
 
 
 def access_token(client, credentials, save_credentials):

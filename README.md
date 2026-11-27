@@ -150,7 +150,8 @@ The separate GitHub Actions deployment workflow runs after successful Core CI on
 `main` and requests one private production release. The hosted layer verifies the
 exact Core/SaaS pair once, then builds and checks the regional Core images and
 delivers RU and IO through their restricted production runners. The public Core
-repository has no production or LAN CI runner.
+repository has no production or LAN CI runner. The standalone setup above remains
+available for separate self-hosted installations.
 
 ## Releases
 

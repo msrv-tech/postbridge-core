@@ -30,7 +30,6 @@ function writeDismissedImageJobs(workspaceId, ids) {
 export default function AppShell({
   title,
   subtitle,
-  user,
   onLogout,
   children,
   actions,
@@ -132,9 +131,6 @@ export default function AppShell({
                 <NavLink to={settingsHref} end className={navClassName(isSettingsActive)}>
                   {t('app.nav.settings')}
                 </NavLink>
-                {!isSelfhostMode() && user && <NavLink to="/settings/meta-connections" end className={({ isActive }) => navClassName(isActive)}>
-                  {t('metaConnections.title')}
-                </NavLink>}
                 <LanguageSelect compact />
               </HeaderNavigation>
             </div>
