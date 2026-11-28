@@ -10,5 +10,7 @@ export function listNews({ limit = 10, offset = 0, query = '' } = {}) {
 }
 
 export function getNewsItem(slug) {
-  return api(`/api/news/${encodeURIComponent(slug || '')}`)
+  const source = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search).get('utm_source')
+  const query = source ? `?${new URLSearchParams({ utm_source: source })}` : ''
+  return api(`/api/news/${encodeURIComponent(slug || '')}${query}`, { headers: { 'X-Postbridge-News-View': '1' } })
 }

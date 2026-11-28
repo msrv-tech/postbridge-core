@@ -125,6 +125,9 @@ export default function AppShell({
                 <NavLink to={channelsHref} className={navClassName(isChannelsActive)}>
                   {t('app.nav.channels')}
                 </NavLink>
+                {!isSelfhostMode() && workspaceId && <NavLink to={`/workspaces/${encodeURIComponent(workspaceId)}/analytics`} className={navClassName(location.pathname.includes('/analytics'))}>
+                  {t('analytics.title')}
+                </NavLink>}
                 <NavLink to={agentsHref} className={navClassName(isAgentsActive)}>
                   {t('app.nav.agents')}
                 </NavLink>

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
+from typing import Any, Literal
 import secrets
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -1266,6 +1266,25 @@ class PostbridgeContentPatchBody(BaseModel):
     scheduled_publish_at: datetime | None = None
     live_sync_source_core_channel_id: str | None = Field(default=None, max_length=36)
     saas_workspace_id: str | None = Field(default=None, max_length=64)
+
+
+@router.get("/internal/service/publication-analytics", include_in_schema=False)
+def service_publication_analytics(
+    days: int = Query(30, ge=1, le=365),
+    limit: int = Query(30, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    platform: str | None = Query(None, max_length=32),
+    channel_id: str | None = Query(None, max_length=36),
+    content_id: str | None = Query(None, max_length=36),
+    content_format: Literal["post", "video"] | None = None,
+    metric: str | None = Query(None, max_length=32),
+    tenant_id: str = Depends(require_service_tenant),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    from postbridge.services.publication_analytics import report
+
+    return report(session, tenant_id, days=days, limit=limit, offset=offset, platform=platform,
+                  channel_id=channel_id, content_id=content_id, content_format=content_format, metric=metric)
 
 
 @router.post("/internal/service/content-items/postbridge", include_in_schema=False)

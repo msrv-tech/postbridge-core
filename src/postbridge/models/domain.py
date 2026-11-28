@@ -391,6 +391,45 @@ class ContentMediaLinkOrm(Base):
     )
 
 
+class PublicationAnalyticsOrm(Base):
+    __tablename__ = "publication_analytics"
+    __table_args__ = (
+        Index("ix_publication_analytics_next_attempt", "next_attempt_at"),
+        Index("ix_publication_analytics_expires", "history_expires_at"),
+    )
+
+    target_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("publication_targets.id", ondelete="CASCADE"), primary_key=True
+    )
+    external_post_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claim_id: Mapped[str | None] = mapped_column(String(36))
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    detail: Mapped[str | None] = mapped_column(String(48))
+    history_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    history: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+
+
+class ChannelAudienceOrm(Base):
+    __tablename__ = "channel_audience_analytics"
+    __table_args__ = (
+        Index("ix_channel_audience_due", "next_attempt_at"),
+        Index("ix_channel_audience_expires", "history_expires_at"),
+    )
+
+    channel_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("channels.id", ondelete="CASCADE"), primary_key=True
+    )
+    external_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claim_id: Mapped[str | None] = mapped_column(String(36))
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    detail: Mapped[str | None] = mapped_column(String(48))
+    history_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    history: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+
+
 class BridgeOrm(Base):
     """Связь source_channel → target_channel (live_sync, migration), tenant-scoped."""
 

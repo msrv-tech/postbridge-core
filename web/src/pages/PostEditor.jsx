@@ -17,6 +17,8 @@ import { useAuth } from '../useAuth'
 import AppShell from '../components/AppShell'
 import { useWorkspaceSwitchGuard } from '../components/WorkspaceNavigation'
 import VideoPublicationCard from '../components/VideoPublicationCard'
+import PostPublicationAnalytics from '../components/PublicationAnalytics'
+import { isSelfhostMode } from '../adapters/runtime'
 import { isBillingEnabled } from '../adapters/billing'
 import { mdEditorCommandsFilter } from '../mdEditorRu'
 import { useI18n } from '../i18n'
@@ -1265,6 +1267,8 @@ export default function PostEditor() {
         </Link>
       }
     >
+      {isEdit && !isSelfhostMode() && (status === 'published' || videoOrigin) &&
+        <PostPublicationAnalytics key={`${workspaceId}/${postId}`} workspaceId={workspaceId} contentId={postId} />}
       <div className="card post-editor-card">
         {videoOrigin && <VideoPublicationCard key={`${workspaceId}/${postId}`} workspaceId={workspaceId} postId={postId}
           dirty={!arePostSnapshotsEqual(currentFormSnapshot(), syncedPostSnapshotRef.current)} onLocked={setVideoApproved}

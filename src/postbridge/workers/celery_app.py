@@ -28,12 +28,23 @@ def create_celery_app() -> Celery:
             "postbridge.workers.video_schedule_tasks",
             "postbridge.workers.video_batch_tasks",
             "postbridge.workers.video_publication_tasks",
+            "postbridge.workers.publication_analytics_tasks",
         ],
     )
     app.conf.update(
         task_always_eager=settings.celery_task_always_eager,
         task_eager_propagates=True,
         beat_schedule={
+            "collect-publication-analytics": {
+                "task": "postbridge.analytics.collect",
+                "schedule": 240.0,
+                "options": {"priority": 9, "expires": 220},
+            },
+            "collect-channel-audience": {
+                "task": "postbridge.analytics.audience",
+                "schedule": 900.0,
+                "options": {"priority": 9, "expires": 850},
+            },
             "dispatch-video-production-jobs": {"task": "postbridge.video.dispatch", "schedule": 30.0},
             "dispatch-video-publications": {"task": "postbridge.video.dispatch_publications", "schedule": 30.0},
             "recover-stuck-sync-jobs": {
