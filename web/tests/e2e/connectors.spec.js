@@ -525,3 +525,207 @@ test('Home canonical catalog build-disabled policy intersects a stale full API c
   const disabled = new Set(String(process.env.VITE_POSTBRIDGE_DISABLED_PLATFORMS || '').split(',').map(id => id.trim().toLowerCase().replace(/^twitter$/, 'x')))
   await expect.poll(() => visibleHomeIds(page)).toEqual(homeProviders.map(([id]) => id).filter(id => !disabled.has(id)))
 })
+
+const pilotWorkspaceApi = '/api/workspaces/ws-one/connectors'
+const pilotCatalogPath = '/workspaces/ws-one/connectors'
+const wbPilot = 'wildberries-source'
+const marketPilot = 'yandex-market-source'
+const pilotFixture = (id, connectionIds = [], canConnect = false) => ({ id, can_connect: canConnect, connection_ids: connectionIds })
+
+async function showPilotCatalog(page, privatePilots) {
+  await mockApi(page, { authenticated: true, locale: 'en' })
+  await page.route('**/api/workspaces/*/connectors', route => {
+    const workspace = new URL(route.request().url()).pathname.split('/')[3]
+    return route.fulfill({ json: { ...ru, workspace_id: workspace,
+      private_pilots: workspace === 'ws-one' ? privatePilots() : [],
+    } })
+  })
+}
+
+function draftResult(id) {
+  return { route: `/workspaces/ws-one/content/${id}`, post_reference: { id },
+    content_result: { status: 'draft', persisted: true } }
+}
+
+async function mockPilotEditor(page, post) {
+  await page.route(`**/workspaces/ws-one/posts/${post.id}`, async route => {
+    if (route.request().method() === 'PATCH') Object.assign(post, route.request().postDataJSON())
+    return route.fulfill({ json: post })
+  })
+}
+
+test('private pilot WB picks an exact size, reviews verified price, retries a single draft and returns from the editor', async ({ page }) => {
+  const connectionId = 'wb-test-33'
+  await showPilotCatalog(page, () => [pilotFixture(wbPilot, [connectionId])])
+  await page.setViewportSize({ width: 390, height: 844 })
+  const base = '/workspaces/ws-one/wildberries/connections/' + connectionId
+  const result = draftResult('wb-draft-test')
+  const requests = { preview: 0, prepare: [], apply: [], writes: 0 }
+  let previewLimit = true
+  let pending = true
+  const draft = { id: 'wb-draft-test', title: 'Canvas shoes', content_md: '', status: 'draft' }
+  await mockPilotEditor(page, draft)
+  await page.route('**/wildberries/connections/**', async route => {
+    const request = route.request()
+    const url = new URL(request.url())
+    const path = url.pathname
+    if (path === base) return route.fulfill({ json: { id: connectionId, name: 'Shoe shop', status: 'connected', version: 3 } })
+    if (path === base + '/products/531/sizes') return route.fulfill({ json: { items: [{ size_id: 12, label: 'S' }, { size_id: 781, label: 'M' }] } })
+    if (path === base + '/products/531') {
+      expect(url.searchParams.get('size_id')).toBe('781')
+      requests.preview += 1
+      if (previewLimit) {
+        previewLimit = false
+        return route.fulfill({ status: 429, json: { code: 'WB_RATE_LIMITED' } })
+      }
+      return route.fulfill({ json: { size_id: 781, price_status: 'reported', product: {
+        product_id: '531', title: 'Canvas shoes', description: 'Inspected material', price: { amount: '0', currency: 'RUB' },
+      } } })
+    }
+    if (path === base + '/products/531/draft-review') {
+      requests.prepare.push(request.postDataJSON())
+      return route.fulfill({ json: {
+        card: { id: '261', status: 'proposed', summary: { text: 'Size 781 · 13.75 RUB' } },
+        source: { article: '531', size_id: 781, price_status: 'reported', price: { amount: '13.75', currency: 'RUB' } },
+      } })
+    }
+    if (path === base + '/draft-reviews/261/apply') {
+      requests.apply.push(path)
+      if (pending) {
+        pending = false
+        requests.writes += 1
+        draft.content_md = 'Size 781 · 13.75 RUB'
+        return route.abort('failed')
+      }
+      return route.fulfill({ json: result })
+    }
+    return route.fulfill({ status: 500, json: { code: 'UNEXPECTED_TEST_ROUTE' } })
+  })
+
+  await page.goto(pilotCatalogPath)
+  await page.getByRole('region', { name: 'Private pilots' }).getByRole('link', { name: 'Wildberries', exact: true }).click()
+  await page.getByLabel('WB article').fill('531')
+  await page.getByRole('button', { name: 'Find sizes' }).click()
+  await page.getByLabel('WB size').selectOption('781')
+  await page.getByRole('button', { name: 'Preview product' }).click()
+  await expect(page.getByRole('alert')).toContainText('rate limit')
+  await page.getByRole('button', { name: 'Preview product' }).click()
+  await expect(page.getByText('Price: 0 RUB', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Prepare draft' }).click()
+  await expect(page.getByText('Price: 13.75 RUB', { exact: true })).toBeVisible()
+  await expect(page.getByText('Size 781 · 13.75 RUB', { exact: true })).toBeVisible()
+  expect(requests.writes).toBe(0)
+  await page.getByRole('button', { name: 'Confirm draft creation' }).click()
+  await expect(page.getByRole('alert')).toContainText('Try again')
+  await page.reload()
+  await page.getByRole('button', { name: 'Retry confirmation' }).click()
+  await expect(page).toHaveURL(result.route)
+  const editor = page.locator('.w-md-editor textarea').first()
+  await expect(editor).toHaveValue('Size 781 · 13.75 RUB')
+  await page.getByRole('button', { name: 'Hide assistant' }).click()
+  await editor.fill('Reviewed copy for size 781')
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click()
+  await expect.poll(() => draft.content_md).toBe('Reviewed copy for size 781')
+  await page.goto(pilotCatalogPath + '/' + wbPilot)
+  await expect(page.getByRole('link', { name: 'Open draft' })).toHaveAttribute('href', result.route)
+  await page.getByRole('link', { name: 'Open draft' }).click()
+  await expect(editor).toHaveValue('Reviewed copy for size 781')
+  await page.goBack()
+  await expect(page.getByRole('link', { name: 'Open draft' })).toBeVisible()
+  expect(requests.prepare).toEqual([{ size_id: 781 }])
+  expect(requests.apply).toEqual([base + '/draft-reviews/261/apply', base + '/draft-reviews/261/apply'])
+  expect(requests.preview).toBe(2)
+  expect(requests.writes).toBe(1)
+})
+
+test('private pilot Market connects, reads an exact offer, safely retries a draft and revokes access', async ({ page }) => {
+  const connection = { id: 'market-test-66', account_name: 'Toy store', status: 'connected', campaign_id: '77529' }
+  let connected = false
+  const requests = []
+  const result = draftResult('market-draft-test')
+  const base = pilotWorkspaceApi + '/yandex-market/connections'
+  const offerId = 'toy & blue/92'
+  let saved = false
+  await showPilotCatalog(page, () => [pilotFixture(marketPilot, connected ? [connection.id] : [], true)])
+  await mockPilotEditor(page, { id: 'market-draft-test', title: 'Toy car', content_md: 'Supplier draft', status: 'draft' })
+  await page.route('**/yandex-market/connections**', async route => {
+    const request = route.request()
+    const url = new URL(request.url())
+    const path = url.pathname
+    if (path === base && request.method() === 'POST') {
+      expect(request.postDataJSON()).toEqual({ campaign_id: '77529', api_key: 'synthetic-market-key' })
+      connected = true
+      return route.fulfill({ status: 201, json: connection })
+    }
+    if (path === base + '/' + connection.id && request.method() === 'DELETE') {
+      connection.status = 'revoked'
+      return route.fulfill({ json: { status: 'revoked' } })
+    }
+    if (path === base + '/' + connection.id) return route.fulfill({ json: connection })
+    if (path.endsWith('/offer')) {
+      expect(url.searchParams.get('offer_id')).toBe(offerId)
+      return route.fulfill({ json: { id: offerId, name: 'Toy car', description: 'Blue metal body', prices: [{ amount: '112.65', currency: 'RUB' }] } })
+    }
+    if (path.endsWith('/drafts')) {
+      requests.push(request.postDataJSON())
+      if (!saved) {
+        saved = true
+        return route.fulfill({ json: { ...result, route: '/workspaces/ws-two/content/foreign' } })
+      }
+      return route.fulfill({ json: { ...result, idempotent_replay: true } })
+    }
+    return route.fulfill({ status: 500, json: { code: 'UNEXPECTED_TEST_ROUTE' } })
+  })
+  await page.goto(pilotCatalogPath + '/' + marketPilot)
+  await page.getByLabel('Campaign ID').fill('77529')
+  await page.getByLabel('Read-only API key').fill('synthetic-market-key')
+  await page.getByRole('button', { name: 'Connect store' }).click()
+  await page.getByLabel('Seller offer ID', { exact: true }).fill(offerId)
+  await page.getByRole('button', { name: 'Preview product' }).click()
+  await expect(page.getByText('Price: 112.65 RUB')).toBeVisible()
+  expect(requests).toHaveLength(0)
+  await page.getByRole('button', { name: 'Confirm draft creation' }).click()
+  await expect(page.getByRole('alert')).toBeVisible()
+  await expect(page).toHaveURL(pilotCatalogPath + '/' + marketPilot)
+  await page.reload()
+  await page.getByRole('button', { name: 'Retry confirmation' }).click()
+  await expect(page).toHaveURL(result.route)
+  await page.goBack()
+  await expect(page.getByRole('link', { name: 'Open draft' })).toHaveAttribute('href', result.route)
+  await page.getByRole('button', { name: 'Disconnect store' }).click()
+  await expect(page.getByText('Disconnect access to this store?')).toBeVisible()
+  await page.getByRole('button', { name: 'Disconnect store' }).click()
+  await expect(page.getByText('Toy store · Disconnected')).toBeVisible()
+  await expect(page.getByLabel('Seller offer ID', { exact: true })).toHaveCount(0)
+  expect(requests).toHaveLength(2)
+  expect(requests[0]).toEqual({ offer_id: offerId, idempotency_key: expect.any(String) })
+  expect(requests[1]).toEqual(requests[0])
+  expect(await page.evaluate(() => JSON.stringify(sessionStorage))).not.toContain('synthetic-market-key')
+})
+
+test('private pilot is hidden without explicit access and refused status hides supplier actions', async ({ page }) => {
+  let allowed = false
+  await showPilotCatalog(page, () => allowed ? [pilotFixture(wbPilot, ['synthetic-denied'], true)] : [])
+  const reads = []
+  await page.route('**/wildberries/connections/**', route => {
+    reads.push(route.request().method())
+    return route.fulfill({ status: 403, json: { code: 'WB_ACCESS_DENIED' } })
+  })
+  await page.goto(pilotCatalogPath + '/' + wbPilot)
+  await expect(page.locator('[data-connector-detail]')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Private pilots' })).toHaveCount(0)
+  expect(reads).toEqual([])
+  allowed = true
+  await page.goto('/connectors/' + wbPilot)
+  await expect(page.locator('[data-connector-detail]')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Private pilots' })).toHaveCount(0)
+  await page.goto('/workspaces/ws-two/connectors/' + wbPilot)
+  await expect(page.locator('[data-connector-detail]')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Private pilots' })).toHaveCount(0)
+  expect(reads).toEqual([])
+  await page.goto(pilotCatalogPath + '/' + wbPilot)
+  await expect(page.getByRole('alert')).toContainText('connection is unavailable')
+  await expect(page.getByLabel('WB article')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Connect store' })).toHaveCount(0)
+  expect(reads).toEqual(['GET'])
+})

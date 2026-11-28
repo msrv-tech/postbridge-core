@@ -1,0 +1,35 @@
+.commerce-pilot-fields {
+  display: grid;
+  gap: .55rem;
+  min-width: 0;
+  max-width: 34rem;
+  margin: 1rem 0;
+  padding: 0;
+  border: 0;
+}
+
+.commerce-pilot-fields .btn {
+  justify-self: start;
+}
+
+.commerce-pilot-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .65rem;
+  margin: .75rem 0;
+}
+
+.commerce-pilot-controls p {
+  flex: 1 0 100%;
+  margin: 0;
+}
+
+.commerce-pilot-product {
+  margin-block: 1rem;
+}
+
+.commerce-pilot-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

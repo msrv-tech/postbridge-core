@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import AppShell from '../components/AppShell'
+import CommercePilot from '../components/CommercePilot'
 import PublicLayout from '../components/PublicLayout'
 import { ConnectorAgentLinks, ConnectorAvailability, ConnectorGroups, ConnectorLogo, ConnectorPersonalConnection, ConnectorProtocol, ConnectorReadiness, ConnectorRoadmap, connectorPath } from '../components/ConnectorCatalog'
 import { getPublicExternalAppManifest } from '../adapters/externalApps'
+import { pilotNames } from '../adapters/commercePilots'
 import { connectorAllowsSetup, safeConnectorHref } from '../adapters/connectorPolicy'
 import { preferredWorkspaceId } from '../adapters/workspace'
 import { BILLING_SUPPORT_EMAIL } from '../billingSupport'
@@ -12,7 +14,7 @@ import { useI18n } from '../i18n'
 import { useAuth } from '../useAuth'
 import useConnectors from '../useConnectors'
 
-function ConnectorDetail({ item, workspaceId, user }) {
+function ConnectorDetail({ item, workspaceId, user, pilot, actorId }) {
   const { t } = useI18n()
   const copy = connectorCopy(item, t)
   const canSetup = connectorAllowsSetup(item)
@@ -45,6 +47,7 @@ function ConnectorDetail({ item, workspaceId, user }) {
     {!workspaceId && <h1>{copy.name}</h1>}
     <ConnectorProtocol item={item} />
     <p className="connector-benefit">{copy.benefit}</p>
+    {pilot && <CommercePilot pilot={pilot} workspaceId={workspaceId} actorId={actorId} />}
     <section className="connector-detail-section" aria-labelledby="connector-availability-title">
       <h2 id="connector-availability-title">{t('connectors.current')}</h2>
       <ConnectorAvailability item={item} />
@@ -92,10 +95,13 @@ export default function Connectors() {
   const { t } = useI18n()
   const { workspaceId = '', connectorId = '' } = useParams()
   const { user } = useAuth()
-  const { items, loading, error, disabled } = useConnectors(workspaceId)
+  const actorId = workspaceId ? user?.user_id || user?.id || '' : ''
+  const { items, loading, error, disabled, pilots = [] } = useConnectors(workspaceId, actorId)
   const roadmapRef = useRef(null)
   const item = items.find(entry => entry.id === connectorId)
-  const title = item ? connectorCopy(item, t).name : t('connectors.title')
+  const pilot = pilots.find(entry => entry.id === connectorId)
+  const title = item ? connectorCopy(item, t).name : pilot ? pilotNames[pilot.id] : t('connectors.title')
+  const workspaceCatalog = `/workspaces/${encodeURIComponent(workspaceId)}/connectors`
   const Content = workspaceId ? 'main' : 'div'
   useEffect(() => {
     if (!loading && window.location.hash === '#planned') roadmapRef.current?.querySelector('#planned')?.scrollIntoView({ block: 'start' })
@@ -105,10 +111,23 @@ export default function Connectors() {
     {loading ? <p role="status" className="muted">{t('common.loading')}</p>
       : disabled ? <p className="muted">{t('connectors.selfhost')}</p>
         : error ? <p role="alert">{t('connectors.unavailable')}</p>
-          : connectorId ? item ? <ConnectorDetail key={`${workspaceId}/${item.id}`} item={item} workspaceId={workspaceId} user={user} />
+          : connectorId ? item ? <ConnectorDetail key={`${actorId}/${workspaceId}/${item.id}`} item={item}
+              workspaceId={workspaceId} user={user} pilot={pilot} actorId={actorId} />
+            : pilot ? <article className="connector-detail">
+              <Link className="connector-back" to={workspaceCatalog}>← {t('connectors.all')}</Link>
+              <CommercePilot key={`${actorId}/${workspaceId}/${pilot.id}`} pilot={pilot} workspaceId={workspaceId} actorId={actorId} />
+            </article>
             : <div><h2>{t('connectors.notFound')}</h2><p className="muted">{t('connectors.notFound.text')}</p><Link className="connector-back" to={workspaceId ? `/workspaces/${encodeURIComponent(workspaceId)}/connectors` : '/connectors'}>{t('connectors.all')}</Link></div>
             : <>
-              {!items.length && <p className="muted">{t('connectors.empty')}</p>}
+              {!items.length && !pilots.length && <p className="muted">{t('connectors.empty')}</p>}
+              {pilots.length > 0 && <section className="connector-detail-section" aria-labelledby="workspace-pilots">
+                <h2 id="workspace-pilots">{t('commercePilot.title')}</h2>
+                <div className="connector-actions">
+                  {pilots.map(entry => <Link className="btn btn-secondary" key={entry.id} to={`${workspaceCatalog}/${entry.id}`}>
+                    {pilotNames[entry.id]}
+                  </Link>)}
+                </div>
+              </section>}
               <ConnectorGroups items={items.filter(entry => entry.public_readiness !== 'planned')} workspaceId={workspaceId} />
               <ConnectorRoadmap items={items.filter(entry => entry.public_readiness === 'planned')} workspaceId={workspaceId} />
               {items.length > 0 && <ConnectorAgentLinks />}
