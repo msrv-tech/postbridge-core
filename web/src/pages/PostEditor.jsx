@@ -1,6 +1,6 @@
 import PlatformLogo from '../components/PlatformLogo'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { Link, useParams, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useParams, useNavigate } from 'react-router-dom'
 import {
   createAgentEditorMessage,
   createAgentRun,
@@ -10,6 +10,7 @@ import {
   resolveAgentReviewItem,
 } from '../adapters/agent'
 import { listChannelRegistry } from '../adapters/channels'
+import { commerceMarketerHref } from '../adapters/commerceMarketer'
 import { createContentItem, getContentItem, updateContentItem } from '../adapters/content'
 import { getMediaGenerationJob, startMediaGenerationJob, uploadWorkspaceMedia } from '../adapters/media'
 import { clearToken } from '../adapters/sessionToken'
@@ -445,9 +446,14 @@ export default function PostEditor() {
   const { locale, t } = useI18n()
   const { workspaceId, postId } = useParams()
   const navigate = useNavigate()
+  const { state: locationState } = useLocation()
   const { user } = useAuth()
   const isEdit = !!postId
   const billingEnabled = isBillingEnabled(user)
+  const source = locationState?.commerceMarketer
+  const marketerReturn = isEdit && !isSelfhostMode() && source?.connectionId
+    ? commerceMarketerHref(workspaceId, source.provider, source.connectionId) : null
+  const contentPath = `/workspaces/${workspaceId}/content`
 
   const [contentMd, setContentMd] = useState('')
   const [title, setTitle] = useState('')
@@ -963,7 +969,7 @@ export default function PostEditor() {
         applyPostToForm(savedPost)
       }
       if (redirect) {
-        navigate(`/workspaces/${workspaceId}/content`)
+        navigate(marketerReturn || contentPath)
       } else if (!stayOnPage && !isEdit && savedPost?.id) {
         navigate(`/workspaces/${workspaceId}/content/${savedPost.id}`, { replace: true })
       }
@@ -2157,7 +2163,7 @@ export default function PostEditor() {
                     : t('postEditor.publish')}
               </button>
             )}
-            <Link to={`/workspaces/${workspaceId}/content`} className="btn btn-secondary">
+            <Link to={marketerReturn || contentPath} className="btn btn-secondary">
               {t('common.cancel')}
             </Link>
           </div>

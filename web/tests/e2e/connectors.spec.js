@@ -742,3 +742,274 @@ test('private pilot is hidden without explicit access and refused status hides s
   await expect(page.getByRole('alert')).toContainText('connection is unavailable')
   expect(reads).toEqual([statusRead, statusRead])
 })
+
+const marketerBase = (provider, connection, workspace = 'ws-one') =>
+  `/api/workspaces/${workspace}/commerce-marketer/${provider}/connections/${connection}`
+
+const marketerProfile = (provider, connection_id, capabilities = ['get_products']) => ({
+  provider, connection_id, display_name: provider, capabilities,
+})
+
+test('commerce marketer Woo selects an exact variant, retains a draft and verifies a lost schedule acknowledgement', async ({ page }) => {
+  await mockApi(page, { authenticated: true, locale: 'en' })
+  await page.setViewportSize({ width: 390, height: 950 })
+  const native = pilotWorkspaceApi + '/woocommerce/connections'
+  const base = marketerBase('woocommerce', 'woo-test')
+  const result = draftResult('marketer-woo-draft')
+  const post = { id: 'marketer-woo-draft', title: 'Canvas shoes', content_md: 'Canvas shoes, blue', status: 'draft' }
+  const history = { conversation_id: null, messages: [] }
+  const conversationId = 'woo-thread-1'
+  const turns = []
+  const writes = []
+  let scheduleApplied = false
+  const time = '2026-12-01T16:00:00+03:00'
+  await mockPilotEditor(page, post)
+  await page.route(`**${native}**`, route => {
+    const url = new URL(route.request().url())
+    if (url.pathname === native) return route.fulfill({ json: { items: [
+      { id: 'woo-test', status: 'active', store_url: 'Studio Store' },
+      { id: 'woo-second', status: 'active', store_url: 'Second Store' },
+      { id: 'woo-denied', status: 'active', store_url: 'Denied Store' },
+    ] } })
+    if (url.pathname === native + '/woo-test/products') {
+      expect(url.searchParams.get('search')).toBe('Canvas')
+      return route.fulfill({ json: { items: [{ id: '531', name: 'Canvas shoes', type: 'variable' }] } })
+    }
+    if (url.pathname === native + '/woo-test/products/531/variations') return route.fulfill({ json: { items: [
+      { id: '531:781', name: 'Canvas shoes', variation_id: '781', attributes: [{ option: 'Blue' }] },
+    ] } })
+    expect(url.pathname).toBe(native + '/woo-test/selection/531%3A781')
+    return route.fulfill({ json: { id: '531:781', name: 'Canvas shoes', variation_id: '781', attributes: [{ option: 'Blue' }],
+      price: { status: 'reported', amount: '0', currency: 'RUB' }, stock: { status: 'unavailable', quantity: null } } })
+  })
+  await page.route('**/commerce-marketer/woocommerce/**', async route => {
+    const request = route.request()
+    const url = new URL(request.url())
+    if (url.pathname === marketerBase('woocommerce', 'woo-denied')) return route.fulfill({ status: 403, json: {} })
+    const second = marketerBase('woocommerce', 'woo-second')
+    if (url.pathname === second || url.pathname === base) {
+      return route.fulfill({ json: marketerProfile('woocommerce', url.pathname.split('/').at(-1)) })
+    }
+    if (url.pathname === second + '/chat/history') return route.fulfill({ json: { conversation_id: 'woo-thread-2',
+      messages: [{ role: 'assistant', message: 'Second store only' }] } })
+    if (url.pathname === base + '/chat/history') return route.fulfill({ json: history })
+    if (url.pathname === base + '/actions/318/apply') {
+      expect(request.method()).toBe('POST')
+      writes.push('318')
+      scheduleApplied = true
+      const card = history.messages.at(-1)
+      card.video_action.status = 'applied'
+      Object.assign(card, { ...result, content_result: { ...result.content_result, scheduled_publish_at: time } })
+      return route.abort('failed')
+    }
+    expect(url.pathname).toBe(base + '/chat')
+    expect(request.method()).toBe('POST')
+    const turn = request.postDataJSON()
+    const first = turns.find(row => row.request_key === turn.request_key)
+    turns.push(turn)
+    if (first) {
+      expect(turn).toEqual(first)
+      return route.fulfill({ json: history.messages[1] })
+    }
+    const reply = { conversation_id: conversationId, message: 'Ready' }
+    if (turn.question === 'Draft copy') Object.assign(reply, result)
+    if (turn.question === 'Make the same draft shorter') {
+      Object.assign(post, { content_md: 'Blue canvas' })
+      Object.assign(reply, { ...result, message: 'Shortened', content_result: { ...result.content_result, operation: 'update' } })
+    }
+    if (turn.question === 'Schedule the draft') Object.assign(reply, { message: 'Review the schedule',
+      video_action: { id: '318', kind: 'postbridge_action', status: 'proposed', summary: {
+        operation: 'schedule_post', text: post.content_md, requires_confirmation: true, scheduled_publish_at: time,
+        destinations: [{ bridge_id: 'demo-bridge', platform: 'telegram', title: 'Studio channel' }],
+      } },
+    })
+    history.conversation_id = conversationId
+    history.messages.push({ role: 'user', message: turn.question }, { ...reply, role: 'assistant' })
+    return turn.question === 'Draft copy' ? route.abort('failed') : route.fulfill({ json: reply })
+  })
+
+  await page.goto(pilotCatalogPath)
+  await page.getByRole('region', { name: 'AI marketer' }).getByRole('link', { name: 'WooCommerce' }).click()
+  await expect(page).toHaveURL(pilotCatalogPath + '/woocommerce?assistant=commerce')
+  const assistant = page.getByRole('region', { name: 'AI marketer' })
+  const store = assistant.getByLabel('Store')
+  const conversation = assistant.getByRole('log')
+  await expect(store.locator('option')).toHaveText(['Studio Store', 'Second Store'])
+  await store.selectOption('woo-second')
+  await expect(conversation).toContainText('Second store only')
+  await store.selectOption('woo-test')
+  await expect(conversation).not.toContainText('Second store only')
+  await assistant.getByLabel('Product name or SKU').fill('Canvas')
+  await assistant.getByRole('button', { name: 'Find', exact: true }).click()
+  await assistant.getByRole('button', { name: 'Choose variant' }).click()
+  await expect(assistant.getByText('Canvas shoes · Blue', { exact: true })).toBeVisible()
+  await assistant.getByRole('button', { name: 'Select', exact: true }).click()
+  const fact = assistant.getByRole('region', { name: 'Selected product' })
+  await expect(fact).toContainText('0 RUB')
+  await expect(fact).toContainText('Unavailable')
+  const send = assistant.getByRole('button', { name: 'Send message' })
+  const type = text => assistant.getByLabel('Message', { exact: true }).fill(text)
+  await type('Draft copy')
+  await send.click()
+  await expect(assistant.getByRole('alert')).toContainText('The request failed')
+  await send.click()
+  await expect(assistant.getByRole('link', { name: 'Open editor' })).toHaveAttribute('href', result.route)
+  await type('Make the same draft shorter')
+  await send.click()
+  await expect(assistant.getByText('Changes saved to the same draft.')).toBeVisible()
+  await expect(assistant.getByRole('link', { name: 'Open editor' })).toHaveCount(2)
+  await assistant.getByRole('link', { name: 'Open editor' }).last().click()
+  await expect(page).toHaveURL(result.route)
+  const editor = page.locator('.w-md-editor textarea').first()
+  await expect(editor).toHaveValue('Blue canvas')
+  await expect(page.getByRole('heading', { name: 'Bridge preview' })).toBeVisible()
+  await page.getByRole('button', { name: 'Hide assistant' }).click()
+  await editor.fill('Studio reviewed the draft')
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click()
+  await expect.poll(() => post.content_md).toBe('Studio reviewed the draft')
+  await expect(page).toHaveURL(pilotCatalogPath + '/woocommerce?assistant=commerce&store=woo-test')
+  await expect(assistant.getByRole('link', { name: 'Open editor' }).first()).toHaveAttribute('href', result.route)
+  await type('Schedule the draft')
+  await send.click()
+  const review = assistant.getByRole('region', { name: 'Schedule publication' })
+  await expect(review).toContainText('Studio channel')
+  await expect(review).toContainText(time)
+  await expect(review).toContainText('Studio reviewed the draft')
+  expect(scheduleApplied).toBe(false)
+  await review.getByRole('button', { name: 'Confirm schedule' }).click()
+  await expect(assistant.getByRole('alert')).toContainText('The request failed')
+  await expect(review.getByRole('button')).toHaveCount(0)
+  await page.reload()
+  await expect(assistant.getByText('Publication scheduled.')).toBeVisible()
+  await expect(review.getByRole('button')).toHaveCount(0)
+  expect(writes).toEqual(['318'])
+  expect(turns.map(({ request_key, ...turn }) => turn)).toEqual([
+    { question: 'Draft copy', conversation_id: null, product_ids: ['531:781'] },
+    { question: 'Draft copy', conversation_id: null, product_ids: ['531:781'] },
+    { question: 'Make the same draft shorter', conversation_id: conversationId },
+    { question: 'Schedule the draft', conversation_id: conversationId },
+  ])
+  expect(turns[0].request_key).toBe(turns[1].request_key)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
+
+test('commerce marketer Market keeps offers and readback scoped to admitted workspaces and hides actions after revoke', async ({ page }) => {
+  const connection = 'market-test-23'
+  const base = marketerBase('yandex-market', connection)
+  const offerId = 'toy & blue/92'
+  let revoked = false
+  let supplierReads = 0
+  const profiles = []
+  const chat = []
+  await showPilotCatalog(page, () => [pilotFixture(marketPilot, [connection])])
+  await page.route('**/commerce-marketer/yandex-market/**', route => {
+    const path = new URL(route.request().url()).pathname
+    if (path === base) {
+      profiles.push(path)
+      return route.fulfill({ json: marketerProfile('yandex-market', connection) })
+    }
+    if (path === base + '/chat/history') return route.fulfill({ json: { conversation_id: 'market-thread-1', messages: [] } })
+    expect(path).toBe(base + '/chat')
+    chat.push(route.request().postDataJSON())
+    return revoked ? route.fulfill({ status: 403, json: { code: 'SOURCE_ACCESS_REVOKED' } })
+      : route.fulfill({ json: { conversation_id: 'market-thread-1', message: 'Offer read', ...draftResult('foreign'),
+        route: '/workspaces/ws-two/content/foreign' } })
+  })
+  await page.route(`**${pilotWorkspaceApi}/yandex-market/connections/${connection}/offer?*`, route => {
+    supplierReads += 1
+    expect(new URL(route.request().url()).searchParams.get('offer_id')).toBe(offerId)
+    return route.fulfill({ json: { id: offerId, name: 'Toy car', prices: [{ amount: '112.65', currency: 'RUB' }] } })
+  })
+
+  await page.goto('/connectors/' + marketPilot + '?assistant=commerce')
+  await expect(page.locator('[data-connector-detail]')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'AI marketer' })).toHaveCount(0)
+  await page.goto('/workspaces/ws-two/connectors/' + marketPilot + '?assistant=commerce')
+  await expect(page.getByRole('alert')).toContainText('This connection is unavailable')
+  expect(profiles).toEqual([])
+  expect(supplierReads).toBe(0)
+
+  await page.goto(pilotCatalogPath + '/' + marketPilot + '?assistant=commerce&store=other-connection')
+  await expect(page.getByRole('alert')).toContainText('This connection is unavailable')
+  await expect(page.getByRole('log')).toHaveCount(0)
+  expect(profiles).toEqual([base])
+  expect(supplierReads).toBe(0)
+
+  await page.goto(pilotCatalogPath)
+  await page.getByRole('region', { name: 'AI marketer' }).getByRole('link', { name: 'Yandex Market' }).click()
+  const assistant = page.getByRole('region', { name: 'AI marketer' })
+  await assistant.getByLabel('Seller offer ID').fill(offerId)
+  await assistant.getByRole('button', { name: 'Select', exact: true }).click()
+  await expect(assistant.getByRole('region', { name: 'Selected product' })).toContainText('112.65 RUB')
+  await expect(assistant.getByRole('region', { name: 'Selected product' })).toContainText('Unavailable')
+  await assistant.getByLabel('Message', { exact: true }).fill('Read selected offer')
+  await assistant.getByRole('button', { name: 'Send message' }).click()
+  await expect(assistant.getByText('Offer read', { exact: true })).toBeVisible()
+  await expect(assistant.getByRole('link', { name: 'Open editor' })).toHaveCount(0)
+  await assistant.getByRole('button', { name: 'Clear product selection' }).click()
+  revoked = true
+  await assistant.getByLabel('Message', { exact: true }).fill('Try another product')
+  await assistant.getByRole('button', { name: 'Send message' }).click()
+  await expect(assistant.getByRole('alert')).toContainText('This connection is unavailable')
+  await expect(assistant.getByRole('log')).toHaveCount(0)
+  await expect(assistant.getByLabel('Seller offer ID')).toHaveCount(0)
+  expect(chat.map(turn => turn.product_ids)).toEqual([[offerId], []])
+  expect(supplierReads).toBe(1)
+})
+
+test('commerce marketer WB submits the exact size and previews video using read-only result status', async ({ page }) => {
+  const connection = 'wb-marketer-42'
+  const base = marketerBase('wildberries', connection)
+  const product = `/workspaces/ws-one/wildberries/connections/${connection}/products/42`
+  const transport = []
+  await showPilotCatalog(page, () => [pilotFixture(wbPilot, [connection])])
+  await page.route(`**${product}**`, route => {
+    const url = new URL(route.request().url())
+    if (url.pathname === product + '/sizes') return route.fulfill({ json: { items: [
+      { size_id: 101, label: 'Small' }, { size_id: 102, label: 'Large' },
+    ] } })
+    expect(url.pathname).toBe(product)
+    expect(url.searchParams.get('size_id')).toBe('102')
+    return route.fulfill({ json: { size_id: 102, price_status: 'reported', product: {
+      product_id: '42', title: 'Canvas bag', price: { amount: '189.5', currency: 'RUB' },
+    } } })
+  })
+  await page.route('**/commerce-marketer/wildberries/**', route => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    if (path === base) return route.fulfill({ json: marketerProfile('wildberries', connection,
+      ['get_products', 'import_product_images']) })
+    if (path === base + '/chat/history') return route.fulfill({ json: { conversation_id: null, messages: [] } })
+    transport.push([request.method(), path.slice(base.length)])
+    if (path === base + '/chat') {
+      expect(request.postDataJSON()).toMatchObject({ question: 'Prepare a product video', product_ids: ['42:102'] })
+      return route.fulfill({ json: { conversation_id: 'wb-thread', message: 'Review the video', video_action: {
+        id: '416', kind: 'video_generation', status: 'proposed', summary: { brief: 'Canvas bag · Large' },
+      } } })
+    }
+    if (path === base + '/actions/416/apply') return route.fulfill({ json: {
+      route: '/workspaces/ws-one/content/videos/wb-video',
+      video_update: { project_id: 'wb-video', version: 1, status: 'queued' },
+    } })
+    expect(path).toBe(base + '/actions/416/result')
+    return route.fulfill({ json: { status: 'succeeded', output_url: '/media/wb-video.mp4' } })
+  })
+  await page.route('**/media/wb-video.mp4', route => route.fulfill({ status: 200, contentType: 'video/mp4', body: '' }))
+
+  await page.goto(pilotCatalogPath)
+  await page.getByRole('region', { name: 'AI marketer' }).getByRole('link', { name: 'Wildberries' }).click()
+  const assistant = page.getByRole('region', { name: 'AI marketer' })
+  await assistant.getByLabel('WB article').fill('42')
+  await assistant.getByRole('button', { name: 'Find', exact: true }).click()
+  await assistant.getByRole('listitem').filter({ hasText: 'Large' }).getByRole('button', { name: 'Select' }).click()
+  await expect(assistant.getByRole('region', { name: 'Selected product' })).toContainText('189.5 RUB')
+  await assistant.getByLabel('Message', { exact: true }).fill('Prepare a product video')
+  await assistant.getByRole('button', { name: 'Send message' }).click()
+  await expect(assistant.getByRole('region', { name: 'Generate a video' })).toContainText('Canvas bag · Large')
+  expect(transport).toEqual([['POST', '/chat']])
+  await assistant.getByRole('button', { name: 'Confirm action' }).click()
+  await expect(assistant.getByRole('link', { name: 'Open result' })).toHaveAttribute('href', '/workspaces/ws-one/content/videos/wb-video')
+  await assistant.getByRole('button', { name: 'Check video status' }).click()
+  await expect(assistant.locator('video')).toHaveAttribute('src', '/media/wb-video.mp4')
+  expect(transport).toEqual([['POST', '/chat'], ['POST', '/actions/416/apply'], ['GET', '/actions/416/result']])
+})
