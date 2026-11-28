@@ -706,12 +706,20 @@ test('private pilot Market connects, reads an exact offer, safely retries a draf
 test('private pilot is hidden without explicit access and refused status hides supplier actions', async ({ page }) => {
   let allowed = false
   await showPilotCatalog(page, () => allowed ? [pilotFixture(wbPilot, ['synthetic-denied'], true)] : [])
+  const pilotDetail = pilotCatalogPath + '/' + wbPilot
+  const statusPath = '/workspaces/ws-one/wildberries/connections/synthetic-denied'
+  const statusRead = { method: 'GET', path: statusPath }
   const reads = []
-  await page.route('**/wildberries/connections/**', route => {
-    reads.push(route.request().method())
+  await page.route(/\/wildberries(?:\/|$)/, route => {
+    const request = route.request()
+    const { pathname, search } = new URL(request.url())
+    reads.push({ method: request.method(), path: pathname + search })
     return route.fulfill({ status: 403, json: { code: 'WB_ACCESS_DENIED' } })
   })
-  await page.goto(pilotCatalogPath + '/' + wbPilot)
+  const deniedStatus = () => page.waitForResponse(response => response.status() === 403
+    && response.request().method() === 'GET' && new URL(response.url()).pathname === statusPath)
+  await page.goto(pilotDetail)
+  await expect(page).toHaveURL(pilotDetail)
   await expect(page.locator('[data-connector-detail]')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Private pilots' })).toHaveCount(0)
   expect(reads).toEqual([])
@@ -720,12 +728,17 @@ test('private pilot is hidden without explicit access and refused status hides s
   await expect(page.locator('[data-connector-detail]')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Private pilots' })).toHaveCount(0)
   await page.goto('/workspaces/ws-two/connectors/' + wbPilot)
+  await expect(page).toHaveURL('/workspaces/ws-two/connectors/' + wbPilot)
   await expect(page.locator('[data-connector-detail]')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Private pilots' })).toHaveCount(0)
   expect(reads).toEqual([])
-  await page.goto(pilotCatalogPath + '/' + wbPilot)
+  await Promise.all([deniedStatus(), page.goto(pilotDetail)])
+  await expect(page).toHaveURL(pilotDetail)
   await expect(page.getByRole('alert')).toContainText('connection is unavailable')
   await expect(page.getByLabel('WB article')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Connect store' })).toHaveCount(0)
-  expect(reads).toEqual(['GET'])
+  expect(reads).toEqual([statusRead])
+  await Promise.all([deniedStatus(), page.getByRole('button', { name: 'Check connection' }).click()])
+  await expect(page.getByRole('alert')).toContainText('connection is unavailable')
+  expect(reads).toEqual([statusRead, statusRead])
 })

@@ -203,12 +203,16 @@ export default function CommercePilot({ pilot, workspaceId, actorId }) {
   useEffect(() => {
     if (!connectionId) return undefined
     const controller = new AbortController()
-    client.status(connectionId, controller.signal).then(value => {
-      if (!controller.signal.aborted) setStatus({ id: connectionId, connection: readPilotConnection(value, connectionId, wb) })
-    }).catch(error => {
-      if (!controller.signal.aborted) {
-        setStatus({ id: connectionId, error: error?.status === 404 ? 'accessLost' : errorKey(error) })
-      }
+    // Let an immediate effect cleanup cancel the status request before it starts.
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return
+      client.status(connectionId, controller.signal).then(value => {
+        if (!controller.signal.aborted) setStatus({ id: connectionId, connection: readPilotConnection(value, connectionId, wb) })
+      }).catch(error => {
+        if (!controller.signal.aborted) {
+          setStatus({ id: connectionId, error: error?.status === 404 ? 'accessLost' : errorKey(error) })
+        }
+      })
     })
     return () => controller.abort()
   }, [client, connectionId, loadVersion, wb])
